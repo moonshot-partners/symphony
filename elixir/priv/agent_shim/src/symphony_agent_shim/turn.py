@@ -33,6 +33,8 @@ class TurnTracker:
 
     async def cancel_all(self, writer: Writer) -> None:
         for turn_id in list(self._active):
+            if turn_id not in self._active:
+                continue
             await writer(
                 protocol.notification(
                     protocol.METHOD_TURN_CANCELLED,
