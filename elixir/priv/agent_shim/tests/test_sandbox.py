@@ -40,3 +40,15 @@ def test_approval_policy_on_request_means_block():
     auto, deny_message = map_approval_policy("on-request")
     assert auto is False
     assert "operator approval" in deny_message
+
+
+def test_approval_policy_dict_never_means_auto_accept():
+    auto, deny_message = map_approval_policy({"type": "never"})
+    assert auto is True
+    assert deny_message is None
+
+
+def test_approval_policy_dict_on_request_means_block():
+    auto, deny_message = map_approval_policy({"type": "on-request"})
+    assert auto is False
+    assert "operator approval" in deny_message
