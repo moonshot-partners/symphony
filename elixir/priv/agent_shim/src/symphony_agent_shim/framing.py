@@ -2,22 +2,18 @@
 
 Each frame = one JSON object on a single line, terminated by ``\n``. Matches
 the format Symphony's Elixir port writes via ``Jason.encode!(msg) <> "\n"``.
+
+Streams are duck-typed: any object with ``readline()``/``write()``/``flush()``
+methods works, sync or async. ``inspect.iscoroutine`` distinguishes the two.
 """
 
+import inspect
 import json
-from typing import Any, Protocol
-
-
-class _AsyncReadable(Protocol):
-    async def readline(self) -> bytes: ...
-
-
-class _SyncReadable(Protocol):
-    def readline(self) -> bytes: ...
+from typing import Any
 
 
 class LineFramer:
-    def __init__(self, stream: _AsyncReadable | _SyncReadable) -> None:
+    def __init__(self, stream: Any) -> None:
         self._stream = stream
 
     async def read_message(self) -> dict[str, Any] | None:
@@ -37,21 +33,19 @@ class LineFramer:
             return parsed
 
     async def _readline(self) -> bytes:
-        readline = self._stream.readline
-        result = readline()
-        if hasattr(result, "__await__"):
+        result = self._stream.readline()
+        if inspect.iscoroutine(result):
             return await result
         return result
 
 
 async def write_frame(stream: Any, message: dict[str, Any]) -> None:
     line = (json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8")
-    write = stream.write
-    result = write(line)
-    if hasattr(result, "__await__"):
+    result = stream.write(line)
+    if inspect.iscoroutine(result):
         await result
     flush = getattr(stream, "flush", None)
     if flush is not None:
         flush_result = flush()
-        if hasattr(flush_result, "__await__"):
+        if inspect.iscoroutine(flush_result):
             await flush_result
