@@ -18,9 +18,7 @@ async def test_bridge_sends_request_and_awaits_response():
         # Simulate Symphony replying after request is sent
         await asyncio.sleep(0.01)
         msg_id = sent[-1]["id"]
-        bridge.route_response(
-            {"id": msg_id, "result": {"success": True, "output": "done"}}
-        )
+        bridge.route_response({"id": msg_id, "result": {"success": True, "output": "done"}})
 
     asyncio.create_task(fake_responder())
 
@@ -44,9 +42,7 @@ async def test_bridge_propagates_error_response():
     async def fake_responder():
         await asyncio.sleep(0.01)
         msg_id = sent[-1]["id"]
-        bridge.route_response(
-            {"id": msg_id, "error": {"code": -32000, "message": "boom"}}
-        )
+        bridge.route_response({"id": msg_id, "error": {"code": -32000, "message": "boom"}})
 
     asyncio.create_task(fake_responder())
 
@@ -69,9 +65,7 @@ def test_build_mcp_server_from_specs_creates_callable_tools(monkeypatch):
         captured["tools"] = tools
         return f"server:{name}"
 
-    monkeypatch.setattr(
-        "symphony_agent_shim.tools.create_sdk_mcp_server", fake_create
-    )
+    monkeypatch.setattr("symphony_agent_shim.tools.create_sdk_mcp_server", fake_create)
 
     specs = [
         {

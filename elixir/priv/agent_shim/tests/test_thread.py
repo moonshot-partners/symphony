@@ -12,9 +12,7 @@ async def test_thread_start_creates_session_and_returns_id(monkeypatch, tmp_path
 
     fake_client = MagicMock()
     sdk_client_factory = MagicMock(return_value=fake_client)
-    monkeypatch.setattr(
-        "symphony_agent_shim.thread.ClaudeSDKClient", sdk_client_factory
-    )
+    monkeypatch.setattr("symphony_agent_shim.thread.ClaudeSDKClient", sdk_client_factory)
 
     workspace = tmp_path / "ws"
     workspace.mkdir()

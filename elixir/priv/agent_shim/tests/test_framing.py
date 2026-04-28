@@ -47,7 +47,7 @@ async def test_write_frame_appends_newline():
 
 @pytest.mark.asyncio
 async def test_raises_on_non_dict_json():
-    raw = b'[1, 2, 3]\n'
+    raw = b"[1, 2, 3]\n"
     framer = LineFramer(io.BytesIO(raw))
     with pytest.raises(ValueError, match="must be an object"):
         await framer.read_message()
