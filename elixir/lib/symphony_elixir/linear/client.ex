@@ -25,6 +25,9 @@ defmodule SymphonyElixir.Linear.Client do
         url
         assignee {
           id
+          email
+          name
+          displayName
         }
         labels {
           nodes {
@@ -70,6 +73,9 @@ defmodule SymphonyElixir.Linear.Client do
         url
         assignee {
           id
+          email
+          name
+          displayName
         }
         labels {
           nodes {
