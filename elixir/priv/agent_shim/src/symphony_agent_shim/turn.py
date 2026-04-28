@@ -38,7 +38,10 @@ async def handle_turn_start(
     prompt = _flatten_input(params.get("input", []))
     turn_id = f"turn-{uuid.uuid4().hex[:12]}"
 
-    asyncio.create_task(_drive_turn(session.client, prompt, turn_id, writer))
+    session.active_task = asyncio.create_task(
+        _drive_turn(session.client, prompt, turn_id, writer),
+        name=f"drive-turn-{turn_id}",
+    )
 
     return protocol.response(
         request_id=request_id,

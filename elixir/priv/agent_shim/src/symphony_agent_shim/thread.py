@@ -6,8 +6,9 @@ lazily here so credential failures surface as JSON-RPC errors (visible to
 Symphony) rather than a subprocess crash.
 """
 
+import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ class ThreadSession:
     thread_id: str
     client: ClaudeSDKClient
     auto_approve: bool
+    active_task: asyncio.Task | None = field(default=None)
 
 
 class ThreadRegistry:

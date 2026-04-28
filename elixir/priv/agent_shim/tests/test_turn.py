@@ -62,8 +62,7 @@ async def test_turn_start_returns_turn_id_then_emits_completed():
     turn_id = reply["result"]["turn"]["id"]
 
     # Wait for the background task (_drive_turn) to complete
-    import asyncio
-    await asyncio.gather(*[t for t in asyncio.all_tasks() if t is not asyncio.current_task()])
+    await session.active_task
 
     # turn/completed must have been sent via writer
     completed = [m for m in sent if m.get("method") == "turn/completed"]
@@ -82,9 +81,7 @@ async def test_turn_start_unknown_thread_returns_error():
         "method": "turn/start",
         "params": {"threadId": "nonexistent", "input": [], "cwd": "/tmp"},
     }
-    reply = await handle_turn_start(
-        request, writer=lambda m: sent.append(m), registry=registry
-    )
+    reply = await handle_turn_start(request, writer=lambda m: sent.append(m), registry=registry)
     assert "error" in reply
     assert "unknown thread" in reply["error"]["message"]
 
@@ -101,9 +98,8 @@ async def test_turn_failed_emitted_on_sdk_exception():
     fake_client.receive_response = lambda: iter(())
 
     registry = ThreadRegistry()
-    registry.register(
-        ThreadSession(thread_id="t2", client=fake_client, auto_approve=True)
-    )
+    session = ThreadSession(thread_id="t2", client=fake_client, auto_approve=True)
+    registry.register(session)
 
     request = {
         "jsonrpc": "2.0",
@@ -116,8 +112,7 @@ async def test_turn_failed_emitted_on_sdk_exception():
     assert reply["id"] == 3  # turn id reply still sent
 
     # Wait for the background task (_drive_turn) to complete
-    import asyncio
-    await asyncio.gather(*[t for t in asyncio.all_tasks() if t is not asyncio.current_task()])
+    await session.active_task
 
     failed = [m for m in sent if m.get("method") == "turn/failed"]
     assert len(failed) == 1
