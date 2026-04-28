@@ -10,12 +10,15 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
 
 from symphony_agent_shim import protocol
 from symphony_agent_shim.thread import ThreadRegistry
 
 Writer = Callable[[dict[str, Any]], Awaitable[None]]
+
+_BASH_TOOLS = {"Bash", "mcp__bash__bash"}
+_FILE_WRITE_TOOLS = {"Edit", "Write", "NotebookEdit"}
 
 
 async def handle_turn_start(
@@ -73,6 +76,9 @@ async def _drive_turn(client: Any, prompt: str, turn_id: str, writer: Writer) ->
 
 async def _emit_message(message: Any, turn_id: str, writer: Writer) -> None:
     if isinstance(message, AssistantMessage):
+        for block in message.content:
+            if isinstance(block, ToolUseBlock):
+                await _emit_synthetic_approval(block, turn_id, writer)
         text_parts = [block.text for block in message.content if isinstance(block, TextBlock)]
         if text_parts:
             await writer(
@@ -91,6 +97,31 @@ async def _emit_message(message: Any, turn_id: str, writer: Writer) -> None:
                     "usage": dict(message.usage or {}),
                     "total_cost_usd": message.total_cost_usd,
                     "stop_reason": message.subtype,
+                },
+            )
+        )
+
+
+async def _emit_synthetic_approval(block: ToolUseBlock, turn_id: str, writer: Writer) -> None:
+    if block.name in _BASH_TOOLS:
+        await writer(
+            protocol.notification(
+                protocol.METHOD_ITEM_COMMAND_APPROVAL,
+                {
+                    "turn_id": turn_id,
+                    "tool_use_id": block.id,
+                    "command": block.input.get("command", ""),
+                },
+            )
+        )
+    elif block.name in _FILE_WRITE_TOOLS:
+        await writer(
+            protocol.notification(
+                protocol.METHOD_FILE_CHANGE_APPROVAL,
+                {
+                    "turn_id": turn_id,
+                    "tool_use_id": block.id,
+                    "path": block.input.get("file_path", ""),
                 },
             )
         )

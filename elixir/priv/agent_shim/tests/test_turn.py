@@ -117,3 +117,44 @@ async def test_turn_failed_emitted_on_sdk_exception():
     failed = [m for m in sent if m.get("method") == "turn/failed"]
     assert len(failed) == 1
     assert "auth bad" in failed[0]["params"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_emits_synthetic_approval_for_bash_tool_use():
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        yield AssistantMessage(
+            content=[ToolUseBlock(id="tu_1", name="Bash", input={"command": "ls"})],
+            model="claude-sonnet-4-6",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="t3", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {"threadId": "t3", "input": [], "cwd": "/tmp"},
+        },
+        writer=writer,
+        registry=registry,
+    )
+    await session.active_task
+
+    approvals = [m for m in sent if m.get("method") == "item/commandExecution/requestApproval"]
+    assert len(approvals) == 1
+    assert approvals[0]["params"]["command"] == "ls"
