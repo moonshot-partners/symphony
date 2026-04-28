@@ -103,6 +103,7 @@ async def _emit_message(message: Any, turn_id: str, writer: Writer) -> None:
 
 
 async def _emit_synthetic_approval(block: ToolUseBlock, turn_id: str, writer: Writer) -> None:
+    inp = block.input or {}
     if block.name in _BASH_TOOLS:
         await writer(
             protocol.notification(
@@ -110,7 +111,7 @@ async def _emit_synthetic_approval(block: ToolUseBlock, turn_id: str, writer: Wr
                 {
                     "turn_id": turn_id,
                     "tool_use_id": block.id,
-                    "command": block.input.get("command", ""),
+                    "command": inp.get("command", ""),
                 },
             )
         )
@@ -121,7 +122,7 @@ async def _emit_synthetic_approval(block: ToolUseBlock, turn_id: str, writer: Wr
                 {
                     "turn_id": turn_id,
                     "tool_use_id": block.id,
-                    "path": block.input.get("file_path", ""),
+                    "path": inp.get("file_path", ""),
                 },
             )
         )
