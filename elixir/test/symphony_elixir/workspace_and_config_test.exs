@@ -371,6 +371,130 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute issue.assigned_to_worker
   end
 
+  test "linear client matches assignee filter against email" do
+    raw_issue = %{
+      "id" => "issue-email",
+      "identifier" => "MT-EMAIL",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "cba6b899-138e-465b-a79d-250eff3508e0",
+        "email" => "vinicius.freitas@moonshot.partners",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client matches assignee filter against email case-insensitively" do
+    raw_issue = %{
+      "id" => "issue-email-ci",
+      "identifier" => "MT-EMAIL-CI",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-x",
+        "email" => "Vinicius.Freitas@Moonshot.Partners",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client matches assignee filter against name case-insensitively" do
+    raw_issue = %{
+      "id" => "issue-name",
+      "identifier" => "MT-NAME",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-y",
+        "email" => "other@example.com",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "vinicius freitas")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client matches assignee filter against displayName" do
+    raw_issue = %{
+      "id" => "issue-display",
+      "identifier" => "MT-DISP",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-z",
+        "email" => "other@example.com",
+        "name" => "Other Person",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "Vinicius")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client preserves UUID match for assignee filter" do
+    raw_issue = %{
+      "id" => "issue-uuid",
+      "identifier" => "MT-UUID",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "cba6b899-138e-465b-a79d-250eff3508e0",
+        "email" => "vinicius.freitas@moonshot.partners",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue =
+      Client.normalize_issue_for_test(raw_issue, "cba6b899-138e-465b-a79d-250eff3508e0")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client rejects assignee when no field matches the filter" do
+    raw_issue = %{
+      "id" => "issue-miss",
+      "identifier" => "MT-MISS",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-other",
+        "email" => "other@example.com",
+        "name" => "Other Person",
+        "displayName" => "other"
+      }
+    }
+
+    issue =
+      Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    refute issue.assigned_to_worker
+  end
+
+  test "linear client rejects nil assignee when filter is active" do
+    raw_issue = %{
+      "id" => "issue-nil",
+      "identifier" => "MT-NIL",
+      "state" => %{"name" => "Todo"},
+      "assignee" => nil
+    }
+
+    issue =
+      Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    refute issue.assigned_to_worker
+  end
+
   test "linear client pagination merge helper preserves issue ordering" do
     issue_page_1 = [
       %Issue{id: "issue-1", identifier: "MT-1"},

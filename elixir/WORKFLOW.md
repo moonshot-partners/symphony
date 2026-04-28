@@ -1,18 +1,17 @@
 ---
 tracker:
   kind: linear
-  project_slug: "symphony-0c79b11b75ea"
+  project_slug: "c2bd55c135ce"
+  assignee: vinicius.freitas@moonshot.partners
   active_states:
-    - Todo
-    - In Progress
-    - Merging
-    - Rework
+    - Scheduled
+    - In Development
+    - In QA / Review
   terminal_states:
+    - Released / Live
     - Closed
-    - Cancelled
     - Canceled
     - Duplicate
-    - Done
 polling:
   interval_ms: 5000
 workspace:
@@ -31,11 +30,14 @@ agent:
 codex:
   # Default agent backend = Python shim around claude-agent-sdk.
   # See priv/agent_shim/README.md for setup (uv sync) and ANTHROPIC_OAUTH_TOKEN config.
-  command: python -m symphony_agent_shim
+  command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
+server:
+  host: 127.0.0.1
+  port: 4000
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

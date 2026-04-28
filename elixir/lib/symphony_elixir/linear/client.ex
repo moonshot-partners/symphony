@@ -476,14 +476,20 @@ defmodule SymphonyElixir.Linear.Client do
   defp assigned_to_worker?(%{} = assignee, %{match_values: match_values})
        when is_struct(match_values, MapSet) do
     assignee
-    |> assignee_id()
-    |> then(fn
-      nil -> false
-      assignee_id -> MapSet.member?(match_values, assignee_id)
-    end)
+    |> assignee_match_candidates()
+    |> Enum.any?(&MapSet.member?(match_values, &1))
   end
 
   defp assigned_to_worker?(_assignee, _assignee_filter), do: false
+
+  defp assignee_match_candidates(%{} = assignee) do
+    Enum.flat_map(["id", "email", "name", "displayName"], fn field ->
+      case normalize_assignee_match_value(assignee[field]) do
+        nil -> []
+        value -> [String.downcase(value)]
+      end
+    end)
+  end
 
   defp assignee_id(%{} = assignee), do: normalize_assignee_match_value(assignee["id"])
 
@@ -506,7 +512,11 @@ defmodule SymphonyElixir.Linear.Client do
         resolve_viewer_assignee_filter()
 
       normalized ->
-        {:ok, %{configured_assignee: assignee, match_values: MapSet.new([normalized])}}
+        {:ok,
+         %{
+           configured_assignee: assignee,
+           match_values: MapSet.new([String.downcase(normalized)])
+         }}
     end
   end
 
@@ -518,7 +528,11 @@ defmodule SymphonyElixir.Linear.Client do
             {:error, :missing_linear_viewer_identity}
 
           viewer_id ->
-            {:ok, %{configured_assignee: "me", match_values: MapSet.new([viewer_id])}}
+            {:ok,
+             %{
+               configured_assignee: "me",
+               match_values: MapSet.new([String.downcase(viewer_id)])
+             }}
         end
 
       {:ok, _body} ->
