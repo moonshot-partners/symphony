@@ -42,6 +42,12 @@ async def test_thread_start_creates_session_and_returns_id(monkeypatch, tmp_path
     options = sdk_client_factory.call_args.kwargs["options"]
     assert options.permission_mode == "acceptEdits"
     assert str(options.cwd) == str(workspace)
+    mcp_servers = options.mcp_servers
+    assert "symphony" in mcp_servers
+    assert isinstance(mcp_servers["symphony"], dict)
+    assert mcp_servers["symphony"]["type"] == "sdk"
+    assert mcp_servers["symphony"]["name"] == "symphony"
+    assert mcp_servers["symphony"]["instance"] is not None
 
 
 @pytest.mark.asyncio

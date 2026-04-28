@@ -65,7 +65,7 @@ async def handle_thread_start(
     options = ClaudeAgentOptions(
         cwd=Path(cwd),
         permission_mode=sandbox_cfg.permission_mode,
-        mcp_servers={"symphony": mcp_server},
+        mcp_servers={"symphony": {"type": "sdk", "name": "symphony", "instance": mcp_server}},
         env=env,
         disallowed_tools=sandbox_cfg.disallowed_tools,
     )
