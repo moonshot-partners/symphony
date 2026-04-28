@@ -89,3 +89,39 @@ def test_build_mcp_server_from_specs_creates_callable_tools(monkeypatch):
     assert server == "server:symphony"
     assert captured["name"] == "symphony"
     assert len(captured["tools"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_invoke_tool_cancellation_cleans_up_pending():
+    async def slow_writer(_: dict) -> None:
+        await asyncio.sleep(0)
+
+    bridge = ToolBridge(writer=slow_writer)
+    task = asyncio.create_task(bridge.invoke_tool("x", {}))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert len(bridge._pending) == 0
+    # Late response is silently dropped; no crash
+    bridge.route_response({"id": 10000, "result": {}})
+
+
+@pytest.mark.asyncio
+async def test_bridge_preserves_empty_string_output():
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    bridge = ToolBridge(writer=writer)
+
+    async def fake_responder():
+        await asyncio.sleep(0.01)
+        msg_id = sent[-1]["id"]
+        bridge.route_response({"id": msg_id, "result": {"output": ""}})
+
+    asyncio.create_task(fake_responder())
+
+    result = await bridge.invoke_tool("noop", {})
+    assert result == {"output": ""}

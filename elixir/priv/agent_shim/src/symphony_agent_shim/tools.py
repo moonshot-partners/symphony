@@ -75,7 +75,7 @@ def _make_tool(spec: dict[str, Any], bridge: ToolBridge):
     @tool(name, description, schema)
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         result = await bridge.invoke_tool(name, args)
-        text = result.get("output") or str(result)
+        text = result.get("output", str(result))
         return {"content": [{"type": "text", "text": text}]}
 
     return _impl
