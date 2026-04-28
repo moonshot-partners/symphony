@@ -59,7 +59,12 @@ async def run_async(*, stdin: Any, stdout: Any) -> None:
     for task in pending:
         task.cancel()
     if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
+        # Bounded drain: SDK's client.query may ignore cancel briefly; cap so
+        # SIGTERM never hangs the shim past 5s.
+        try:
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
 
 
 def run() -> None:
