@@ -157,7 +157,7 @@ defmodule SymphonyElixir.Config.Schema do
 
     @primary_key false
     embedded_schema do
-      field(:command, :string, default: "codex app-server")
+      field(:command, :string, default: "python -m symphony_agent_shim")
 
       field(:approval_policy, StringOrMap,
         default: %{

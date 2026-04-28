@@ -29,7 +29,9 @@ agent:
   max_concurrent_agents: 10
   max_turns: 20
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  # Default agent backend = Python shim around claude-agent-sdk.
+  # See priv/agent_shim/README.md for setup (uv sync) and ANTHROPIC_OAUTH_TOKEN config.
+  command: python -m symphony_agent_shim
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
