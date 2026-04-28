@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from symphony_agent_shim.thread import ThreadRegistry, ThreadSession
-from symphony_agent_shim.turn import handle_turn_start
+from symphony_agent_shim.turn import TurnTracker, handle_turn_start
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,9 @@ async def test_turn_start_returns_turn_id_then_emits_completed():
         },
     }
 
-    reply = await handle_turn_start(request, writer=writer, registry=registry)
+    reply = await handle_turn_start(
+        request, writer=writer, registry=registry, tracker=TurnTracker()
+    )
 
     assert reply["id"] == 3
     turn_id = reply["result"]["turn"]["id"]
@@ -81,7 +83,12 @@ async def test_turn_start_unknown_thread_returns_error():
         "method": "turn/start",
         "params": {"threadId": "nonexistent", "input": [], "cwd": "/tmp"},
     }
-    reply = await handle_turn_start(request, writer=lambda m: sent.append(m), registry=registry)
+    reply = await handle_turn_start(
+        request,
+        writer=lambda m: sent.append(m),
+        registry=registry,
+        tracker=TurnTracker(),
+    )
     assert "error" in reply
     assert "unknown thread" in reply["error"]["message"]
 
@@ -108,7 +115,9 @@ async def test_turn_failed_emitted_on_sdk_exception():
         "params": {"threadId": "t2", "input": [{"type": "text", "text": "x"}], "cwd": "/tmp"},
     }
 
-    reply = await handle_turn_start(request, writer=writer, registry=registry)
+    reply = await handle_turn_start(
+        request, writer=writer, registry=registry, tracker=TurnTracker()
+    )
     assert reply["id"] == 3  # turn id reply still sent
 
     # Wait for the background task (_drive_turn) to complete
@@ -152,9 +161,28 @@ async def test_emits_synthetic_approval_for_bash_tool_use():
         },
         writer=writer,
         registry=registry,
+        tracker=TurnTracker(),
     )
     await session.active_task
 
     approvals = [m for m in sent if m.get("method") == "item/commandExecution/requestApproval"]
     assert len(approvals) == 1
     assert approvals[0]["params"]["command"] == "ls"
+
+
+@pytest.mark.asyncio
+async def test_cancel_emits_turn_cancelled():
+    from symphony_agent_shim.turn import TurnTracker
+
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    tracker = TurnTracker()
+    tracker.register("turn-x")
+    await tracker.cancel_all(writer)
+
+    cancelled = [m for m in sent if m.get("method") == "turn/cancelled"]
+    assert len(cancelled) == 1
+    assert cancelled[0]["params"]["turn_id"] == "turn-x"

@@ -21,11 +21,33 @@ _BASH_TOOLS = {"Bash", "mcp__bash__bash"}
 _FILE_WRITE_TOOLS = {"Edit", "Write", "NotebookEdit"}
 
 
+class TurnTracker:
+    def __init__(self) -> None:
+        self._active: set[str] = set()
+
+    def register(self, turn_id: str) -> None:
+        self._active.add(turn_id)
+
+    def unregister(self, turn_id: str) -> None:
+        self._active.discard(turn_id)
+
+    async def cancel_all(self, writer: Writer) -> None:
+        for turn_id in list(self._active):
+            await writer(
+                protocol.notification(
+                    protocol.METHOD_TURN_CANCELLED,
+                    {"turn_id": turn_id, "reason": "shim shutdown"},
+                )
+            )
+            self._active.discard(turn_id)
+
+
 async def handle_turn_start(
     request: dict[str, Any],
     *,
     writer: Writer,
     registry: ThreadRegistry,
+    tracker: TurnTracker,
 ) -> dict[str, Any]:
     request_id = request["id"]
     params = request.get("params", {}) or {}
@@ -42,7 +64,7 @@ async def handle_turn_start(
     turn_id = f"turn-{uuid.uuid4().hex[:12]}"
 
     session.active_task = asyncio.create_task(
-        _drive_turn(session.client, prompt, turn_id, writer),
+        _drive_turn(session.client, prompt, turn_id, writer, tracker),
         name=f"drive-turn-{turn_id}",
     )
 
@@ -60,18 +82,24 @@ def _flatten_input(blocks: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-async def _drive_turn(client: Any, prompt: str, turn_id: str, writer: Writer) -> None:
+async def _drive_turn(
+    client: Any, prompt: str, turn_id: str, writer: Writer, tracker: TurnTracker
+) -> None:
+    tracker.register(turn_id)
     try:
-        await client.query(prompt)
-        async for message in client.receive_response():
-            await _emit_message(message, turn_id, writer)
-    except Exception as exc:  # noqa: BLE001 — surface SDK error as JSON-RPC failure
-        await writer(
-            protocol.notification(
-                protocol.METHOD_TURN_FAILED,
-                {"turn_id": turn_id, "error": str(exc)},
+        try:
+            await client.query(prompt)
+            async for message in client.receive_response():
+                await _emit_message(message, turn_id, writer)
+        except Exception as exc:  # noqa: BLE001 — surface SDK error as JSON-RPC failure
+            await writer(
+                protocol.notification(
+                    protocol.METHOD_TURN_FAILED,
+                    {"turn_id": turn_id, "error": str(exc)},
+                )
             )
-        )
+    finally:
+        tracker.unregister(turn_id)
 
 
 async def _emit_message(message: Any, turn_id: str, writer: Writer) -> None:
