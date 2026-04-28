@@ -55,6 +55,12 @@ async def run_async(*, stdin: Any, stdout: Any) -> None:
 
     await tracker.cancel_all(writer)
 
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
 
 def run() -> None:
     asyncio.run(run_async(stdin=sys.stdin.buffer, stdout=sys.stdout.buffer))
