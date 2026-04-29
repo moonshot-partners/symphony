@@ -199,7 +199,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.settings!().codex.command)],
+            args: [~c"-lc", String.to_charlist(Config.settings!().agent_runtime.command)],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]
@@ -217,7 +217,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp remote_launch_command(workspace) when is_binary(workspace) do
     [
       "cd #{shell_escape(workspace)}",
-      "exec #{Config.settings!().codex.command}"
+      "exec #{Config.settings!().agent_runtime.command}"
     ]
     |> Enum.join(" && ")
   end
@@ -263,11 +263,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp session_policies(workspace, nil) do
-    Config.codex_runtime_settings(workspace)
+    Config.agent_runtime_settings(workspace)
   end
 
   defp session_policies(workspace, worker_host) when is_binary(worker_host) do
-    Config.codex_runtime_settings(workspace, remote: true)
+    Config.agent_runtime_settings(workspace, remote: true)
   end
 
   defp do_start_session(port, workspace, session_policies) do
@@ -330,7 +330,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     receive_loop(
       port,
       on_message,
-      Config.settings!().codex.turn_timeout_ms,
+      Config.settings!().agent_runtime.turn_timeout_ms,
       "",
       tool_executor,
       auto_approve_requests
@@ -920,7 +920,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp await_response(port, request_id) do
-    with_timeout_response(port, request_id, Config.settings!().codex.read_timeout_ms, "")
+    with_timeout_response(port, request_id, Config.settings!().agent_runtime.read_timeout_ms, "")
   end
 
   defp with_timeout_response(port, request_id, timeout_ms, pending_line) do

@@ -155,8 +155,8 @@ defmodule SymphonyElixir.AppServerTest do
 
         write_workflow_file!(Workflow.workflow_file_path(),
           workspace_root: workspace_root,
-          codex_command: "#{codex_binary} app-server",
-          codex_turn_sandbox_policy: configured_policy
+          agent_runtime_command: "#{codex_binary} app-server",
+          agent_runtime_turn_sandbox_policy: configured_policy
         )
 
         assert {:ok, _result} = AppServer.run(workspace, "Validate supported turn policy", issue)
@@ -240,7 +240,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -303,7 +303,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -386,8 +386,8 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_approval_policy: "never"
+        agent_runtime_command: "#{codex_binary} app-server",
+        agent_runtime_approval_policy: "never"
       )
 
       issue = %Issue{
@@ -523,8 +523,8 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_approval_policy: "never"
+        agent_runtime_command: "#{codex_binary} app-server",
+        agent_runtime_approval_policy: "never"
       )
 
       issue = %Issue{
@@ -608,8 +608,8 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_approval_policy: "never"
+        agent_runtime_command: "#{codex_binary} app-server",
+        agent_runtime_approval_policy: "never"
       )
 
       issue = %Issue{
@@ -698,7 +698,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -798,7 +798,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -899,7 +899,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1021,7 +1021,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1111,7 +1111,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1175,7 +1175,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1250,7 +1250,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1335,7 +1335,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: "/remote/workspaces",
-        codex_command: "fake-remote-codex app-server"
+        agent_runtime_command: "fake-remote-codex app-server"
       )
 
       issue = %Issue{

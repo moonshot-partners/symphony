@@ -8,7 +8,7 @@ defmodule SymphonyElixir.CoreTest do
       poll_interval_ms: nil,
       tracker_active_states: nil,
       tracker_terminal_states: nil,
-      codex_command: nil
+      agent_runtime_command: nil
     )
 
     config = Config.settings!()
@@ -50,39 +50,39 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_project_slug: "project",
-      codex_command: ""
+      agent_runtime_command: ""
     )
 
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.command"
+    assert message =~ "agent_runtime.command"
     assert message =~ "can't be blank"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_command: "   ")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_command: "   ")
     assert :ok = Config.validate!()
-    assert Config.settings!().codex.command == "   "
+    assert Config.settings!().agent_runtime.command == "   "
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_command: "/bin/sh app-server")
-    assert :ok = Config.validate!()
-
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: "definitely-not-valid")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_command: "/bin/sh app-server")
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: "unsafe-ish")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_approval_policy: "definitely-not-valid")
+    assert :ok = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_thread_sandbox: "unsafe-ish")
     assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
-      codex_turn_sandbox_policy: %{type: "workspaceWrite", writableRoots: ["relative/path"]}
+      agent_runtime_turn_sandbox_policy: %{type: "workspaceWrite", writableRoots: ["relative/path"]}
     )
 
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: 123)
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_approval_policy: 123)
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.approval_policy"
+    assert message =~ "agent_runtime.approval_policy"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: 123)
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_thread_sandbox: 123)
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.thread_sandbox"
+    assert message =~ "agent_runtime.thread_sandbox"
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "123")
     assert {:error, {:unsupported_tracker_kind, "123"}} = Config.validate!()
@@ -125,7 +125,7 @@ defmodule SymphonyElixir.CoreTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
       tracker_project_slug: "project",
-      codex_command: "/bin/sh app-server"
+      agent_runtime_command: "/bin/sh app-server"
     )
 
     assert Config.settings!().tracker.api_key == env_api_key
@@ -143,7 +143,7 @@ defmodule SymphonyElixir.CoreTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_assignee: nil,
       tracker_project_slug: "project",
-      codex_command: "/bin/sh app-server"
+      agent_runtime_command: "/bin/sh app-server"
     )
 
     assert Config.settings!().tracker.assignee == env_assignee
@@ -1043,7 +1043,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1128,7 +1128,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1294,7 +1294,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
+        agent_runtime_command: "#{codex_binary} app-server",
         max_turns: 3
       )
 
@@ -1424,7 +1424,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
+        agent_runtime_command: "#{codex_binary} app-server",
         max_turns: 2
       )
 
@@ -1522,7 +1522,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1666,7 +1666,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
+        agent_runtime_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
       )
 
       issue = %Issue{
@@ -1755,10 +1755,10 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_approval_policy: "on-request",
-        codex_thread_sandbox: "workspace-write",
-        codex_turn_sandbox_policy: %{
+        agent_runtime_command: "#{codex_binary} app-server",
+        agent_runtime_approval_policy: "on-request",
+        agent_runtime_thread_sandbox: "workspace-write",
+        agent_runtime_turn_sandbox_policy: %{
           type: "workspaceWrite",
           writableRoots: [Path.expand(workspace), workspace_cache]
         }
