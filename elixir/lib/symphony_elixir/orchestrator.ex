@@ -499,7 +499,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp last_activity_timestamp(running_entry) when is_map(running_entry) do
-    Map.get(running_entry, :last_codex_timestamp) || Map.get(running_entry, :started_at)
+    Map.get(running_entry, :last_agent_timestamp) || Map.get(running_entry, :started_at)
   end
 
   defp last_activity_timestamp(_running_entry), do: nil
@@ -708,13 +708,13 @@ defmodule SymphonyElixir.Orchestrator do
             worker_host: worker_host,
             workspace_path: nil,
             session_id: nil,
-            last_codex_message: nil,
-            last_codex_timestamp: nil,
-            last_codex_event: nil,
-            codex_app_server_pid: nil,
-            codex_input_tokens: 0,
-            codex_output_tokens: 0,
-            codex_total_tokens: 0,
+            last_agent_message: nil,
+            last_agent_timestamp: nil,
+            last_agent_event: nil,
+            agent_pid: nil,
+            agent_input_tokens: 0,
+            agent_output_tokens: 0,
+            agent_total_tokens: 0,
             codex_last_reported_input_tokens: 0,
             codex_last_reported_output_tokens: 0,
             codex_last_reported_total_tokens: 0,
@@ -1113,15 +1113,15 @@ defmodule SymphonyElixir.Orchestrator do
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
           session_id: metadata.session_id,
-          codex_app_server_pid: metadata.codex_app_server_pid,
-          codex_input_tokens: metadata.codex_input_tokens,
-          codex_output_tokens: metadata.codex_output_tokens,
-          codex_total_tokens: metadata.codex_total_tokens,
+          agent_pid: metadata.agent_pid,
+          agent_input_tokens: metadata.agent_input_tokens,
+          agent_output_tokens: metadata.agent_output_tokens,
+          agent_total_tokens: metadata.agent_total_tokens,
           turn_count: Map.get(metadata, :turn_count, 0),
           started_at: metadata.started_at,
-          last_codex_timestamp: metadata.last_codex_timestamp,
-          last_codex_message: metadata.last_codex_message,
-          last_codex_event: metadata.last_codex_event,
+          last_agent_timestamp: metadata.last_agent_timestamp,
+          last_agent_message: metadata.last_agent_message,
+          last_agent_event: metadata.last_agent_event,
           runtime_seconds: running_seconds(metadata.started_at, now)
         }
       end)
@@ -1171,10 +1171,10 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = extract_token_delta(running_entry, update)
-    codex_input_tokens = Map.get(running_entry, :codex_input_tokens, 0)
-    codex_output_tokens = Map.get(running_entry, :codex_output_tokens, 0)
-    codex_total_tokens = Map.get(running_entry, :codex_total_tokens, 0)
-    codex_app_server_pid = Map.get(running_entry, :codex_app_server_pid)
+    agent_input_tokens = Map.get(running_entry, :agent_input_tokens, 0)
+    agent_output_tokens = Map.get(running_entry, :agent_output_tokens, 0)
+    agent_total_tokens = Map.get(running_entry, :agent_total_tokens, 0)
+    agent_pid = Map.get(running_entry, :agent_pid)
     last_reported_input = Map.get(running_entry, :codex_last_reported_input_tokens, 0)
     last_reported_output = Map.get(running_entry, :codex_last_reported_output_tokens, 0)
     last_reported_total = Map.get(running_entry, :codex_last_reported_total_tokens, 0)
@@ -1182,14 +1182,14 @@ defmodule SymphonyElixir.Orchestrator do
 
     {
       Map.merge(running_entry, %{
-        last_codex_timestamp: timestamp,
-        last_codex_message: summarize_codex_update(update),
+        last_agent_timestamp: timestamp,
+        last_agent_message: summarize_codex_update(update),
         session_id: session_id_for_update(running_entry.session_id, update),
-        last_codex_event: event,
-        codex_app_server_pid: codex_app_server_pid_for_update(codex_app_server_pid, update),
-        codex_input_tokens: codex_input_tokens + token_delta.input_tokens,
-        codex_output_tokens: codex_output_tokens + token_delta.output_tokens,
-        codex_total_tokens: codex_total_tokens + token_delta.total_tokens,
+        last_agent_event: event,
+        agent_pid: agent_pid_for_update(agent_pid, update),
+        agent_input_tokens: agent_input_tokens + token_delta.input_tokens,
+        agent_output_tokens: agent_output_tokens + token_delta.output_tokens,
+        agent_total_tokens: agent_total_tokens + token_delta.total_tokens,
         codex_last_reported_input_tokens: max(last_reported_input, token_delta.input_reported),
         codex_last_reported_output_tokens: max(last_reported_output, token_delta.output_reported),
         codex_last_reported_total_tokens: max(last_reported_total, token_delta.total_reported),
@@ -1199,18 +1199,18 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp codex_app_server_pid_for_update(_existing, %{codex_app_server_pid: pid})
+  defp agent_pid_for_update(_existing, %{agent_pid: pid})
        when is_binary(pid),
        do: pid
 
-  defp codex_app_server_pid_for_update(_existing, %{codex_app_server_pid: pid})
+  defp agent_pid_for_update(_existing, %{agent_pid: pid})
        when is_integer(pid),
        do: Integer.to_string(pid)
 
-  defp codex_app_server_pid_for_update(_existing, %{codex_app_server_pid: pid}) when is_list(pid),
+  defp agent_pid_for_update(_existing, %{agent_pid: pid}) when is_list(pid),
     do: to_string(pid)
 
-  defp codex_app_server_pid_for_update(existing, _update), do: existing
+  defp agent_pid_for_update(existing, _update), do: existing
 
   defp session_id_for_update(_existing, %{session_id: session_id}) when is_binary(session_id),
     do: session_id

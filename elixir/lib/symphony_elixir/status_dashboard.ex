@@ -336,9 +336,9 @@ defmodule SymphonyElixir.StatusDashboard do
         rate_limits = Map.get(snapshot, :rate_limits)
         project_link_lines = format_project_link_lines()
         project_refresh_line = format_project_refresh_line(Map.get(snapshot, :polling))
-        codex_input_tokens = Map.get(codex_totals, :input_tokens, 0)
-        codex_output_tokens = Map.get(codex_totals, :output_tokens, 0)
-        codex_total_tokens = Map.get(codex_totals, :total_tokens, 0)
+        agent_input_tokens = Map.get(codex_totals, :input_tokens, 0)
+        agent_output_tokens = Map.get(codex_totals, :output_tokens, 0)
+        agent_total_tokens = Map.get(codex_totals, :total_tokens, 0)
         codex_seconds_running = Map.get(codex_totals, :seconds_running, 0)
         agent_count = length(running)
         max_agents = Config.settings!().agent.max_concurrent_agents
@@ -357,11 +357,11 @@ defmodule SymphonyElixir.StatusDashboard do
            colorize("│ Runtime: ", @ansi_bold) <>
              colorize(format_runtime_seconds(codex_seconds_running), @ansi_magenta),
            colorize("│ Tokens: ", @ansi_bold) <>
-             colorize("in #{format_count(codex_input_tokens)}", @ansi_yellow) <>
+             colorize("in #{format_count(agent_input_tokens)}", @ansi_yellow) <>
              colorize(" | ", @ansi_gray) <>
-             colorize("out #{format_count(codex_output_tokens)}", @ansi_yellow) <>
+             colorize("out #{format_count(agent_output_tokens)}", @ansi_yellow) <>
              colorize(" | ", @ansi_gray) <>
-             colorize("total #{format_count(codex_total_tokens)}", @ansi_yellow),
+             colorize("total #{format_count(agent_total_tokens)}", @ansi_yellow),
            colorize("│ Rate Limits: ", @ansi_bold) <> format_rate_limits(rate_limits),
            project_link_lines,
            project_refresh_line,
@@ -592,13 +592,13 @@ defmodule SymphonyElixir.StatusDashboard do
     state = running_entry.state || "unknown"
     state_display = format_cell(to_string(state), @running_stage_width)
     session = running_entry.session_id |> compact_session_id() |> format_cell(@running_session_width)
-    pid = format_cell(running_entry.codex_app_server_pid || "n/a", @running_pid_width)
-    total_tokens = running_entry.codex_total_tokens || 0
+    pid = format_cell(running_entry.agent_pid || "n/a", @running_pid_width)
+    total_tokens = running_entry.agent_total_tokens || 0
     runtime_seconds = running_entry.runtime_seconds || 0
     turn_count = Map.get(running_entry, :turn_count, 0)
     age = format_cell(format_runtime_and_turns(runtime_seconds, turn_count), @running_age_width)
-    event = running_entry.last_codex_event || "none"
-    event_label = format_cell(summarize_message(running_entry.last_codex_message), running_event_width)
+    event = running_entry.last_agent_event || "none"
+    event_label = format_cell(summarize_message(running_entry.last_agent_message), running_event_width)
 
     tokens = format_count(total_tokens) |> format_cell(@running_tokens_width, :right)
 
