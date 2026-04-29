@@ -425,6 +425,54 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert issue.assigned_to_worker
   end
 
+  test "linear client marks has_pr_attachment when a GitHub PR url is present" do
+    raw_issue = %{
+      "id" => "issue-pr",
+      "identifier" => "MT-PR",
+      "state" => %{"name" => "In Progress"},
+      "attachments" => %{
+        "nodes" => [
+          %{"url" => "https://example.org/random/link"},
+          %{"url" => "https://github.com/owner/repo/pull/728"}
+        ]
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    assert issue.has_pr_attachment
+  end
+
+  test "linear client leaves has_pr_attachment false when no GitHub PR url is attached" do
+    raw_issue = %{
+      "id" => "issue-no-pr",
+      "identifier" => "MT-NOPR",
+      "state" => %{"name" => "In Progress"},
+      "attachments" => %{
+        "nodes" => [
+          %{"url" => "https://github.com/owner/repo/issues/1"},
+          %{"url" => "https://example.org/foo"}
+        ]
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    refute issue.has_pr_attachment
+  end
+
+  test "linear client leaves has_pr_attachment false when attachments are absent" do
+    raw_issue = %{
+      "id" => "issue-blank",
+      "identifier" => "MT-BLANK",
+      "state" => %{"name" => "In Progress"}
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    refute issue.has_pr_attachment
+  end
+
   test "linear client matches assignee filter against displayName" do
     raw_issue = %{
       "id" => "issue-display",

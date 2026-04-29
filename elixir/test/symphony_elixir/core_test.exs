@@ -1367,6 +1367,35 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "continuation_decision marks issue done when a GitHub PR attachment is present" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: ["In Progress"])
+
+    issue_with_pr = %Issue{
+      id: "issue-pr",
+      identifier: "MT-901",
+      state: "In Progress",
+      has_pr_attachment: true
+    }
+
+    issue_without_pr = %Issue{
+      id: "issue-no-pr",
+      identifier: "MT-902",
+      state: "In Progress",
+      has_pr_attachment: false
+    }
+
+    issue_terminal = %Issue{
+      id: "issue-terminal",
+      identifier: "MT-903",
+      state: "Done",
+      has_pr_attachment: false
+    }
+
+    assert AgentRunner.continuation_decision_for_test(issue_with_pr) == :done
+    assert AgentRunner.continuation_decision_for_test(issue_without_pr) == :continue
+    assert AgentRunner.continuation_decision_for_test(issue_terminal) == :done
+  end
+
   test "agent runner stops continuing once agent.max_turns is reached" do
     test_root =
       Path.join(

@@ -46,6 +46,11 @@ defmodule SymphonyElixir.Linear.Client do
             }
           }
         }
+        attachments(first: 25) {
+          nodes {
+            url
+          }
+        }
         createdAt
         updatedAt
       }
@@ -92,6 +97,11 @@ defmodule SymphonyElixir.Linear.Client do
                 name
               }
             }
+          }
+        }
+        attachments(first: 25) {
+          nodes {
+            url
           }
         }
         createdAt
@@ -467,12 +477,24 @@ defmodule SymphonyElixir.Linear.Client do
       blocked_by: extract_blockers(issue),
       labels: extract_labels(issue),
       assigned_to_worker: assigned_to_worker?(assignee, assignee_filter),
+      has_pr_attachment: pr_attachment?(issue),
       created_at: parse_datetime(issue["createdAt"]),
       updated_at: parse_datetime(issue["updatedAt"])
     }
   end
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
+
+  @github_pr_url ~r{^https://github\.com/[^/]+/[^/]+/pull/\d+(?:/|$)}i
+
+  defp pr_attachment?(%{"attachments" => %{"nodes" => nodes}}) when is_list(nodes) do
+    Enum.any?(nodes, fn
+      %{"url" => url} when is_binary(url) -> Regex.match?(@github_pr_url, url)
+      _ -> false
+    end)
+  end
+
+  defp pr_attachment?(_issue), do: false
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil

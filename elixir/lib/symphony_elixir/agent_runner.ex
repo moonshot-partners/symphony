@@ -147,11 +147,7 @@ defmodule SymphonyElixir.AgentRunner do
   defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do
     case issue_state_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if active_issue_state?(refreshed_issue.state) do
-          {:continue, refreshed_issue}
-        else
-          {:done, refreshed_issue}
-        end
+        decide_continuation(refreshed_issue)
 
       {:ok, []} ->
         {:done, issue}
@@ -162,6 +158,29 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
+
+  defp decide_continuation(%Issue{} = refreshed_issue) do
+    case continuation_decision(refreshed_issue) do
+      :continue -> {:continue, refreshed_issue}
+      :done -> done_with_log(refreshed_issue)
+    end
+  end
+
+  defp done_with_log(%Issue{has_pr_attachment: true} = issue) do
+    Logger.info("PR attachment detected for #{issue_context(issue)}; stopping continuation loop")
+    {:done, issue}
+  end
+
+  defp done_with_log(%Issue{} = issue), do: {:done, issue}
+
+  @spec continuation_decision_for_test(Issue.t()) :: :continue | :done
+  def continuation_decision_for_test(%Issue{} = issue), do: continuation_decision(issue)
+
+  defp continuation_decision(%Issue{has_pr_attachment: true}), do: :done
+
+  defp continuation_decision(%Issue{state: state}) do
+    if active_issue_state?(state), do: :continue, else: :done
+  end
 
   defp active_issue_state?(state_name) when is_binary(state_name) do
     normalized_state = normalize_issue_state(state_name)
