@@ -189,12 +189,12 @@ defmodule SymphonyElixir.Orchestrator do
         {:noreply, state}
 
       running_entry ->
-        {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
+        {updated_running_entry, token_delta} = integrate_agent_update(running_entry, update)
 
         state =
           state
-          |> apply_codex_token_delta(token_delta)
-          |> apply_codex_rate_limits(update)
+          |> apply_agent_token_delta(token_delta)
+          |> apply_agent_rate_limits(update)
 
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
@@ -1169,7 +1169,7 @@ defmodule SymphonyElixir.Orchestrator do
      }, state}
   end
 
-  defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
+  defp integrate_agent_update(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = extract_token_delta(running_entry, update)
     agent_input_tokens = Map.get(running_entry, :agent_input_tokens, 0)
     agent_output_tokens = Map.get(running_entry, :agent_output_tokens, 0)
@@ -1183,7 +1183,7 @@ defmodule SymphonyElixir.Orchestrator do
     {
       Map.merge(running_entry, %{
         last_agent_timestamp: timestamp,
-        last_agent_message: summarize_codex_update(update),
+        last_agent_message: summarize_agent_update(update),
         session_id: session_id_for_update(running_entry.session_id, update),
         last_agent_event: event,
         agent_pid: agent_pid_for_update(agent_pid, update),
@@ -1235,7 +1235,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp turn_count_for_update(_existing_count, _existing_session_id, _update), do: 0
 
-  defp summarize_codex_update(update) do
+  defp summarize_agent_update(update) do
     %{
       event: update[:event],
       message: update[:payload] || update[:raw],
@@ -1312,7 +1312,7 @@ defmodule SymphonyElixir.Orchestrator do
     available_slots(state) > 0 and state_slots_available?(issue, state.running)
   end
 
-  defp apply_codex_token_delta(
+  defp apply_agent_token_delta(
          %{codex_totals: codex_totals} = state,
          %{input_tokens: input, output_tokens: output, total_tokens: total} = token_delta
        )
@@ -1320,9 +1320,9 @@ defmodule SymphonyElixir.Orchestrator do
     %{state | codex_totals: apply_token_delta(codex_totals, token_delta)}
   end
 
-  defp apply_codex_token_delta(state, _token_delta), do: state
+  defp apply_agent_token_delta(state, _token_delta), do: state
 
-  defp apply_codex_rate_limits(%State{} = state, update) when is_map(update) do
+  defp apply_agent_rate_limits(%State{} = state, update) when is_map(update) do
     case extract_rate_limits(update) do
       %{} = rate_limits ->
         %{state | codex_rate_limits: rate_limits}
@@ -1332,7 +1332,7 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp apply_codex_rate_limits(state, _update), do: state
+  defp apply_agent_rate_limits(state, _update), do: state
 
   defp apply_token_delta(codex_totals, token_delta) do
     input_tokens = Map.get(codex_totals, :input_tokens, 0) + token_delta.input_tokens
