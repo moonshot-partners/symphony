@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 
@@ -92,3 +93,35 @@ async def test_read_message_async_stream():
     framer = LineFramer(AsyncStream())
     assert await framer.read_message() == {"id": 5}
     assert await framer.read_message() is None
+
+
+@pytest.mark.asyncio
+async def test_sync_readline_does_not_block_event_loop():
+    """Sync readline must yield the loop so peer tasks can progress.
+
+    Reproduces the smoke hang: shim main loop awaits stdin readline. If that
+    runs synchronously on the loop thread, asyncio.create_task'd turn drivers
+    can never execute. We detect this by needing a peer task to release the
+    blocking readline — if the loop is held, readline times out instead.
+    """
+    import threading
+
+    release = threading.Event()
+
+    class BlockingStream:
+        def readline(self) -> bytes:
+            # Times out only if no peer task ever sets release.
+            assert release.wait(timeout=2.0), "release never set — loop was blocked"
+            return b'{"id":1}\n'
+
+    framer = LineFramer(BlockingStream())
+
+    async def releaser():
+        # Tiny await so create_task has a chance to start running concurrently
+        # with the readline executor call.
+        await asyncio.sleep(0.05)
+        release.set()
+
+    asyncio.create_task(releaser())
+    msg = await framer.read_message()
+    assert msg == {"id": 1}

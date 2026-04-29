@@ -4,9 +4,13 @@ Each frame = one JSON object on a single line, terminated by ``\n``. Matches
 the format Symphony's Elixir port writes via ``Jason.encode!(msg) <> "\n"``.
 
 Streams are duck-typed: any object with ``readline()``/``write()``/``flush()``
-methods works, sync or async. ``inspect.iscoroutine`` distinguishes the two.
+methods works, sync or async. Async readlines are awaited directly; sync
+readlines run via ``asyncio.to_thread`` so a blocking stdin read does not
+freeze the event loop and starve concurrently scheduled tasks (e.g. turn
+drivers).
 """
 
+import asyncio
 import inspect
 import json
 from typing import Any
@@ -33,10 +37,10 @@ class LineFramer:
             return parsed
 
     async def _readline(self) -> bytes:
-        result = self._stream.readline()
-        if inspect.iscoroutine(result):
-            return await result
-        return result
+        readline = self._stream.readline
+        if inspect.iscoroutinefunction(readline):
+            return await readline()
+        return await asyncio.to_thread(readline)
 
 
 async def write_frame(stream: Any, message: dict[str, Any]) -> None:

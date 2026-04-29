@@ -35,6 +35,7 @@ async def test_server_initialize_thread_smoke(monkeypatch, tmp_path):
             result="ok",
         )
 
+    fake_client.connect = AsyncMock()
     fake_client.query = AsyncMock()
     fake_client.receive_response = lambda: fake_msgs()
     monkeypatch.setattr(

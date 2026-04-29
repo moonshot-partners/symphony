@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -11,6 +11,7 @@ async def test_thread_start_creates_session_and_returns_id(monkeypatch, tmp_path
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
 
     fake_client = MagicMock()
+    fake_client.connect = AsyncMock()
     sdk_client_factory = MagicMock(return_value=fake_client)
     monkeypatch.setattr("symphony_agent_shim.thread.ClaudeSDKClient", sdk_client_factory)
 
@@ -37,6 +38,7 @@ async def test_thread_start_creates_session_and_returns_id(monkeypatch, tmp_path
     thread_id = reply["result"]["thread"]["id"]
     assert thread_id in registry
     sdk_client_factory.assert_called_once()
+    fake_client.connect.assert_awaited_once()
     options = sdk_client_factory.call_args.kwargs["options"]
     assert options.permission_mode == "acceptEdits"
     assert str(options.cwd) == str(workspace)

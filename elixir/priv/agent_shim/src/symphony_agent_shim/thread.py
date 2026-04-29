@@ -73,6 +73,12 @@ async def handle_thread_start(
     )
 
     client = ClaudeSDKClient(options=options)
+    try:
+        await client.connect()
+    except Exception as exc:  # noqa: BLE001 — surface SDK init failure as JSON-RPC error
+        return protocol.error(
+            request_id=request_id, code=-32603, message=f"SDK connect failed: {exc}"
+        )
 
     thread_id = f"shim-{uuid.uuid4().hex[:12]}"
     registry.register(ThreadSession(thread_id=thread_id, client=client, auto_approve=auto_approve))
