@@ -22,9 +22,42 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
-import uuid
 from pathlib import Path
+
+
+def build_thread_start_request(request_id: int, cwd: str) -> dict:
+    """Build a thread/start JSON-RPC request matching the shim's contract.
+
+    The shim expects camelCase keys (`approvalPolicy`, `dynamicTools`) and
+    requires `cwd`. Returning a pure dict here keeps the protocol shape
+    testable without spawning the subprocess.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "thread/start",
+        "params": {
+            "cwd": cwd,
+            "sandbox": "danger-full-access",
+            "approvalPolicy": "never",
+            "dynamicTools": [],
+        },
+    }
+
+
+def build_turn_start_request(request_id: int, thread_id: str, prompt: str) -> dict:
+    """Build a turn/start JSON-RPC request matching the shim's contract."""
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "turn/start",
+        "params": {
+            "threadId": thread_id,
+            "input": [{"type": "text", "text": prompt}],
+        },
+    }
 
 
 def main() -> int:
@@ -62,6 +95,8 @@ def main() -> int:
                 print(f"!!! malformed: {line!r}", file=sys.stderr)
         return None
 
+    workdir = tempfile.mkdtemp(prefix="symphony-smoke-")
+
     try:
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
         init_resp = read_one()
@@ -69,39 +104,29 @@ def main() -> int:
 
         send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 
-        thread_id = f"smoke-{uuid.uuid4()}"
-        send(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "thread/start",
-                "params": {
-                    "thread_id": thread_id,
-                    "sandbox": "danger-full-access",
-                    "approval_policy": "never",
-                    "dynamic_tools": [],
-                },
-            }
-        )
+        send(build_thread_start_request(request_id=2, cwd=workdir))
         thread_resp = read_one()
         print(f"<<< thread/start: {json.dumps(thread_resp)[:200]}", flush=True)
         if not thread_resp or "error" in thread_resp:
             print("error: thread/start failed", file=sys.stderr)
             return 1
+        thread_id = thread_resp.get("result", {}).get("thread", {}).get("id")
+        if not thread_id:
+            print("error: thread/start missing thread.id in response", file=sys.stderr)
+            return 1
 
-        turn_id = f"turn-{uuid.uuid4()}"
         send(
-            {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "turn/start",
-                "params": {
-                    "thread_id": thread_id,
-                    "turn_id": turn_id,
-                    "prompt": "Reply with exactly the word PONG and nothing else.",
-                },
-            }
+            build_turn_start_request(
+                request_id=3,
+                thread_id=thread_id,
+                prompt="Reply with exactly the word PONG and nothing else.",
+            )
         )
+        turn_resp = read_one()
+        print(f"<<< turn/start: {json.dumps(turn_resp)[:200]}", flush=True)
+        if not turn_resp or "error" in turn_resp:
+            print("error: turn/start failed", file=sys.stderr)
+            return 1
 
         completed = False
         for _ in range(200):
