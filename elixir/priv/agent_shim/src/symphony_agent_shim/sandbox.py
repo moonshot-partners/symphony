@@ -23,7 +23,7 @@ class SandboxConfig:
 
 
 _TIERS = {
-    "workspace-write": ("acceptEdits", []),
+    "workspace-write": ("bypassPermissions", []),
     "read-only": ("default", ["Edit", "Write", "Bash"]),
     "danger-full-access": ("bypassPermissions", []),
 }

@@ -6,9 +6,9 @@ from symphony_agent_shim.sandbox import (
 )
 
 
-def test_workspace_write_maps_to_acceptedits_with_cwd():
+def test_workspace_write_maps_to_bypass_with_cwd():
     cfg = map_sandbox_tier("workspace-write", cwd="/tmp/work")
-    assert cfg.permission_mode == "acceptEdits"
+    assert cfg.permission_mode == "bypassPermissions"
     assert cfg.cwd == "/tmp/work"
     assert cfg.disallowed_tools == []
 
