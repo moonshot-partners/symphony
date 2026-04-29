@@ -1,4 +1,4 @@
-defmodule SymphonyElixir.Codex.DynamicTool do
+defmodule SymphonyElixir.Agent.DynamicTool do
   @moduledoc """
   Executes client-side tool calls requested by Codex app-server turns.
   """
