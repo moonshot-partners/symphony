@@ -96,7 +96,9 @@ No description provided.
    - Title: `[{{ issue.identifier }}] <one-line>`
    - Body: 2–4 sentence summary + `Linear: {{ issue.url }}`
    - Apply label `symphony` (create with color `#7C3AED` if missing).
-   - Request review from `viniciuscffreitas`.
+   - Do **not** add reviewers via `--reviewer`; the agent's git identity
+     is the operator (`viniciuscffreitas`) and GitHub rejects self-review
+     with HTTP 422. The operator monitors PRs via the Linear workpad.
    - **Never** call `gh pr merge`. Humans merge.
 
 ## Hard stops
