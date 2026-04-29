@@ -5,6 +5,8 @@ defmodule SymphonyElixir.Config.Schema do
 
   import Ecto.Changeset
 
+  require Logger
+
   alias SymphonyElixir.PathSafety
 
   @primary_key false
@@ -278,6 +280,7 @@ defmodule SymphonyElixir.Config.Schema do
     config
     |> normalize_keys()
     |> drop_nil_values()
+    |> migrate_codex_alias()
     |> changeset()
     |> apply_action(:validate)
     |> case do
@@ -412,6 +415,24 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp drop_nil_values(value) when is_list(value), do: Enum.map(value, &drop_nil_values/1)
   defp drop_nil_values(value), do: value
+
+  defp migrate_codex_alias(%{"codex" => codex_block} = config) when is_map(codex_block) do
+    case Map.fetch(config, "agent_runtime") do
+      {:ok, _existing} ->
+        Logger.warning("workflow.yml: both `codex:` and `agent_runtime:` set — using `agent_runtime:`. Remove the deprecated `codex:` block.")
+
+        Map.delete(config, "codex")
+
+      :error ->
+        Logger.warning("workflow.yml: `codex:` block is deprecated — rename to `agent_runtime:`. Alias will be removed in a future release.")
+
+        config
+        |> Map.delete("codex")
+        |> Map.put("agent_runtime", codex_block)
+    end
+  end
+
+  defp migrate_codex_alias(config), do: config
 
   defp resolve_secret_setting(nil, fallback), do: normalize_secret_value(fallback)
 

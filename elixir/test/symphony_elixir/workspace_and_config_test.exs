@@ -1174,6 +1174,37 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
   end
 
+  test "schema parse accepts deprecated `codex:` block as alias for `agent_runtime:`" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, settings} =
+                 Schema.parse(%{
+                   "codex" => %{"command" => "legacy-codex app-server"}
+                 })
+
+        assert settings.agent_runtime.command == "legacy-codex app-server"
+      end)
+
+    assert log =~ "deprecated"
+    assert log =~ "agent_runtime"
+  end
+
+  test "schema parse prefers `agent_runtime:` when both blocks set, warning about `codex:`" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, settings} =
+                 Schema.parse(%{
+                   "codex" => %{"command" => "ignored-legacy"},
+                   "agent_runtime" => %{"command" => "winning-runtime"}
+                 })
+
+        assert settings.agent_runtime.command == "winning-runtime"
+      end)
+
+    assert log =~ "both"
+    assert log =~ "agent_runtime"
+  end
+
   test "schema resolves sandbox policies from explicit and default workspaces" do
     explicit_policy = %{"type" => "workspaceWrite", "writableRoots" => ["/tmp/explicit"]}
 
