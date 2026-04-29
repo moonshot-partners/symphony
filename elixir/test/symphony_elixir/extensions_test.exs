@@ -2,7 +2,6 @@ defmodule SymphonyElixir.ExtensionsTest do
   use SymphonyElixir.TestSupport
 
   import Phoenix.ConnTest
-  import Phoenix.LiveViewTest
 
   alias SymphonyElixir.Linear.Adapter
   alias SymphonyElixir.Tracker.Memory
@@ -192,13 +191,19 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_candidate_issues()
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issues_by_states([" in progress ", 42])
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
-    assert :ok = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
+
+    assert {:ok, "memory-comment-issue-1"} =
+             SymphonyElixir.Tracker.create_comment("issue-1", "comment")
+
+    assert :ok = SymphonyElixir.Tracker.update_comment("memory-comment-issue-1", "edited")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-1", "edited"}
     assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
 
     Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
-    assert :ok = Memory.create_comment("issue-1", "quiet")
+    assert {:ok, "memory-comment-issue-1"} = Memory.create_comment("issue-1", "quiet")
+    assert :ok = Memory.update_comment("memory-comment-issue-1", "muted")
     assert :ok = Memory.update_issue_state("issue-1", "Quiet")
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
@@ -219,10 +224,15 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Process.put(
       {FakeLinearClient, :graphql_result},
-      {:ok, %{"data" => %{"commentCreate" => %{"success" => true}}}}
+      {:ok,
+       %{
+         "data" => %{
+           "commentCreate" => %{"success" => true, "comment" => %{"id" => "comment-1"}}
+         }
+       }}
     )
 
-    assert :ok = Adapter.create_comment("issue-1", "hello")
+    assert {:ok, "comment-1"} = Adapter.create_comment("issue-1", "hello")
     assert_receive {:graphql_called, create_comment_query, %{body: "hello", issueId: "issue-1"}}
     assert create_comment_query =~ "commentCreate"
 
@@ -243,6 +253,38 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Process.put({FakeLinearClient, :graphql_result}, :unexpected)
     assert {:error, :comment_create_failed} = Adapter.create_comment("issue-1", "odd")
+
+    Process.put(
+      {FakeLinearClient, :graphql_result},
+      {:ok, %{"data" => %{"commentCreate" => %{"success" => true}}}}
+    )
+
+    assert {:error, :comment_create_failed} =
+             Adapter.create_comment("issue-1", "missing-id")
+
+    Process.put(
+      {FakeLinearClient, :graphql_result},
+      {:ok, %{"data" => %{"commentUpdate" => %{"success" => true}}}}
+    )
+
+    assert :ok = Adapter.update_comment("comment-1", "edited")
+
+    assert_receive {:graphql_called, update_comment_query, %{body: "edited", commentId: "comment-1"}}
+
+    assert update_comment_query =~ "commentUpdate"
+
+    Process.put(
+      {FakeLinearClient, :graphql_result},
+      {:ok, %{"data" => %{"commentUpdate" => %{"success" => false}}}}
+    )
+
+    assert {:error, :comment_update_failed} = Adapter.update_comment("comment-1", "no")
+
+    Process.put({FakeLinearClient, :graphql_result}, {:error, :boom})
+    assert {:error, :boom} = Adapter.update_comment("comment-1", "fail")
+
+    Process.put({FakeLinearClient, :graphql_result}, {:ok, %{"data" => %{}}})
+    assert {:error, :comment_update_failed} = Adapter.update_comment("comment-1", "empty")
 
     Process.put(
       {FakeLinearClient, :graphql_results},
@@ -477,137 +519,21 @@ defmodule SymphonyElixir.ExtensionsTest do
              }
   end
 
-  test "dashboard bootstraps liveview from embedded static assets" do
-    orchestrator_name = Module.concat(__MODULE__, :AssetOrchestrator)
-
-    {:ok, _pid} =
-      StaticOrchestrator.start_link(
-        name: orchestrator_name,
-        snapshot: static_snapshot(),
-        refresh: %{
-          queued: true,
-          coalesced: false,
-          requested_at: DateTime.utc_now(),
-          operations: ["poll"]
-        }
-      )
-
-    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
-
-    html = html_response(get(build_conn(), "/"), 200)
-    assert html =~ "/dashboard.css"
-    assert html =~ "/vendor/phoenix_html/phoenix_html.js"
-    assert html =~ "/vendor/phoenix/phoenix.js"
-    assert html =~ "/vendor/phoenix_live_view/phoenix_live_view.js"
-    refute html =~ "/assets/app.js"
-    refute html =~ "<style>"
-
-    dashboard_css = response(get(build_conn(), "/dashboard.css"), 200)
-    assert dashboard_css =~ ":root {"
-    assert dashboard_css =~ ".status-badge-live"
-    assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
-    assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
-
-    phoenix_html_js = response(get(build_conn(), "/vendor/phoenix_html/phoenix_html.js"), 200)
-    assert phoenix_html_js =~ "phoenix.link.click"
-
-    phoenix_js = response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 200)
-    assert phoenix_js =~ "var Phoenix = (() => {"
-
-    live_view_js =
-      response(get(build_conn(), "/vendor/phoenix_live_view/phoenix_live_view.js"), 200)
-
-    assert live_view_js =~ "var LiveView = (() => {"
-  end
-
-  test "dashboard liveview renders and refreshes over pubsub" do
-    orchestrator_name = Module.concat(__MODULE__, :DashboardOrchestrator)
-    snapshot = static_snapshot()
-
-    {:ok, orchestrator_pid} =
-      StaticOrchestrator.start_link(
-        name: orchestrator_name,
-        snapshot: snapshot,
-        refresh: %{
-          queued: true,
-          coalesced: true,
-          requested_at: DateTime.utc_now(),
-          operations: ["poll"]
-        }
-      )
-
-    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
-
-    {:ok, view, html} = live(build_conn(), "/")
-    assert html =~ "Operations Dashboard"
-    assert html =~ "MT-HTTP"
-    assert html =~ "MT-RETRY"
-    assert html =~ "rendered"
-    assert html =~ "Runtime"
-    assert html =~ "Live"
-    assert html =~ "Offline"
-    assert html =~ "Copy ID"
-    assert html =~ "Agent update"
-    refute html =~ "data-runtime-clock="
-    refute html =~ "setInterval(refreshRuntimeClocks"
-    refute html =~ "Refresh now"
-    refute html =~ "Transport"
-    assert html =~ "status-badge-live"
-    assert html =~ "status-badge-offline"
-
-    updated_snapshot =
-      put_in(snapshot.running, [
-        %{
-          issue_id: "issue-http",
-          identifier: "MT-HTTP",
-          state: "In Progress",
-          session_id: "thread-http",
-          turn_count: 8,
-          last_agent_event: :notification,
-          last_agent_message: %{
-            event: :notification,
-            message: %{
-              payload: %{
-                "method" => "codex/event/agent_message_content_delta",
-                "params" => %{
-                  "msg" => %{
-                    "content" => "structured update"
-                  }
-                }
-              }
-            }
-          },
-          last_agent_timestamp: DateTime.utc_now(),
-          agent_input_tokens: 10,
-          agent_output_tokens: 12,
-          agent_total_tokens: 22,
-          started_at: DateTime.utc_now()
-        }
-      ])
-
-    :sys.replace_state(orchestrator_pid, fn state ->
-      Keyword.put(state, :snapshot, updated_snapshot)
-    end)
-
-    StatusDashboard.notify_update()
-
-    assert_eventually(fn ->
-      render(view) =~ "agent message content streaming: structured update"
-    end)
-  end
-
-  test "dashboard liveview renders an unavailable state without crashing" do
+  test "healthz returns 200 ok without orchestrator dependency" do
     start_test_endpoint(
-      orchestrator: Module.concat(__MODULE__, :MissingDashboardOrchestrator),
+      orchestrator: Module.concat(__MODULE__, :HealthzOrchestrator),
       snapshot_timeout_ms: 5
     )
 
-    {:ok, _view, html} = live(build_conn(), "/")
-    assert html =~ "Snapshot unavailable"
-    assert html =~ "snapshot_unavailable"
+    payload = json_response(get(build_conn(), "/healthz"), 200)
+    assert payload == %{"status" => "ok"}
+
+    assert json_response(post(build_conn(), "/healthz", %{}), 405) == %{
+             "error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}
+           }
   end
 
-  test "http server serves embedded assets, accepts form posts, and rejects invalid hosts" do
+  test "http server serves headless API, accepts form posts, and rejects invalid hosts" do
     spec = HttpServer.child_spec(port: 0)
     assert spec.id == HttpServer
     assert spec.start == {HttpServer, :start_link, [[port: 0]]}
@@ -643,13 +569,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert response.status == 200
     assert response.body["counts"] == %{"running" => 1, "retrying" => 1}
 
-    dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
-    assert dashboard_css.status == 200
-    assert dashboard_css.body =~ ":root {"
-
-    phoenix_js = Req.get!("http://127.0.0.1:#{port}/vendor/phoenix/phoenix.js")
-    assert phoenix_js.status == 200
-    assert phoenix_js.body =~ "var Phoenix = (() => {"
+    healthz = Req.get!("http://127.0.0.1:#{port}/healthz")
+    assert healthz.status == 200
+    assert healthz.body == %{"status" => "ok"}
 
     refresh_response =
       Req.post!("http://127.0.0.1:#{port}/api/v1/refresh",
