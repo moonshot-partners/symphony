@@ -1,12 +1,12 @@
 ---
 tracker:
   kind: linear
-  # TODO replace with the slugId of a Linear project that scopes Symphony test tickets.
-  # SODEV-796 currently has project: null, so it will NOT be picked up until you either
-  # (a) move it into a project, or (b) create a dedicated "Symphony E2E (Schools Out)"
-  # project and add a tiny test ticket to it for the first run.
-  # See "Pre-flight" below.
-  project_slug: "REPLACE_ME_SCHOOLS_OUT_PROJECT_SLUG"
+  # Linear project: "Symphony E2E Sandbox" (id 3792a5e9-efa6-4677-83f1-c47cbeacc249)
+  # Description on Linear: "Isolated project for testing Symphony agent runtime
+  # end-to-end. Only Vinicius issues here. Safe to wipe."
+  # Add tiny PR-generating test tickets here. Do NOT widen the slug to a real
+  # delivery project until the agent has landed at least one human-reviewed PR.
+  project_slug: "symphony-e2e-sandbox-c2bd55c135ce"
   assignee: vinicius.freitas@moonshot.partners
   active_states:
     - Scheduled
@@ -49,18 +49,21 @@ read ticket -> implement -> test -> open PR -> hand off to human review.
 
 ## Pre-flight (do once before the first run)
 
-1. Create a Linear project scoped to Symphony test tickets (suggested name:
-   `Symphony E2E (Schools Out)`). Copy its `slugId` into `tracker.project_slug`
-   above.
-2. Create a **small** test ticket inside that project, assigned to you:
-   e.g. "Fix typo in `README.md`" or "Add missing `.gitignore` entry". Keep
-   the first run scoped so a stuck loop is cheap to abort.
+1. Linear project `Symphony E2E Sandbox`
+   (slug `symphony-e2e-sandbox-c2bd55c135ce`) already exists and is wired
+   above. It is intentionally isolated — *"Only Vinicius issues here. Safe
+   to wipe."* Do not repurpose it for real delivery work.
+2. Add a **small** test ticket inside that project, assigned to you. The
+   first such ticket is `SODEV-810` (`Symphony E2E V1: add SYMPHONY.md
+   banner via PR`); add new ones in the same shape — tiny verifiable diff,
+   acceptance criteria expressed as `git diff --stat`, no app logic.
 3. Confirm `ANTHROPIC_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY` is set
    in the environment that runs Symphony, and that `LINEAR_API_KEY` is set.
 4. Confirm `gh auth status` shows write access to `schoolsoutapp/schools-out`.
 
 Do **not** point this workflow at large multi-day tickets (SODEV-796 etc.)
-on the first run.
+on the first run, and do **not** widen `tracker.project_slug` to a real
+delivery project until a Sandbox ticket has been landed end-to-end.
 
 ## Ticket prompt
 
