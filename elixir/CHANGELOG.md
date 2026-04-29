@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased — GitHub App identity for orchestrator-driven PRs
+
+### Highlights
+
+- Symphony can now author PRs as the `symphony-orchestrator[bot]` GitHub App
+  instead of the operator's personal account. The agent's git/gh subprocesses
+  inherit a short-lived installation token (1h GitHub TTL, refreshed at 55min)
+  via `GH_TOKEN` / `GITHUB_TOKEN`. Required when the operator wants to be the
+  reviewer on agent-authored PRs (GitHub rejects self-review with HTTP 422).
+- New shim module `symphony_agent_shim.auth_github_app` handles JWT signing
+  (RS256, 9min TTL with backdated `iat` to absorb clock skew), installation
+  token exchange, and a thread-safe in-memory token cache.
+- New CLI `symphony-setup-github-app` walks the operator through the GitHub
+  App manifest flow (one click to create) and writes credentials to
+  `~/.symphony/github-app.{pem,env}` (pem chmod 600). Org install requires
+  approval if the operator is not an owner — the CLI prints a copy-paste DM
+  template for the org owner.
+- New `agent_runtime.github_app_env` block in `WORKFLOW.*.md` declares the env
+  vars passed through to the agent: `SYMPHONY_GITHUB_APP_ID`,
+  `SYMPHONY_GITHUB_APP_INSTALLATION_ID`, `SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH`.
+
+### Backwards compatibility
+
+If any of the three `SYMPHONY_GITHUB_APP_*` vars is missing, the shim falls
+back to the operator's `GH_TOKEN` / `GITHUB_TOKEN` (PAT) so existing runs keep
+working. PAT mode does **not** set `SYMPHONY_GITHUB_APP_ACTIVE=1`, which lets
+downstream tooling distinguish App-authored vs operator-authored runs.
+
+### Manual install steps
+
+1. `uv run symphony-setup-github-app --org <your-org>` — opens browser, creates
+   the App, persists the pem and env file.
+2. Click "Install" on the App page; pick "All repositories" on the org. If you
+   are not an org owner, GitHub fires an approval request — DM an owner using
+   the template the CLI prints.
+3. After approval, finalize with
+   `symphony-setup-github-app --finalize <installation_id>`.
+4. `source ~/.symphony/github-app.env` before launching Symphony.
+
+See `docs/github-app-setup.md` for the full runbook.
+
 ## Unreleased — Codex → Claude Agent SDK migration
 
 ### Highlights

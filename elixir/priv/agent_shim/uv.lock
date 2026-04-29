@@ -835,10 +835,12 @@ source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "claude-agent-sdk" },
+    { name = "pyjwt", extra = ["crypto"] },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -848,6 +850,8 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "claude-agent-sdk", specifier = ">=0.1.0" },
+    { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },

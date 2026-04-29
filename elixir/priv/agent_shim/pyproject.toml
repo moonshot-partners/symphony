@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
   "claude-agent-sdk>=0.1.0",
   "anyio>=4.0",
+  "PyJWT[crypto]>=2.8",
 ]
 
 [project.optional-dependencies]
@@ -13,7 +14,14 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "ruff>=0.5",
+  # Used by tests to generate ephemeral RSA keypairs. Production already pulls
+  # this in via PyJWT[crypto] but we list it explicitly so the test dep is
+  # auditable.
+  "cryptography>=42.0",
 ]
+
+[project.scripts]
+symphony-setup-github-app = "symphony_agent_shim.bootstrap_github_app:main"
 
 [build-system]
 requires = ["hatchling"]
