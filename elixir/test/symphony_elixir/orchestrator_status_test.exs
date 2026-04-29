@@ -1397,7 +1397,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       message = Map.put(payload, "method", method)
 
       humanized =
-        StatusDashboard.humanize_codex_message(%{event: :notification, message: message})
+        StatusDashboard.humanize_agent_message(%{event: :notification, message: message})
 
       assert humanized =~ expected_fragment
     end)
@@ -1425,13 +1425,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       }
     }
 
-    assert StatusDashboard.humanize_codex_message(completed) =~
+    assert StatusDashboard.humanize_agent_message(completed) =~
              "dynamic tool call completed (linear_graphql)"
 
-    assert StatusDashboard.humanize_codex_message(failed) =~
+    assert StatusDashboard.humanize_agent_message(failed) =~
              "dynamic tool call failed (linear_graphql)"
 
-    assert StatusDashboard.humanize_codex_message(unsupported) =~
+    assert StatusDashboard.humanize_agent_message(unsupported) =~
              "unsupported dynamic tool call rejected (unknown_tool)"
   end
 
@@ -1450,8 +1450,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       }
     }
 
-    assert StatusDashboard.humanize_codex_message(wrapped) =~ "turn completed"
-    assert StatusDashboard.humanize_codex_message(wrapped) =~ "in 10"
+    assert StatusDashboard.humanize_agent_message(wrapped) =~ "turn completed"
+    assert StatusDashboard.humanize_agent_message(wrapped) =~ "in 10"
   end
 
   test "status dashboard uses shell command line as exec command status text" do
@@ -1463,7 +1463,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       }
     }
 
-    assert StatusDashboard.humanize_codex_message(message) == "git status --short"
+    assert StatusDashboard.humanize_agent_message(message) == "git status --short"
   end
 
   test "status dashboard formats auto-approval updates from codex" do
@@ -1478,7 +1478,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       }
     }
 
-    humanized = StatusDashboard.humanize_codex_message(message)
+    humanized = StatusDashboard.humanize_agent_message(message)
     assert humanized =~ "command approval requested"
     assert humanized =~ "auto-approved"
   end
@@ -1495,7 +1495,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       }
     }
 
-    humanized = StatusDashboard.humanize_codex_message(message)
+    humanized = StatusDashboard.humanize_agent_message(message)
     assert humanized =~ "tool requires user input"
     assert humanized =~ "auto-answered"
   end
@@ -1533,13 +1533,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       }
     }
 
-    assert StatusDashboard.humanize_codex_message(reasoning_message) =~
+    assert StatusDashboard.humanize_agent_message(reasoning_message) =~
              "reasoning update: compare retry paths for Linear polling"
 
-    assert StatusDashboard.humanize_codex_message(message_delta) =~
+    assert StatusDashboard.humanize_agent_message(message_delta) =~
              "agent message streaming: writing workpad reconciliation update"
 
-    assert StatusDashboard.humanize_codex_message(fallback_reasoning) == "reasoning update"
+    assert StatusDashboard.humanize_agent_message(fallback_reasoning) == "reasoning update"
   end
 
   test "application stop renders offline status" do

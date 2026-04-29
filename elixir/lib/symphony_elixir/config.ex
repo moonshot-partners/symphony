@@ -68,7 +68,7 @@ defmodule SymphonyElixir.Config do
         policy
 
       {:error, reason} ->
-        raise ArgumentError, message: "Invalid codex turn sandbox policy: #{inspect(reason)}"
+        raise ArgumentError, message: "Invalid agent turn sandbox policy: #{inspect(reason)}"
     end
   end
 

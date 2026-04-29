@@ -76,7 +76,7 @@ defmodule SymphonyElixirWeb.Presenter do
       running: running && running_issue_payload(running),
       retry: retry && retry_issue_payload(retry),
       logs: %{
-        codex_session_logs: []
+        agent_session_logs: []
       },
       recent_events: (running && recent_events_payload(running)) || [],
       last_error: retry && retry.error,
@@ -179,7 +179,7 @@ defmodule SymphonyElixirWeb.Presenter do
   end
 
   defp summarize_message(nil), do: nil
-  defp summarize_message(message), do: StatusDashboard.humanize_codex_message(message)
+  defp summarize_message(message), do: StatusDashboard.humanize_agent_message(message)
 
   defp due_at_iso8601(due_in_ms) when is_integer(due_in_ms) do
     DateTime.utc_now()

@@ -1,6 +1,6 @@
 defmodule SymphonyElixir.Agent.AppServer do
   @moduledoc """
-  Minimal client for the Codex app-server JSON-RPC 2.0 stream over stdio.
+  Minimal client for the Agent app-server JSON-RPC 2.0 stream over stdio.
   """
 
   require Logger
@@ -91,7 +91,7 @@ defmodule SymphonyElixir.Agent.AppServer do
     case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
-        Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
+        Logger.info("Agent session started for #{issue_context(issue)} session_id=#{session_id}")
 
         emit_message(
           on_message,
@@ -106,7 +106,7 @@ defmodule SymphonyElixir.Agent.AppServer do
 
         case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
           {:ok, result} ->
-            Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
+            Logger.info("Agent session completed for #{issue_context(issue)} session_id=#{session_id}")
 
             {:ok,
              %{
@@ -117,7 +117,7 @@ defmodule SymphonyElixir.Agent.AppServer do
              }}
 
           {:error, reason} ->
-            Logger.warning("Codex session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
+            Logger.warning("Agent session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
 
             emit_message(
               on_message,
@@ -133,7 +133,7 @@ defmodule SymphonyElixir.Agent.AppServer do
         end
 
       {:error, reason} ->
-        Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
+        Logger.error("Agent session failed for #{issue_context(issue)}: #{inspect(reason)}")
         emit_message(on_message, :startup_failed, %{reason: reason}, metadata)
         {:error, reason}
     end
@@ -517,7 +517,7 @@ defmodule SymphonyElixir.Agent.AppServer do
             metadata
           )
 
-          Logger.debug("Codex notification: #{inspect(method)}")
+          Logger.debug("Agent notification: #{inspect(method)}")
           receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
         end
     end
@@ -972,9 +972,9 @@ defmodule SymphonyElixir.Agent.AppServer do
 
     if text != "" do
       if String.match?(text, ~r/\b(error|warn|warning|failed|fatal|panic|exception)\b/i) do
-        Logger.warning("Codex #{stream_label} output: #{text}")
+        Logger.warning("Agent #{stream_label} output: #{text}")
       else
-        Logger.debug("Codex #{stream_label} output: #{text}")
+        Logger.debug("Agent #{stream_label} output: #{text}")
       end
     end
   end

@@ -1199,7 +1199,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       assert_received {:app_server_message, %{event: :turn_completed}}
       refute_received {:app_server_message, %{event: :malformed}}
-      assert log =~ "Codex turn stream output: warning: this is stderr noise"
+      assert log =~ "Agent turn stream output: warning: this is stderr noise"
     after
       File.rm_rf(test_root)
     end
