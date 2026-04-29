@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -190,6 +190,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       running_entry ->
         {updated_running_entry, token_delta} = integrate_agent_update(running_entry, update)
+        updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
 
         state =
           state
@@ -202,6 +203,18 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_info({:agent_worker_update, _issue_id, _update}, state), do: {:noreply, state}
+
+  def handle_info({:workpad_comment_created, issue_id, comment_id}, %{running: running} = state)
+      when is_binary(issue_id) and is_binary(comment_id) do
+    case Map.get(running, issue_id) do
+      nil ->
+        {:noreply, state}
+
+      running_entry ->
+        running_entry = Map.put(running_entry, :workpad_comment_id, comment_id)
+        {:noreply, %{state | running: Map.put(running, issue_id, running_entry)}}
+    end
+  end
 
   def handle_info({:retry_issue, issue_id, retry_token}, state) do
     result =
