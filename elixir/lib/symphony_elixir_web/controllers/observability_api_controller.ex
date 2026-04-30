@@ -6,7 +6,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
-  alias SymphonyElixirWeb.{Endpoint, Presenter}
+  alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
 
   @spec healthz(Conn.t(), map()) :: Conn.t()
   def healthz(conn, _params) do
@@ -21,6 +21,34 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   @spec board(Conn.t(), map()) :: Conn.t()
   def board(conn, _params) do
     json(conn, Presenter.board_payload(orchestrator(), snapshot_timeout_ms()))
+  end
+
+  @spec stream(Conn.t(), map()) :: Conn.t()
+  def stream(conn, _params) do
+    :ok = ObservabilityPubSub.subscribe()
+
+    conn
+    |> put_resp_header("content-type", "text/event-stream")
+    |> put_resp_header("cache-control", "no-cache")
+    |> put_resp_header("connection", "keep-alive")
+    |> Conn.send_chunked(200)
+    |> sse_loop()
+  end
+
+  defp sse_loop(conn) do
+    receive do
+      :observability_updated ->
+        case Conn.chunk(conn, "event: board_updated\ndata: {}\n\n") do
+          {:ok, conn} -> sse_loop(conn)
+          {:error, _closed} -> conn
+        end
+    after
+      15_000 ->
+        case Conn.chunk(conn, ":heartbeat\n\n") do
+          {:ok, conn} -> sse_loop(conn)
+          {:error, _closed} -> conn
+        end
+    end
   end
 
   @spec issue(Conn.t(), map()) :: Conn.t()

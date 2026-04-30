@@ -743,6 +743,43 @@ defmodule SymphonyElixir.ExtensionsTest do
     end
   end
 
+  describe "GET /api/v1/stream" do
+    test "emits board_updated SSE on PubSub broadcast" do
+      orch_name = Module.concat(__MODULE__, :StreamOrchestrator)
+
+      start_supervised!(
+        {StaticOrchestrator,
+         name: orch_name,
+         snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}}
+      )
+
+      start_supervised!(
+        {HttpServer,
+         host: "127.0.0.1", port: 0, orchestrator: orch_name, snapshot_timeout_ms: 50}
+      )
+
+      port = wait_for_bound_port()
+      parent = self()
+
+      spawn_link(fn ->
+        Req.get!("http://127.0.0.1:#{port}/api/v1/stream",
+          receive_timeout: 2_000,
+          into: fn {:data, chunk}, acc ->
+            send(parent, {:sse_chunk, chunk})
+            {:cont, acc}
+          end
+        )
+      end)
+
+      Process.sleep(150)
+
+      assert :ok = SymphonyElixirWeb.ObservabilityPubSub.broadcast_update()
+
+      assert_receive {:sse_chunk, chunk}, 1_500
+      assert chunk =~ "event: board_updated"
+    end
+  end
+
   describe "GET /api/v1/board" do
     test "returns board payload as JSON" do
       Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
