@@ -355,6 +355,30 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert issue.assigned_to_worker
   end
 
+  test "linear client keeps assignee name and display_name on the issue struct" do
+    raw_issue = %{
+      "id" => "issue-1",
+      "identifier" => "SODEV-1",
+      "title" => "T",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-1",
+        "name" => "Vini Freitas",
+        "displayName" => "vini",
+        "email" => "v@example.com"
+      },
+      "labels" => %{"nodes" => []},
+      "attachments" => %{"nodes" => []},
+      "inverseRelations" => %{"nodes" => []}
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    assert issue.assignee_id == "user-1"
+    assert issue.assignee_name == "Vini Freitas"
+    assert issue.assignee_display_name == "vini"
+  end
+
   test "linear client marks explicitly unassigned issues as not routed to worker" do
     raw_issue = %{
       "id" => "issue-99",
