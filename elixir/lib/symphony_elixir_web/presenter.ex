@@ -141,6 +141,7 @@ defmodule SymphonyElixirWeb.Presenter do
       priority: issue.priority,
       labels: issue.labels,
       has_pr_attachment: issue.has_pr_attachment,
+      pr_url: issue.pr_url,
       assignee: assignee_payload(issue),
       agent_status: agent_status_payload(issue.id, running_index, retrying_index)
     }

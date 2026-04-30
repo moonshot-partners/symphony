@@ -480,6 +480,7 @@ defmodule SymphonyElixir.Linear.Client do
       labels: extract_labels(issue),
       assigned_to_worker: assigned_to_worker?(assignee, assignee_filter),
       has_pr_attachment: pr_attachment?(issue),
+      pr_url: extract_pr_url(issue),
       created_at: parse_datetime(issue["createdAt"]),
       updated_at: parse_datetime(issue["updatedAt"])
     }
@@ -497,6 +498,18 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp pr_attachment?(_issue), do: false
+
+  defp extract_pr_url(%{"attachments" => %{"nodes" => nodes}}) when is_list(nodes) do
+    Enum.find_value(nodes, fn
+      %{"url" => url} when is_binary(url) ->
+        if Regex.match?(@github_pr_url, url), do: url, else: nil
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp extract_pr_url(_issue), do: nil
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil

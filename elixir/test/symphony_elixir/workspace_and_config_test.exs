@@ -465,6 +465,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     issue = Client.normalize_issue_for_test(raw_issue)
 
     assert issue.has_pr_attachment
+    assert issue.pr_url == "https://github.com/owner/repo/pull/728"
   end
 
   test "linear client leaves has_pr_attachment false when no GitHub PR url is attached" do
@@ -483,6 +484,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     issue = Client.normalize_issue_for_test(raw_issue)
 
     refute issue.has_pr_attachment
+    assert issue.pr_url == nil
   end
 
   test "linear client leaves has_pr_attachment false when attachments are absent" do
@@ -495,6 +497,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     issue = Client.normalize_issue_for_test(raw_issue)
 
     refute issue.has_pr_attachment
+    assert issue.pr_url == nil
   end
 
   test "linear client matches assignee filter against displayName" do

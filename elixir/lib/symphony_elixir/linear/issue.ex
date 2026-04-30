@@ -19,6 +19,7 @@ defmodule SymphonyElixir.Linear.Issue do
     labels: [],
     assigned_to_worker: true,
     has_pr_attachment: false,
+    pr_url: nil,
     created_at: nil,
     updated_at: nil
   ]
@@ -38,6 +39,7 @@ defmodule SymphonyElixir.Linear.Issue do
           labels: [String.t()],
           assigned_to_worker: boolean(),
           has_pr_attachment: boolean(),
+          pr_url: String.t() | nil,
           created_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
