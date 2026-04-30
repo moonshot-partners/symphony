@@ -605,22 +605,43 @@ defmodule SymphonyElixir.ExtensionsTest do
 
       issues = [
         %SymphonyElixir.Linear.Issue{
-          id: "i1", identifier: "SODEV-1", title: "Todo task",
-          state: "Todo", url: "u1", priority: 2,
-          assignee_id: "a1", assignee_name: "Ana", assignee_display_name: "ana",
-          labels: ["seo"], has_pr_attachment: false
+          id: "i1",
+          identifier: "SODEV-1",
+          title: "Todo task",
+          state: "Todo",
+          url: "u1",
+          priority: 2,
+          assignee_id: "a1",
+          assignee_name: "Ana",
+          assignee_display_name: "ana",
+          labels: ["seo"],
+          has_pr_attachment: false
         },
         %SymphonyElixir.Linear.Issue{
-          id: "i2", identifier: "SODEV-2", title: "Active task",
-          state: "In Progress", url: "u2", priority: 1,
-          assignee_id: "a2", assignee_name: "Bob", assignee_display_name: "bob",
-          labels: [], has_pr_attachment: true
+          id: "i2",
+          identifier: "SODEV-2",
+          title: "Active task",
+          state: "In Progress",
+          url: "u2",
+          priority: 1,
+          assignee_id: "a2",
+          assignee_name: "Bob",
+          assignee_display_name: "bob",
+          labels: [],
+          has_pr_attachment: true
         },
         %SymphonyElixir.Linear.Issue{
-          id: "i3", identifier: "SODEV-3", title: "Done task",
-          state: "Done", url: "u3", priority: 3,
-          assignee_id: nil, assignee_name: nil, assignee_display_name: nil,
-          labels: [], has_pr_attachment: true
+          id: "i3",
+          identifier: "SODEV-3",
+          title: "Done task",
+          state: "Done",
+          url: "u3",
+          priority: 3,
+          assignee_id: nil,
+          assignee_name: nil,
+          assignee_display_name: nil,
+          labels: [],
+          has_pr_attachment: true
         }
       ]
 
@@ -701,10 +722,17 @@ defmodule SymphonyElixir.ExtensionsTest do
 
       issues = [
         %SymphonyElixir.Linear.Issue{
-          id: "i9", identifier: "SODEV-9", title: "Retrying task",
-          state: "In Progress", url: "u9", priority: nil,
-          assignee_id: nil, assignee_name: nil, assignee_display_name: nil,
-          labels: [], has_pr_attachment: false
+          id: "i9",
+          identifier: "SODEV-9",
+          title: "Retrying task",
+          state: "In Progress",
+          url: "u9",
+          priority: nil,
+          assignee_id: nil,
+          assignee_name: nil,
+          assignee_display_name: nil,
+          labels: [],
+          has_pr_attachment: false
         }
       ]
 
@@ -747,16 +775,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     test "emits board_updated SSE on PubSub broadcast" do
       orch_name = Module.concat(__MODULE__, :StreamOrchestrator)
 
-      start_supervised!(
-        {StaticOrchestrator,
-         name: orch_name,
-         snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}}
-      )
+      start_supervised!({StaticOrchestrator, name: orch_name, snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}})
 
-      start_supervised!(
-        {HttpServer,
-         host: "127.0.0.1", port: 0, orchestrator: orch_name, snapshot_timeout_ms: 50}
-      )
+      start_supervised!({HttpServer, host: "127.0.0.1", port: 0, orchestrator: orch_name, snapshot_timeout_ms: 50})
 
       port = wait_for_bound_port()
       parent = self()
