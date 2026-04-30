@@ -60,6 +60,131 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
+  @board_columns [
+    %{key: "todo", label: "Todo", linear_states: ["Backlog", "Todo"]},
+    %{key: "in_progress", label: "In Progress", linear_states: ["In Progress", "In Review"]},
+    %{key: "done", label: "Done", linear_states: ["Done", "Cancelled", "Canceled", "Duplicate"]}
+  ]
+
+  @spec board_payload(GenServer.name(), timeout()) :: map()
+  def board_payload(orchestrator, snapshot_timeout_ms) do
+    fetcher = fn ->
+      states = Enum.flat_map(@board_columns, & &1.linear_states)
+      SymphonyElixir.Tracker.fetch_issues_by_states(states)
+    end
+
+    board_payload(fetcher, orchestrator, snapshot_timeout_ms)
+  end
+
+  @spec board_payload(
+          (-> {:ok, [SymphonyElixir.Linear.Issue.t()]} | {:error, term()}),
+          GenServer.name(),
+          timeout()
+        ) :: map()
+  def board_payload(fetcher, orchestrator, snapshot_timeout_ms) when is_function(fetcher, 0) do
+    generated_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    snapshot = Orchestrator.snapshot(orchestrator, snapshot_timeout_ms)
+
+    case fetcher.() do
+      {:ok, issues} ->
+        running_index = build_running_index(snapshot)
+        retrying_index = build_retrying_index(snapshot)
+
+        %{
+          generated_at: generated_at,
+          columns: build_board_columns(issues, running_index, retrying_index)
+        }
+
+      {:error, _reason} ->
+        %{
+          generated_at: generated_at,
+          columns: empty_board_columns(),
+          error: %{code: "linear_unavailable", message: "Linear API unreachable"}
+        }
+    end
+  end
+
+  defp build_running_index(%{running: running}) when is_list(running),
+    do: Map.new(running, &{&1.issue_id, &1})
+
+  defp build_running_index(_), do: %{}
+
+  defp build_retrying_index(%{retrying: retrying}) when is_list(retrying),
+    do: Map.new(retrying, &{&1.issue_id, &1})
+
+  defp build_retrying_index(_), do: %{}
+
+  defp empty_board_columns do
+    Enum.map(@board_columns, fn %{key: k, label: l, linear_states: s} ->
+      %{key: k, label: l, linear_states: s, issues: []}
+    end)
+  end
+
+  defp build_board_columns(issues, running_index, retrying_index) do
+    Enum.map(@board_columns, fn %{key: k, label: l, linear_states: states} ->
+      column_issues =
+        issues
+        |> Enum.filter(&(&1.state in states))
+        |> Enum.map(&board_issue_payload(&1, running_index, retrying_index))
+
+      %{key: k, label: l, linear_states: states, issues: column_issues}
+    end)
+  end
+
+  defp board_issue_payload(issue, running_index, retrying_index) do
+    %{
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      url: issue.url,
+      state: issue.state,
+      priority: issue.priority,
+      labels: issue.labels,
+      has_pr_attachment: issue.has_pr_attachment,
+      assignee: assignee_payload(issue),
+      agent_status: agent_status_payload(issue.id, running_index, retrying_index)
+    }
+  end
+
+  defp assignee_payload(%{assignee_id: nil}), do: nil
+
+  defp assignee_payload(issue) do
+    %{
+      id: issue.assignee_id,
+      name: issue.assignee_name,
+      display_name: issue.assignee_display_name
+    }
+  end
+
+  defp agent_status_payload(issue_id, running_index, retrying_index) do
+    cond do
+      Map.has_key?(running_index, issue_id) ->
+        running = running_index[issue_id]
+
+        %{
+          running: true,
+          session_id: running.session_id,
+          turn_count: Map.get(running, :turn_count, 0),
+          last_event: summarize_message(running.last_agent_message),
+          started_at: iso8601(running.started_at),
+          last_event_at: iso8601(running.last_agent_timestamp),
+          tokens: %{total_tokens: running.agent_total_tokens}
+        }
+
+      Map.has_key?(retrying_index, issue_id) ->
+        retry = retrying_index[issue_id]
+
+        %{
+          running: false,
+          retry_attempt: retry.attempt,
+          retry_reason: Map.get(retry, :error)
+        }
+
+      true ->
+        nil
+    end
+  end
+
   defp issue_payload_body(issue_identifier, running, retry) do
     %{
       issue_identifier: issue_identifier,

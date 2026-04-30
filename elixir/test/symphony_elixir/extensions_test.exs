@@ -594,6 +594,151 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:error, _reason} = HttpServer.start_link(host: "bad host", port: 0)
   end
 
+  describe "board_payload/2" do
+    test "groups Linear issues by column and joins with running snapshot" do
+      Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
+      Process.put({FakeLinearClient, :graphql_result}, nil)
+
+      issues = [
+        %SymphonyElixir.Linear.Issue{
+          id: "i1", identifier: "SODEV-1", title: "Todo task",
+          state: "Todo", url: "u1", priority: 2,
+          assignee_id: "a1", assignee_name: "Ana", assignee_display_name: "ana",
+          labels: ["seo"], has_pr_attachment: false
+        },
+        %SymphonyElixir.Linear.Issue{
+          id: "i2", identifier: "SODEV-2", title: "Active task",
+          state: "In Progress", url: "u2", priority: 1,
+          assignee_id: "a2", assignee_name: "Bob", assignee_display_name: "bob",
+          labels: [], has_pr_attachment: true
+        },
+        %SymphonyElixir.Linear.Issue{
+          id: "i3", identifier: "SODEV-3", title: "Done task",
+          state: "Done", url: "u3", priority: 3,
+          assignee_id: nil, assignee_name: nil, assignee_display_name: nil,
+          labels: [], has_pr_attachment: true
+        }
+      ]
+
+      orch_name = :"orch_#{System.unique_integer([:positive])}"
+
+      {:ok, _fake_orch} =
+        StaticOrchestrator.start_link(
+          name: orch_name,
+          snapshot: %{
+            running: [
+              %{
+                issue_id: "i2",
+                identifier: "SODEV-2",
+                state: "In Progress",
+                session_id: "sess-1",
+                turn_count: 7,
+                last_agent_event: :tool_use,
+                last_agent_message: "writing test",
+                last_agent_timestamp: ~U[2026-04-30 19:00:00Z],
+                started_at: ~U[2026-04-30 18:55:00Z],
+                agent_input_tokens: 1000,
+                agent_output_tokens: 1400,
+                agent_total_tokens: 2400
+              }
+            ],
+            retrying: [],
+            agent_totals: %{},
+            rate_limits: nil
+          }
+        )
+
+      payload =
+        SymphonyElixirWeb.Presenter.board_payload(
+          fn -> {:ok, issues} end,
+          orch_name,
+          1_000
+        )
+
+      assert is_binary(payload.generated_at)
+      assert length(payload.columns) == 3
+      [todo, in_progress, done] = payload.columns
+
+      assert todo.key == "todo"
+      assert Enum.map(todo.issues, & &1.identifier) == ["SODEV-1"]
+
+      assert in_progress.key == "in_progress"
+      assert [active] = in_progress.issues
+      assert active.identifier == "SODEV-2"
+      assert active.agent_status.running == true
+      assert active.agent_status.turn_count == 7
+      assert active.agent_status.last_event == "writing test"
+
+      assert done.key == "done"
+      assert hd(done.issues).agent_status == nil
+    end
+
+    test "issue with retrying status maps to non-running agent_status" do
+      orch_name = :"orch_#{System.unique_integer([:positive])}"
+
+      {:ok, _fake_orch} =
+        StaticOrchestrator.start_link(
+          name: orch_name,
+          snapshot: %{
+            running: [],
+            retrying: [
+              %{
+                issue_id: "i9",
+                identifier: "SODEV-9",
+                attempt: 2,
+                due_in_ms: 5000,
+                error: "tool_failed"
+              }
+            ],
+            agent_totals: %{},
+            rate_limits: nil
+          }
+        )
+
+      issues = [
+        %SymphonyElixir.Linear.Issue{
+          id: "i9", identifier: "SODEV-9", title: "Retrying task",
+          state: "In Progress", url: "u9", priority: nil,
+          assignee_id: nil, assignee_name: nil, assignee_display_name: nil,
+          labels: [], has_pr_attachment: false
+        }
+      ]
+
+      payload =
+        SymphonyElixirWeb.Presenter.board_payload(
+          fn -> {:ok, issues} end,
+          orch_name,
+          1_000
+        )
+
+      [_todo, in_progress, _done] = payload.columns
+      [issue] = in_progress.issues
+      assert issue.agent_status.running == false
+      assert issue.agent_status.retry_attempt == 2
+      assert issue.agent_status.retry_reason == "tool_failed"
+    end
+
+    test "returns empty columns when linear fetch fails" do
+      orch_name = :"orch_#{System.unique_integer([:positive])}"
+
+      {:ok, _fake_orch} =
+        StaticOrchestrator.start_link(
+          name: orch_name,
+          snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}
+        )
+
+      payload =
+        SymphonyElixirWeb.Presenter.board_payload(
+          fn -> {:error, :missing_linear_api_token} end,
+          orch_name,
+          1_000
+        )
+
+      assert payload.error.code == "linear_unavailable"
+      assert Enum.all?(payload.columns, &(&1.issues == []))
+    end
+  end
+
   defp start_test_endpoint(overrides) do
     endpoint_config =
       :symphony_elixir
