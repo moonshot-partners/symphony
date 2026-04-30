@@ -168,6 +168,24 @@ defmodule SymphonyElixir.WorkpadTest do
     refute_receive {:memory_tracker_comment, _, _}, 200
   end
 
+  test "schedules an update on :pr_attached so the workpad reflects PR shipping" do
+    update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+
+    entry =
+      running_entry(%{
+        workpad_comment_id: "memory-comment-issue-wp",
+        last_agent_event: :pr_attached,
+        last_agent_text: "ready for review"
+      })
+
+    Workpad.maybe_sync(entry, update, self())
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
+    assert body =~ "**Last event**: pr_attached"
+    assert body =~ "ready for review"
+    refute_received {:memory_tracker_comment, _, _}
+  end
+
   test "extracts text from content blocks list" do
     update = %{
       event: :notification,

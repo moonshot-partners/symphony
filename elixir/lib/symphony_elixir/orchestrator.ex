@@ -390,7 +390,9 @@ defmodule SymphonyElixir.Orchestrator do
       has_pr_attachment?(issue) ->
         Logger.info("Issue has a PR attachment: #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
-        terminate_running_issue(state, issue.id, false)
+        state
+        |> sync_workpad_pr_attached(issue.id)
+        |> terminate_running_issue(issue.id, false)
 
       !issue_routable_to_worker?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
@@ -493,6 +495,31 @@ defmodule SymphonyElixir.Orchestrator do
         release_issue_claim(state, issue_id)
     end
   end
+
+  defp sync_workpad_pr_attached(%State{} = state, issue_id) when is_binary(issue_id) do
+    case Map.get(state.running, issue_id) do
+      nil ->
+        state
+
+      running_entry ->
+        comment_id =
+          Map.get(running_entry, :workpad_comment_id) || Map.get(state.workpads, issue_id)
+
+        entry =
+          running_entry
+          |> Map.put(:last_agent_event, :pr_attached)
+          |> maybe_put_workpad_comment_id(comment_id)
+
+        update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+        _ = Workpad.maybe_sync(entry, update, self())
+        state
+    end
+  end
+
+  defp maybe_put_workpad_comment_id(entry, nil), do: entry
+
+  defp maybe_put_workpad_comment_id(entry, comment_id) when is_binary(comment_id),
+    do: Map.put(entry, :workpad_comment_id, comment_id)
 
   defp reconcile_stalled_running_issues(%State{} = state) do
     timeout_ms = Config.settings!().agent_runtime.stall_timeout_ms

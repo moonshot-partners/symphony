@@ -291,6 +291,85 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "reconcile fires a workpad pr_attached sync before terminating the running agent" do
+    previous_enabled = Application.get_env(:symphony_elixir, :workpad_enabled)
+    Application.put_env(:symphony_elixir, :workpad_enabled, true)
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-workpad-sync-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-workpad"
+    issue_identifier = "MT-PR-WP"
+    workspace = Path.join(test_root, issue_identifier)
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: test_root,
+        tracker_kind: "memory",
+        tracker_active_states: ["Scheduled", "In Progress"],
+        tracker_terminal_states: ["Closed", "Done", "Cancelled"]
+      )
+
+      File.mkdir_p!(test_root)
+      File.mkdir_p!(workspace)
+
+      agent_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      state = %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: issue_identifier,
+            issue: %Issue{id: issue_id, state: "Scheduled", identifier: issue_identifier},
+            started_at: DateTime.utc_now(),
+            last_agent_text: "ready for review"
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{},
+        workpads: %{issue_id => "wp-comment-pr-attached"}
+      }
+
+      refreshed_issue = %Issue{
+        id: issue_id,
+        identifier: issue_identifier,
+        state: "Scheduled",
+        title: "Already shipped",
+        description: "PR attached",
+        labels: [],
+        has_pr_attachment: true
+      }
+
+      updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+      assert_receive {:memory_tracker_comment_update, "wp-comment-pr-attached", body}, 1_000
+      assert body =~ "**Last event**: pr_attached"
+      assert body =~ "ready for review"
+
+      refute Map.has_key?(updated_state.running, issue_id)
+      assert Map.get(updated_state.workpads, issue_id) == "wp-comment-pr-attached"
+    after
+      File.rm_rf(test_root)
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+
+      case previous_enabled do
+        nil -> Application.delete_env(:symphony_elixir, :workpad_enabled)
+        value -> Application.put_env(:symphony_elixir, :workpad_enabled, value)
+      end
+    end
+  end
+
   test "non-active issue state stops running agent without cleaning workspace" do
     test_root =
       Path.join(

@@ -19,7 +19,8 @@ defmodule SymphonyElixir.Workpad do
                  :turn_cancelled,
                  :turn_input_required,
                  :approval_required,
-                 :turn_ended_with_error
+                 :turn_ended_with_error,
+                 :pr_attached
                ])
 
   @max_agent_text_chars 4_000
