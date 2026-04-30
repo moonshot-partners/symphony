@@ -224,6 +224,73 @@ defmodule SymphonyElixir.CoreTest do
     assert {:ok, []} = Client.fetch_issue_states_by_ids([])
   end
 
+  test "reconcile stops running agent and skips retry when issue has a PR attachment" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-attachment-reconcile-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-attached"
+    issue_identifier = "MT-PR-1"
+    workspace = Path.join(test_root, issue_identifier)
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: test_root,
+        tracker_active_states: ["Scheduled", "In Progress"],
+        tracker_terminal_states: ["Closed", "Done", "Cancelled"]
+      )
+
+      File.mkdir_p!(test_root)
+      File.mkdir_p!(workspace)
+
+      agent_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      state = %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: issue_identifier,
+            issue: %Issue{id: issue_id, state: "Scheduled", identifier: issue_identifier},
+            started_at: DateTime.utc_now()
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{},
+        workpads: %{issue_id => "wp-comment-1"}
+      }
+
+      refreshed_issue = %Issue{
+        id: issue_id,
+        identifier: issue_identifier,
+        state: "Scheduled",
+        title: "Already shipped",
+        description: "PR attached",
+        labels: [],
+        has_pr_attachment: true
+      }
+
+      updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+      refute Map.has_key?(updated_state.running, issue_id)
+      refute MapSet.member?(updated_state.claimed, issue_id)
+      refute Map.has_key?(updated_state.retry_attempts, issue_id)
+      refute Process.alive?(agent_pid)
+      assert File.exists?(workspace)
+      assert Map.get(updated_state.workpads, issue_id) == "wp-comment-1"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "non-active issue state stops running agent without cleaning workspace" do
     test_root =
       Path.join(
@@ -327,7 +394,8 @@ defmodule SymphonyElixir.CoreTest do
         },
         claimed: MapSet.new([issue_id]),
         agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-        retry_attempts: %{}
+        retry_attempts: %{},
+        workpads: %{issue_id => "wp-comment-terminal"}
       }
 
       issue = %Issue{
@@ -345,6 +413,7 @@ defmodule SymphonyElixir.CoreTest do
       refute MapSet.member?(updated_state.claimed, issue_id)
       refute Process.alive?(agent_pid)
       refute File.exists?(workspace)
+      refute Map.has_key?(updated_state.workpads, issue_id)
     after
       File.rm_rf(test_root)
     end

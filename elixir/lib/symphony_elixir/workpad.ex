@@ -27,18 +27,33 @@ defmodule SymphonyElixir.Workpad do
   @doc """
   Updates the running entry's `last_agent_text` from the latest update and,
   when the event warrants it, fires a supervised workpad sync.
-  Returns the updated running entry (synchronously updated fields only;
-  workpad_comment_id arrives later via `:workpad_comment_created`).
+  Returns the updated running entry. When a create_comment is dispatched the
+  returned entry carries `workpad_creating: true` so subsequent events arriving
+  before `:workpad_comment_created` skip a second create. The orchestrator
+  clears that flag (and stores the id) on the reply message.
   """
   @spec maybe_sync(map(), map(), pid()) :: map()
   def maybe_sync(running_entry, update, reply_to) when is_map(running_entry) and is_map(update) do
     running_entry = update_last_agent_text(running_entry, update)
 
-    if enabled?() and should_sync?(update) do
-      schedule_sync(running_entry, reply_to)
-    end
+    cond do
+      not (enabled?() and should_sync?(update)) ->
+        running_entry
 
-    running_entry
+      not is_binary(issue_id(running_entry)) ->
+        running_entry
+
+      is_binary(Map.get(running_entry, :workpad_comment_id)) ->
+        schedule_update(running_entry, reply_to)
+        running_entry
+
+      Map.get(running_entry, :workpad_creating) == true ->
+        running_entry
+
+      true ->
+        schedule_create(running_entry, reply_to)
+        Map.put(running_entry, :workpad_creating, true)
+    end
   end
 
   defp enabled? do
@@ -83,25 +98,36 @@ defmodule SymphonyElixir.Workpad do
 
   defp agent_message_text(_), do: nil
 
-  defp schedule_sync(running_entry, reply_to) do
+  defp schedule_create(running_entry, reply_to) do
     issue_id = issue_id(running_entry)
+    body = build_body(running_entry)
 
-    if is_binary(issue_id) do
-      body = build_body(running_entry)
-      comment_id = Map.get(running_entry, :workpad_comment_id)
-
-      Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-        sync_to_linear(issue_id, body, comment_id, reply_to)
-      end)
-    end
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      run_create(issue_id, body, reply_to)
+    end)
 
     :ok
   end
 
-  defp sync_to_linear(issue_id, body, nil, reply_to) do
+  defp schedule_update(running_entry, reply_to) do
+    issue_id = issue_id(running_entry)
+    comment_id = Map.get(running_entry, :workpad_comment_id)
+    body = build_body(running_entry)
+
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      run_update(issue_id, comment_id, body, reply_to)
+    end)
+
+    :ok
+  end
+
+  defp run_create(issue_id, body, reply_to) do
     case safely_call(fn -> Tracker.create_comment(issue_id, body) end) do
-      {:ok, comment_id} when is_binary(comment_id) and is_pid(reply_to) ->
-        send(reply_to, {:workpad_comment_created, issue_id, comment_id})
+      {:ok, comment_id} when is_binary(comment_id) ->
+        if is_pid(reply_to) do
+          send(reply_to, {:workpad_comment_created, issue_id, comment_id})
+        end
+
         :ok
 
       {:ok, _} ->
@@ -110,17 +136,25 @@ defmodule SymphonyElixir.Workpad do
       {:error, reason} ->
         Logger.warning("Workpad create failed issue_id=#{issue_id} reason=#{inspect(reason)}")
 
+        if is_pid(reply_to) do
+          send(reply_to, {:workpad_create_failed, issue_id, reason})
+        end
+
         :ok
     end
   end
 
-  defp sync_to_linear(_issue_id, body, comment_id, _reply_to) when is_binary(comment_id) do
+  defp run_update(issue_id, comment_id, body, reply_to) do
     case safely_call(fn -> Tracker.update_comment(comment_id, body) end) do
       :ok ->
         :ok
 
       {:error, reason} ->
         Logger.warning("Workpad update failed comment_id=#{comment_id} reason=#{inspect(reason)}")
+
+        if is_pid(reply_to) do
+          send(reply_to, {:workpad_update_failed, issue_id, comment_id, reason})
+        end
 
         :ok
     end

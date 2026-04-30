@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Orchestrator do
       completed: MapSet.new(),
       claimed: MapSet.new(),
       retry_attempts: %{},
+      workpads: %{},
       agent_totals: nil,
       agent_rate_limits: nil
     ]
@@ -206,14 +207,36 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:workpad_comment_created, issue_id, comment_id}, %{running: running} = state)
       when is_binary(issue_id) and is_binary(comment_id) do
+    state = %{state | workpads: Map.put(state.workpads, issue_id, comment_id)}
+
     case Map.get(running, issue_id) do
       nil ->
         {:noreply, state}
 
       running_entry ->
-        running_entry = Map.put(running_entry, :workpad_comment_id, comment_id)
+        running_entry =
+          running_entry
+          |> Map.put(:workpad_comment_id, comment_id)
+          |> Map.delete(:workpad_creating)
+
         {:noreply, %{state | running: Map.put(running, issue_id, running_entry)}}
     end
+  end
+
+  def handle_info({:workpad_create_failed, issue_id, _reason}, %{running: running} = state)
+      when is_binary(issue_id) do
+    case Map.get(running, issue_id) do
+      nil ->
+        {:noreply, state}
+
+      running_entry ->
+        running_entry = Map.delete(running_entry, :workpad_creating)
+        {:noreply, %{state | running: Map.put(running, issue_id, running_entry)}}
+    end
+  end
+
+  def handle_info({:workpad_update_failed, _issue_id, _comment_id, _reason}, state) do
+    {:noreply, state}
   end
 
   def handle_info({:retry_issue, issue_id, retry_token}, state) do
@@ -364,6 +387,11 @@ defmodule SymphonyElixir.Orchestrator do
 
         terminate_running_issue(state, issue.id, true)
 
+      has_pr_attachment?(issue) ->
+        Logger.info("Issue has a PR attachment: #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
+
+        terminate_running_issue(state, issue.id, false)
+
       !issue_routable_to_worker?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
@@ -446,11 +474,19 @@ defmodule SymphonyElixir.Orchestrator do
           Process.demonitor(ref, [:flush])
         end
 
+        workpads =
+          if cleanup_workspace do
+            Map.delete(state.workpads, issue_id)
+          else
+            state.workpads
+          end
+
         %{
           state
           | running: Map.delete(state.running, issue_id),
             claimed: MapSet.delete(state.claimed, issue_id),
-            retry_attempts: Map.delete(state.retry_attempts, issue_id)
+            retry_attempts: Map.delete(state.retry_attempts, issue_id),
+            workpads: workpads
         }
 
       _ ->
@@ -613,11 +649,15 @@ defmodule SymphonyElixir.Orchestrator do
        )
        when is_binary(id) and is_binary(identifier) and is_binary(title) and is_binary(state_name) do
     issue_routable_to_worker?(issue) and
+      not has_pr_attachment?(issue) and
       active_issue_state?(state_name, active_states) and
       !terminal_issue_state?(state_name, terminal_states)
   end
 
   defp candidate_issue?(_issue, _active_states, _terminal_states), do: false
+
+  defp has_pr_attachment?(%Issue{has_pr_attachment: true}), do: true
+  defp has_pr_attachment?(_), do: false
 
   defp issue_routable_to_worker?(%Issue{assigned_to_worker: assigned_to_worker})
        when is_boolean(assigned_to_worker),
@@ -733,7 +773,8 @@ defmodule SymphonyElixir.Orchestrator do
             agent_last_reported_total_tokens: 0,
             turn_count: 0,
             retry_attempt: normalize_retry_attempt(attempt),
-            started_at: DateTime.utc_now()
+            started_at: DateTime.utc_now(),
+            workpad_comment_id: Map.get(state.workpads, issue.id)
           })
 
         %{

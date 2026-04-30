@@ -131,6 +131,43 @@ defmodule SymphonyElixir.WorkpadTest do
     refute_receive {:memory_tracker_comment, _, _}, 200
   end
 
+  test "marks running entry as creating and skips a second create while the first is in flight" do
+    update_a = %{event: :session_started, timestamp: DateTime.utc_now()}
+    update_b = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+    entry = running_entry(%{last_agent_text: "first event"})
+    entry = Workpad.maybe_sync(entry, update_a, self())
+
+    assert entry.workpad_creating == true
+    assert entry.workpad_comment_id == nil
+
+    entry = Workpad.maybe_sync(entry, update_b, self())
+
+    assert entry.workpad_creating == true
+    assert entry.workpad_comment_id == nil
+
+    assert_receive {:memory_tracker_comment, "issue-wp", _}, 1_000
+    refute_receive {:memory_tracker_comment, _, _}, 200
+
+    assert_receive {:workpad_comment_created, "issue-wp", "memory-comment-issue-wp"}, 1_000
+  end
+
+  test "uses update_comment once workpad_comment_id is known and clears the creating flag" do
+    update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+    entry =
+      running_entry(%{
+        workpad_comment_id: "memory-comment-issue-wp",
+        workpad_creating: true,
+        last_agent_text: "with comment id"
+      })
+
+    Workpad.maybe_sync(entry, update, self())
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", _}, 1_000
+    refute_receive {:memory_tracker_comment, _, _}, 200
+  end
+
   test "extracts text from content blocks list" do
     update = %{
       event: :notification,
