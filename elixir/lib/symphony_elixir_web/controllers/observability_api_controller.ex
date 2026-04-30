@@ -18,6 +18,11 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
   end
 
+  @spec board(Conn.t(), map()) :: Conn.t()
+  def board(conn, _params) do
+    json(conn, Presenter.board_payload(orchestrator(), snapshot_timeout_ms()))
+  end
+
   @spec issue(Conn.t(), map()) :: Conn.t()
   def issue(conn, %{"issue_identifier" => issue_identifier}) do
     case Presenter.issue_payload(issue_identifier, orchestrator(), snapshot_timeout_ms()) do

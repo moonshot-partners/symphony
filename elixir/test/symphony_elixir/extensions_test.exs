@@ -16,7 +16,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     def fetch_issues_by_states(states) do
       send(self(), {:fetch_issues_by_states_called, states})
-      {:ok, states}
+
+      case Process.get({__MODULE__, :fetch_issues_by_states}) do
+        fun when is_function(fun, 1) -> fun.(states)
+        _ -> {:ok, states}
+      end
     end
 
     def fetch_issue_states_by_ids(issue_ids) do
@@ -736,6 +740,53 @@ defmodule SymphonyElixir.ExtensionsTest do
 
       assert payload.error.code == "linear_unavailable"
       assert Enum.all?(payload.columns, &(&1.issues == []))
+    end
+  end
+
+  describe "GET /api/v1/board" do
+    test "returns board payload as JSON" do
+      Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
+      Process.put({FakeLinearClient, :graphql_result}, nil)
+
+      Process.put({FakeLinearClient, :fetch_issues_by_states}, fn _states ->
+        {:ok,
+         [
+           %SymphonyElixir.Linear.Issue{
+             id: "ix",
+             identifier: "SODEV-100",
+             title: "Test",
+             state: "Todo",
+             url: "u",
+             priority: 1,
+             assignee_id: nil,
+             assignee_name: nil,
+             assignee_display_name: nil,
+             labels: [],
+             has_pr_attachment: false
+           }
+         ]}
+      end)
+
+      orch_name = Module.concat(__MODULE__, :BoardOrchestrator)
+
+      {:ok, _orch} =
+        StaticOrchestrator.start_link(
+          name: orch_name,
+          snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}
+        )
+
+      start_test_endpoint(orchestrator: orch_name, snapshot_timeout_ms: 50)
+
+      payload = json_response(get(build_conn(), "/api/v1/board"), 200)
+
+      assert length(payload["columns"]) == 3
+
+      todo_issues =
+        payload["columns"]
+        |> Enum.find(&(&1["key"] == "todo"))
+        |> Map.fetch!("issues")
+
+      assert hd(todo_issues)["identifier"] == "SODEV-100"
     end
   end
 
