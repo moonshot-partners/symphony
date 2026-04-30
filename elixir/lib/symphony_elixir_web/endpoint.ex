@@ -16,5 +16,6 @@ defmodule SymphonyElixirWeb.Endpoint do
 
   plug(Plug.MethodOverride)
   plug(Plug.Head)
+  plug(SymphonyElixirWeb.Plugs.CORS)
   plug(SymphonyElixirWeb.Router)
 end

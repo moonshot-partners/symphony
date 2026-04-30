@@ -780,6 +780,60 @@ defmodule SymphonyElixir.ExtensionsTest do
     end
   end
 
+  describe "CORS for /api/v1/*" do
+    test "OPTIONS /api/v1/board returns 204 with allow-origin headers when origin matches" do
+      orch_name = Module.concat(__MODULE__, :CorsPreflightOrchestrator)
+
+      {:ok, _orch} =
+        StaticOrchestrator.start_link(
+          name: orch_name,
+          snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}
+        )
+
+      start_test_endpoint(orchestrator: orch_name, snapshot_timeout_ms: 50)
+
+      conn =
+        build_conn()
+        |> Plug.Conn.put_req_header("origin", "http://localhost:3000")
+        |> Plug.Conn.put_req_header("access-control-request-method", "GET")
+        |> dispatch(@endpoint, :options, "/api/v1/board")
+
+      assert conn.status == 204
+
+      assert Plug.Conn.get_resp_header(conn, "access-control-allow-origin") ==
+               ["http://localhost:3000"]
+
+      [methods] = Plug.Conn.get_resp_header(conn, "access-control-allow-methods")
+      assert "GET" in String.split(methods, ", ")
+    end
+
+    test "GET /api/v1/board includes allow-origin when origin matches" do
+      Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
+      Process.put({FakeLinearClient, :graphql_result}, nil)
+      Process.put({FakeLinearClient, :fetch_issues_by_states}, fn _ -> {:ok, []} end)
+
+      orch_name = Module.concat(__MODULE__, :CorsBoardOrchestrator)
+
+      {:ok, _orch} =
+        StaticOrchestrator.start_link(
+          name: orch_name,
+          snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}
+        )
+
+      start_test_endpoint(orchestrator: orch_name, snapshot_timeout_ms: 50)
+
+      conn =
+        build_conn()
+        |> Plug.Conn.put_req_header("origin", "http://localhost:3000")
+        |> get("/api/v1/board")
+
+      assert json_response(conn, 200)
+
+      assert Plug.Conn.get_resp_header(conn, "access-control-allow-origin") ==
+               ["http://localhost:3000"]
+    end
+  end
+
   describe "GET /api/v1/board" do
     test "returns board payload as JSON" do
       Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
