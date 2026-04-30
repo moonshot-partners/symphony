@@ -9,7 +9,7 @@ defmodule SymphonyElixirWeb.Plugs.CORS do
 
   import Plug.Conn
 
-  @default_origins ["http://localhost:3000"]
+  @default_origins ["http://localhost:3000", "http://localhost:3100"]
   @allow_methods "GET, POST, OPTIONS"
   @allow_headers "content-type, accept, cache-control"
 
