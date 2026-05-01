@@ -6,7 +6,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
-  alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
+  alias SymphonyElixirWeb.{BoardCache, Endpoint, ObservabilityPubSub, Presenter}
 
   @spec healthz(Conn.t(), map()) :: Conn.t()
   def healthz(conn, _params) do
@@ -20,7 +20,14 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec board(Conn.t(), map()) :: Conn.t()
   def board(conn, _params) do
-    json(conn, Presenter.board_payload(orchestrator(), snapshot_timeout_ms()))
+    payload =
+      BoardCache.fetch(fn ->
+        Presenter.board_payload(orchestrator(), snapshot_timeout_ms())
+      end)
+
+    conn
+    |> put_resp_header("cache-control", "public, max-age=0, must-revalidate")
+    |> json(payload)
   end
 
   @spec stream(Conn.t(), map()) :: Conn.t()

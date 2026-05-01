@@ -913,6 +913,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}
         )
 
+      SymphonyElixirWeb.BoardCache.clear()
       start_test_endpoint(orchestrator: orch_name, snapshot_timeout_ms: 50)
 
       payload = json_response(get(build_conn(), "/api/v1/board"), 200)

@@ -91,6 +91,45 @@ defmodule SymphonyElixirWeb.PresenterPrEnrichmentTest do
     assert card.repos == [%{name: "a", pr: pr}]
   end
 
+  test "board_payload enriches PRs in parallel" do
+    Application.put_env(
+      :symphony_elixir,
+      :pr_status_fetcher,
+      fn _url ->
+        Process.sleep(50)
+        {:ok, %{merged: false, review: nil}}
+      end
+    )
+
+    issues =
+      for i <- 1..8 do
+        %{
+          issue([
+            %{
+              name: "r#{i}",
+              pr: %{
+                url: "https://github.com/me/r#{i}/pull/1",
+                merged: false,
+                review: nil
+              }
+            }
+          ])
+          | id: "i#{i}",
+            identifier: "SODEV-#{i}"
+        }
+      end
+
+    {elapsed_us, payload} =
+      :timer.tc(fn ->
+        Presenter.board_payload(fn -> {:ok, issues} end, orch_name(), 1_000)
+      end)
+
+    cards = Enum.flat_map(payload.columns, & &1.issues)
+    assert length(cards) == 8
+    assert div(elapsed_us, 1_000) < 200,
+           "expected parallel enrichment under 200ms, got #{div(elapsed_us, 1_000)}ms"
+  end
+
   test "board_payload completed+all_merged routes to done after enrichment" do
     Application.put_env(
       :symphony_elixir,

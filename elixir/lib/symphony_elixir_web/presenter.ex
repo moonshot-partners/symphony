@@ -3,6 +3,7 @@ defmodule SymphonyElixirWeb.Presenter do
   Shared projections for the observability API and dashboard.
   """
 
+  require Logger
   alias SymphonyElixir.{Config, Orchestrator, StatusDashboard}
   alias SymphonyElixir.GitHub.PrStatus
 
@@ -94,7 +95,7 @@ defmodule SymphonyElixirWeb.Presenter do
       {:ok, issues} ->
         running_index = build_running_index(snapshot)
         retrying_index = build_retrying_index(snapshot)
-        enriched = Enum.map(issues, &enrich_issue_repos(&1, pr_status_fetcher))
+        enriched = parallel_enrich_issues(issues, pr_status_fetcher)
 
         %{
           generated_at: generated_at,
@@ -117,23 +118,74 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
-  defp enrich_issue_repos(%{repos: repos} = issue, fetcher) when is_list(repos) do
-    %{issue | repos: Enum.map(repos, &enrich_repo(&1, fetcher))}
-  end
+  @pr_enrich_concurrency 8
+  @pr_enrich_timeout_ms 5_000
 
-  defp enrich_issue_repos(issue, _fetcher), do: issue
+  defp parallel_enrich_issues(issues, fetcher) when is_list(issues) do
+    pr_targets = collect_pr_targets(issues)
 
-  defp enrich_repo(%{pr: %{url: url} = pr} = repo, fetcher) when is_binary(url) do
-    case fetcher.(url) do
-      {:ok, %{merged: merged, review: review}} ->
-        %{repo | pr: %{pr | merged: merged, review: review}}
+    case pr_targets do
+      [] ->
+        issues
 
       _ ->
-        repo
+        url_results = fetch_pr_status_in_parallel(pr_targets, fetcher)
+        Enum.map(issues, &apply_pr_results_to_issue(&1, url_results))
     end
   end
 
-  defp enrich_repo(repo, _fetcher), do: repo
+  defp collect_pr_targets(issues) do
+    issues
+    |> Enum.flat_map(fn
+      %{repos: repos} when is_list(repos) ->
+        Enum.flat_map(repos, fn
+          %{pr: %{url: url}} when is_binary(url) -> [url]
+          _ -> []
+        end)
+
+      _ ->
+        []
+    end)
+    |> Enum.uniq()
+  end
+
+  defp fetch_pr_status_in_parallel(urls, fetcher) do
+    urls
+    |> Task.async_stream(
+      fn url -> {url, fetcher.(url)} end,
+      max_concurrency: @pr_enrich_concurrency,
+      timeout: @pr_enrich_timeout_ms,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.reduce(%{}, fn
+      {:ok, {url, {:ok, status}}}, acc ->
+        Map.put(acc, url, status)
+
+      {:ok, {url, {:error, reason}}}, acc ->
+        Logger.warning("PR status fetch failed url=#{url} reason=#{inspect(reason)}")
+        acc
+
+      {:exit, reason}, acc ->
+        Logger.warning("PR status fetch task exit reason=#{inspect(reason)}")
+        acc
+    end)
+  end
+
+  defp apply_pr_results_to_issue(%{repos: repos} = issue, url_results) when is_list(repos) do
+    %{issue | repos: Enum.map(repos, &apply_pr_result_to_repo(&1, url_results))}
+  end
+
+  defp apply_pr_results_to_issue(issue, _url_results), do: issue
+
+  defp apply_pr_result_to_repo(%{pr: %{url: url} = pr} = repo, url_results) when is_binary(url) do
+    case Map.get(url_results, url) do
+      %{merged: merged, review: review} -> %{repo | pr: %{pr | merged: merged, review: review}}
+      _ -> repo
+    end
+  end
+
+  defp apply_pr_result_to_repo(repo, _url_results), do: repo
 
   defp build_running_index(%{running: running}) when is_list(running),
     do: Map.new(running, &{&1.issue_id, &1})
