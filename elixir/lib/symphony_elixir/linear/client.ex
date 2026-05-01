@@ -487,7 +487,7 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
 
-  @github_pr_url ~r{^https://github\.com/[^/]+/[^/]+/pull/\d+(?:/|$)}i
+  @github_pr_url ~r{^https://github\.com/[^/]+/(?<repo>[^/]+)/pull/\d+(?:/|$)}i
 
   defp pr_attachment?(%{"attachments" => %{"nodes" => nodes}}) when is_list(nodes) do
     Enum.any?(nodes, fn
@@ -497,6 +497,34 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp pr_attachment?(_issue), do: false
+
+  @doc """
+  Extracts GitHub PR attachments from a raw Linear issue payload into the
+  normalized `[%{name, pr: %{url, merged, review}}]` shape consumed by the board
+  presenter. Non-PR URLs are ignored. Duplicate PR URLs collapse to one entry.
+  Merge/review fields default to `false`/`nil` and are filled by
+  `Symphony.GitHub.PrStatus` enrichment downstream.
+  """
+  @spec extract_repos(map()) :: [SymphonyElixir.Linear.Issue.repo()]
+  def extract_repos(%{"attachments" => %{"nodes" => nodes}}) when is_list(nodes) do
+    nodes
+    |> Enum.flat_map(fn
+      %{"url" => url} when is_binary(url) ->
+        case Regex.named_captures(@github_pr_url, url) do
+          %{"repo" => repo} -> [{repo, url}]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.uniq_by(fn {_repo, url} -> url end)
+    |> Enum.map(fn {repo, url} ->
+      %{name: repo, pr: %{url: url, merged: false, review: nil}}
+    end)
+  end
+
+  def extract_repos(_issue), do: []
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil
