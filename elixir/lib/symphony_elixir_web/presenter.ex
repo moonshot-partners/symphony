@@ -4,6 +4,7 @@ defmodule SymphonyElixirWeb.Presenter do
   """
 
   alias SymphonyElixir.{Config, Orchestrator, StatusDashboard}
+  alias SymphonyElixir.GitHub.PrStatus
 
   @spec state_payload(GenServer.name(), timeout()) :: map()
   def state_payload(orchestrator, snapshot_timeout_ms) do
@@ -85,15 +86,17 @@ defmodule SymphonyElixirWeb.Presenter do
   def board_payload(fetcher, orchestrator, snapshot_timeout_ms) when is_function(fetcher, 0) do
     generated_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
     snapshot = Orchestrator.snapshot(orchestrator, snapshot_timeout_ms)
+    pr_status_fetcher = pr_status_fetcher()
 
     case fetcher.() do
       {:ok, issues} ->
         running_index = build_running_index(snapshot)
         retrying_index = build_retrying_index(snapshot)
+        enriched = Enum.map(issues, &enrich_issue_repos(&1, pr_status_fetcher))
 
         %{
           generated_at: generated_at,
-          columns: build_board_columns(issues, running_index, retrying_index)
+          columns: build_board_columns(enriched, running_index, retrying_index)
         }
 
       {:error, _reason} ->
@@ -104,6 +107,31 @@ defmodule SymphonyElixirWeb.Presenter do
         }
     end
   end
+
+  defp pr_status_fetcher do
+    case Application.get_env(:symphony_elixir, :pr_status_fetcher) do
+      fun when is_function(fun, 1) -> fun
+      _ -> &PrStatus.fetch_for_url/1
+    end
+  end
+
+  defp enrich_issue_repos(%{repos: repos} = issue, fetcher) when is_list(repos) do
+    %{issue | repos: Enum.map(repos, &enrich_repo(&1, fetcher))}
+  end
+
+  defp enrich_issue_repos(issue, _fetcher), do: issue
+
+  defp enrich_repo(%{pr: %{url: url} = pr} = repo, fetcher) when is_binary(url) do
+    case fetcher.(url) do
+      {:ok, %{merged: merged, review: review}} ->
+        %{repo | pr: %{pr | merged: merged, review: review}}
+
+      _ ->
+        repo
+    end
+  end
+
+  defp enrich_repo(repo, _fetcher), do: repo
 
   defp build_running_index(%{running: running}) when is_list(running),
     do: Map.new(running, &{&1.issue_id, &1})
