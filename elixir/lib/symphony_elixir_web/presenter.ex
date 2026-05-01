@@ -68,11 +68,13 @@ defmodule SymphonyElixirWeb.Presenter do
     %{key: "done", label: "Done", linear_states: ["Done", "Cancelled", "Canceled", "Duplicate"]}
   ]
 
+  @board_workspace_limit 100
+
   @spec board_payload(GenServer.name(), timeout()) :: map()
   def board_payload(orchestrator, snapshot_timeout_ms) do
     fetcher = fn ->
       states = Enum.flat_map(@board_columns, & &1.linear_states)
-      SymphonyElixir.Tracker.fetch_issues_by_states(states)
+      SymphonyElixir.Tracker.fetch_all_issues_by_states(states, @board_workspace_limit)
     end
 
     board_payload(fetcher, orchestrator, snapshot_timeout_ms)
@@ -150,18 +152,31 @@ defmodule SymphonyElixirWeb.Presenter do
   end
 
   defp build_board_columns(issues, running_index, retrying_index) do
-    payloads =
+    issues_with_column =
       issues
       |> Enum.map(&{compute_column(&1), &1})
       |> Enum.reject(fn {column, _} -> column == nil end)
-      |> Enum.map(fn {column, issue} ->
-        board_issue_payload(issue, column, running_index, retrying_index)
-      end)
 
     Enum.map(@board_columns, fn %{key: k, label: l, linear_states: states} ->
-      column_issues = Enum.filter(payloads, &(&1.column == k))
+      column_issues =
+        issues_with_column
+        |> Enum.filter(fn {column, _} -> column == k end)
+        |> Enum.sort(&compare_desc_created_at/2)
+        |> Enum.map(fn {column, issue} ->
+          board_issue_payload(issue, column, running_index, retrying_index)
+        end)
+
       %{key: k, label: l, linear_states: states, issues: column_issues}
     end)
+  end
+
+  defp compare_desc_created_at({_, %{created_at: a}}, {_, %{created_at: b}}) do
+    case {a, b} do
+      {nil, nil} -> true
+      {nil, _} -> false
+      {_, nil} -> true
+      {%DateTime{} = da, %DateTime{} = db} -> DateTime.compare(da, db) != :lt
+    end
   end
 
   defp compute_column(%{state_type: type, repos: repos} = issue) do

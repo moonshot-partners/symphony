@@ -23,6 +23,15 @@ defmodule SymphonyElixir.ExtensionsTest do
       end
     end
 
+    def fetch_all_issues_by_states(states, limit) do
+      send(self(), {:fetch_all_issues_by_states_called, states, limit})
+
+      case fetch_issues_by_states(states) do
+        {:ok, issues} -> {:ok, Enum.take(issues, limit)}
+        other -> other
+      end
+    end
+
     def fetch_issue_states_by_ids(issue_ids) do
       send(self(), {:fetch_issue_states_by_ids_called, issue_ids})
       {:ok, issue_ids}
@@ -83,11 +92,24 @@ defmodule SymphonyElixir.ExtensionsTest do
   setup do
     linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
 
+    linear_board_client_module =
+      Application.get_env(:symphony_elixir, :linear_board_client_module)
+
     on_exit(fn ->
       if is_nil(linear_client_module) do
         Application.delete_env(:symphony_elixir, :linear_client_module)
       else
         Application.put_env(:symphony_elixir, :linear_client_module, linear_client_module)
+      end
+
+      if is_nil(linear_board_client_module) do
+        Application.delete_env(:symphony_elixir, :linear_board_client_module)
+      else
+        Application.put_env(
+          :symphony_elixir,
+          :linear_board_client_module,
+          linear_board_client_module
+        )
       end
     end)
 
@@ -861,6 +883,7 @@ defmodule SymphonyElixir.ExtensionsTest do
   describe "GET /api/v1/board" do
     test "returns board payload as JSON" do
       Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
+      Application.put_env(:symphony_elixir, :linear_board_client_module, FakeLinearClient)
       Process.put({FakeLinearClient, :graphql_result}, nil)
 
       Process.put({FakeLinearClient, :fetch_issues_by_states}, fn _states ->

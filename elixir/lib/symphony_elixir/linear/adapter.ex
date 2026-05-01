@@ -5,7 +5,7 @@ defmodule SymphonyElixir.Linear.Adapter do
 
   @behaviour SymphonyElixir.Tracker
 
-  alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.Linear.{BoardClient, Client}
 
   @create_comment_mutation """
   mutation SymphonyCreateComment($issueId: String!, $body: String!) {
@@ -53,6 +53,11 @@ defmodule SymphonyElixir.Linear.Adapter do
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
   def fetch_issues_by_states(states), do: client_module().fetch_issues_by_states(states)
+
+  @spec fetch_all_issues_by_states([String.t()], pos_integer()) ::
+          {:ok, [term()]} | {:error, term()}
+  def fetch_all_issues_by_states(states, limit),
+    do: board_client_module().fetch_all_issues_by_states(states, limit)
 
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
   def fetch_issue_states_by_ids(issue_ids), do: client_module().fetch_issue_states_by_ids(issue_ids)
@@ -112,6 +117,10 @@ defmodule SymphonyElixir.Linear.Adapter do
 
   defp client_module do
     Application.get_env(:symphony_elixir, :linear_client_module, Client)
+  end
+
+  defp board_client_module do
+    Application.get_env(:symphony_elixir, :linear_board_client_module, BoardClient)
   end
 
   defp resolve_state_id(issue_id, state_name) do
