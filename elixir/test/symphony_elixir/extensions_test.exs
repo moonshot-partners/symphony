@@ -817,7 +817,7 @@ defmodule SymphonyElixir.ExtensionsTest do
         )
       end)
 
-      Process.sleep(150)
+      assert_receive {:sse_chunk, ":ok\n\n"}, 1_500
 
       assert :ok = SymphonyElixirWeb.ObservabilityPubSub.broadcast_update()
 

@@ -31,9 +31,22 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     |> put_resp_header("content-type", "text/event-stream")
     |> put_resp_header("cache-control", "no-cache")
     |> put_resp_header("connection", "keep-alive")
+    |> put_resp_header("x-accel-buffering", "no")
     |> Conn.send_chunked(200)
+    |> sse_initial_chunk()
     |> sse_loop()
   end
+
+  defp sse_initial_chunk(conn) do
+    case Conn.chunk(conn, ":ok\n\n") do
+      {:ok, conn} -> conn
+      {:error, _closed} -> conn
+    end
+  end
+
+  # Firefox aborts the fetch ReadableStream with `TypeError: Error in input stream`
+  # when SSE keepalives go above ~7.5s. Keep the heartbeat at 5s for compatibility.
+  @sse_heartbeat_ms 5_000
 
   defp sse_loop(conn) do
     receive do
@@ -43,7 +56,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
           {:error, _closed} -> conn
         end
     after
-      15_000 ->
+      @sse_heartbeat_ms ->
         case Conn.chunk(conn, ":heartbeat\n\n") do
           {:ok, conn} -> sse_loop(conn)
           {:error, _closed} -> conn
