@@ -681,8 +681,8 @@ defmodule SymphonyElixir.ExtensionsTest do
         )
 
       assert is_binary(payload.generated_at)
-      assert length(payload.columns) == 3
-      [todo, in_progress, done] = payload.columns
+      assert length(payload.columns) == 4
+      [todo, in_progress, in_review, done] = payload.columns
 
       assert todo.key == "todo"
       assert Enum.map(todo.issues, & &1.identifier) == ["SODEV-1"]
@@ -693,6 +693,9 @@ defmodule SymphonyElixir.ExtensionsTest do
       assert active.agent_status.running == true
       assert active.agent_status.turn_count == 7
       assert active.agent_status.last_event == "writing test"
+
+      assert in_review.key == "in_review"
+      assert in_review.issues == []
 
       assert done.key == "done"
       assert hd(done.issues).agent_status == nil
@@ -743,7 +746,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           1_000
         )
 
-      [_todo, in_progress, _done] = payload.columns
+      [_todo, in_progress, _in_review, _done] = payload.columns
       [issue] = in_progress.issues
       assert issue.agent_status.running == false
       assert issue.agent_status.retry_attempt == 2
@@ -891,7 +894,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
       payload = json_response(get(build_conn(), "/api/v1/board"), 200)
 
-      assert length(payload["columns"]) == 3
+      assert length(payload["columns"]) == 4
 
       todo_issues =
         payload["columns"]

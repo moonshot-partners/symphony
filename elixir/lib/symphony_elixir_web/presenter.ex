@@ -62,7 +62,8 @@ defmodule SymphonyElixirWeb.Presenter do
 
   @board_columns [
     %{key: "todo", label: "Todo", linear_states: ["Backlog", "Todo"]},
-    %{key: "in_progress", label: "In Progress", linear_states: ["In Progress", "In Review"]},
+    %{key: "in_progress", label: "In Progress", linear_states: ["In Progress"]},
+    %{key: "in_review", label: "In Review", linear_states: ["In Review"]},
     %{key: "done", label: "Done", linear_states: ["Done", "Cancelled", "Canceled", "Duplicate"]}
   ]
 
@@ -121,26 +122,65 @@ defmodule SymphonyElixirWeb.Presenter do
   end
 
   defp build_board_columns(issues, running_index, retrying_index) do
-    Enum.map(@board_columns, fn %{key: k, label: l, linear_states: states} ->
-      column_issues =
-        issues
-        |> Enum.filter(&(&1.state in states))
-        |> Enum.map(&board_issue_payload(&1, running_index, retrying_index))
+    payloads =
+      issues
+      |> Enum.map(&{compute_column(&1), &1})
+      |> Enum.reject(fn {column, _} -> column == nil end)
+      |> Enum.map(fn {column, issue} ->
+        board_issue_payload(issue, column, running_index, retrying_index)
+      end)
 
+    Enum.map(@board_columns, fn %{key: k, label: l, linear_states: states} ->
+      column_issues = Enum.filter(payloads, &(&1.column == k))
       %{key: k, label: l, linear_states: states, issues: column_issues}
     end)
   end
 
-  defp board_issue_payload(issue, running_index, retrying_index) do
+  defp compute_column(%{state_type: type, repos: repos} = issue) do
+    state = legacy_state(issue)
+    has_open_pr = Enum.any?(repos, fn r -> r.pr != nil and r.pr.merged != true end)
+    all_merged = repos != [] and Enum.all?(repos, fn r -> r.pr != nil and r.pr.merged end)
+
+    cond do
+      type == "completed" and all_merged -> "done"
+      type == "completed" -> "in_review"
+      type == "started" and has_open_pr -> "in_review"
+      type == "started" -> "in_progress"
+      type in ["backlog", "unstarted", "triage"] -> "todo"
+      type == "canceled" -> nil
+      true -> column_from_legacy_state(state)
+    end
+  end
+
+  defp legacy_state(%{state: state}), do: state
+
+  defp column_from_legacy_state(state) when is_binary(state) do
+    cond do
+      state in ["Backlog", "Todo"] -> "todo"
+      state == "In Progress" -> "in_progress"
+      state == "In Review" -> "in_review"
+      state in ["Done", "Cancelled", "Canceled", "Duplicate"] -> "done"
+      true -> "todo"
+    end
+  end
+
+  defp column_from_legacy_state(_), do: "todo"
+
+  defp board_issue_payload(issue, column, running_index, retrying_index) do
     %{
       id: issue.id,
       identifier: issue.identifier,
       title: issue.title,
       url: issue.url,
       state: issue.state,
+      state_type: issue.state_type,
+      column: column,
       priority: issue.priority,
       labels: issue.labels,
+      blocked_by: issue.blocked_by,
+      repos: issue.repos,
       has_pr_attachment: issue.has_pr_attachment,
+      created_at: iso8601(issue.created_at),
       assignee: assignee_payload(issue),
       agent_status: agent_status_payload(issue.id, running_index, retrying_index)
     }
