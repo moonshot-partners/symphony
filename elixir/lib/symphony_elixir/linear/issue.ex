@@ -17,12 +17,19 @@ defmodule SymphonyElixir.Linear.Issue do
     :assignee_display_name,
     blocked_by: [],
     labels: [],
+    repos: [],
+    state_type: nil,
+    column: nil,
     assigned_to_worker: true,
     has_pr_attachment: false,
-    pr_url: nil,
     created_at: nil,
     updated_at: nil
   ]
+
+  @type repo :: %{
+          required(:name) => String.t(),
+          required(:pr) => nil | %{required(:url) => String.t(), optional(atom()) => any()}
+        }
 
   @type t :: %__MODULE__{
           id: String.t() | nil,
@@ -37,9 +44,11 @@ defmodule SymphonyElixir.Linear.Issue do
           assignee_name: String.t() | nil,
           assignee_display_name: String.t() | nil,
           labels: [String.t()],
+          repos: [repo()],
+          state_type: String.t() | nil,
+          column: String.t() | nil,
           assigned_to_worker: boolean(),
           has_pr_attachment: boolean(),
-          pr_url: String.t() | nil,
           created_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
