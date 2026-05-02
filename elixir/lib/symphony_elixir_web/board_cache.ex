@@ -67,12 +67,13 @@ defmodule SymphonyElixirWeb.BoardCache do
 
   @impl true
   def init(opts) do
-    table = :ets.new(:"#{Keyword.get(opts, :name, __MODULE__)}_table", [
-      :named_table,
-      :set,
-      :public,
-      read_concurrency: true
-    ])
+    table =
+      :ets.new(:"#{Keyword.get(opts, :name, __MODULE__)}_table", [
+        :named_table,
+        :set,
+        :public,
+        read_concurrency: true
+      ])
 
     state = %{
       table: table,

@@ -131,9 +131,6 @@ defmodule SymphonyElixir.Workpad do
 
         :ok
 
-      {:ok, _} ->
-        :ok
-
       {:error, reason} ->
         Logger.warning("Workpad create failed issue_id=#{issue_id} reason=#{inspect(reason)}")
 

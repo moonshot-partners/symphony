@@ -13,8 +13,10 @@ defmodule SymphonyElixirWeb.Plugs.CORS do
   @allow_methods "GET, POST, OPTIONS"
   @allow_headers "content-type, accept, cache-control"
 
+  @spec init(Plug.opts()) :: Plug.opts()
   def init(opts), do: opts
 
+  @spec call(Plug.Conn.t(), Plug.opts()) :: Plug.Conn.t()
   def call(%Plug.Conn{request_path: "/api/v1/" <> _} = conn, _opts) do
     handle(conn)
   end
@@ -23,25 +25,24 @@ defmodule SymphonyElixirWeb.Plugs.CORS do
 
   defp handle(conn) do
     case origin(conn) do
-      nil ->
-        conn
-
-      origin ->
-        if allowed?(origin) do
-          conn = put_cors_headers(conn, origin)
-
-          if conn.method == "OPTIONS" do
-            conn
-            |> send_resp(204, "")
-            |> halt()
-          else
-            conn
-          end
-        else
-          conn
-        end
+      nil -> conn
+      origin -> apply_cors(conn, origin)
     end
   end
+
+  defp apply_cors(conn, origin) do
+    if allowed?(origin) do
+      conn |> put_cors_headers(origin) |> maybe_short_circuit_preflight()
+    else
+      conn
+    end
+  end
+
+  defp maybe_short_circuit_preflight(%Plug.Conn{method: "OPTIONS"} = conn) do
+    conn |> send_resp(204, "") |> halt()
+  end
+
+  defp maybe_short_circuit_preflight(conn), do: conn
 
   defp origin(conn) do
     case get_req_header(conn, "origin") do

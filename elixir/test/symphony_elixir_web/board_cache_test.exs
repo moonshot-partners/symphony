@@ -81,5 +81,4 @@ defmodule SymphonyElixirWeb.BoardCacheTest do
     Process.sleep(80)
     assert :counters.get(counter, 1) <= 2
   end
-
 end

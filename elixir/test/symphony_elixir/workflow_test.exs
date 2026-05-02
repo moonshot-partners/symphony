@@ -53,5 +53,11 @@ defmodule SymphonyElixir.WorkflowTest do
       System.put_env("SYMPHONY_WORKFLOW_FILE", "/tmp/os-env-loses.md")
       assert Workflow.workflow_file_path() == "/tmp/app-env-wins.md"
     end
+
+    test "empty SYMPHONY_WORKFLOW_FILE falls back to cwd-relative WORKFLOW.md" do
+      System.put_env("SYMPHONY_WORKFLOW_FILE", "")
+      expected = Path.join(File.cwd!(), "WORKFLOW.md")
+      assert Workflow.workflow_file_path() == expected
+    end
   end
 end

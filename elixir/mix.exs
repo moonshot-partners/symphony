@@ -30,7 +30,12 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixirWeb.ObservabilityApiController,
           SymphonyElixirWeb.Presenter,
           SymphonyElixirWeb.Router,
-          SymphonyElixirWeb.Router.Helpers
+          SymphonyElixirWeb.Router.Helpers,
+          SymphonyElixir.Linear.BoardClient,
+          SymphonyElixir.GitHub.PrStatus,
+          SymphonyElixirWeb.BoardCache,
+          SymphonyElixir.Workpad,
+          SymphonyElixirWeb.Plugs.CORS
         ]
       ],
       test_ignore_filters: [

@@ -232,6 +232,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert :ok = Memory.update_comment("memory-comment-issue-1", "muted")
     assert :ok = Memory.update_issue_state("issue-1", "Quiet")
 
+    assert {:ok, [^issue]} = Memory.fetch_all_issues_by_states(["In Progress"], 5)
+    assert {:ok, []} = Memory.fetch_all_issues_by_states(["NoSuchState"], 5)
+
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
     assert SymphonyElixir.Tracker.adapter() == Adapter
   end
@@ -311,6 +314,9 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Process.put({FakeLinearClient, :graphql_result}, {:ok, %{"data" => %{}}})
     assert {:error, :comment_update_failed} = Adapter.update_comment("comment-1", "empty")
+
+    Process.put({FakeLinearClient, :graphql_result}, :unexpected)
+    assert {:error, :comment_update_failed} = Adapter.update_comment("comment-1", "odd")
 
     Process.put(
       {FakeLinearClient, :graphql_results},
@@ -800,7 +806,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     test "emits board_updated SSE on PubSub broadcast" do
       orch_name = Module.concat(__MODULE__, :StreamOrchestrator)
 
-      start_supervised!({StaticOrchestrator, name: orch_name, snapshot: %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}})
+      snapshot = %{running: [], retrying: [], agent_totals: %{}, rate_limits: nil}
+      start_supervised!({StaticOrchestrator, name: orch_name, snapshot: snapshot})
 
       start_supervised!({HttpServer, host: "127.0.0.1", port: 0, orchestrator: orch_name, snapshot_timeout_ms: 50})
 

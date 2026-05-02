@@ -232,20 +232,20 @@ defmodule SymphonyElixirWeb.Presenter do
   end
 
   defp compute_column(%{state_type: type, repos: repos} = issue) do
-    state = legacy_state(issue)
-    has_open_pr = Enum.any?(repos, fn r -> r.pr != nil and r.pr.merged != true end)
-    all_merged = repos != [] and Enum.all?(repos, fn r -> r.pr != nil and r.pr.merged end)
-
-    cond do
-      type == "completed" and all_merged -> "done"
-      type == "completed" -> "in_review"
-      type == "started" and has_open_pr -> "in_review"
-      type == "started" -> "in_progress"
-      type in ["backlog", "unstarted", "triage"] -> "todo"
-      type == "canceled" -> nil
-      true -> column_from_legacy_state(state)
+    case column_for_state_type(type, repos) do
+      :unmatched -> column_from_legacy_state(legacy_state(issue))
+      column -> column
     end
   end
+
+  defp column_for_state_type("completed", repos), do: if(all_merged?(repos), do: "done", else: "in_review")
+  defp column_for_state_type("started", repos), do: if(has_open_pr?(repos), do: "in_review", else: "in_progress")
+  defp column_for_state_type(type, _repos) when type in ["backlog", "unstarted", "triage"], do: "todo"
+  defp column_for_state_type("canceled", _repos), do: nil
+  defp column_for_state_type(_type, _repos), do: :unmatched
+
+  defp has_open_pr?(repos), do: Enum.any?(repos, fn r -> r.pr != nil and r.pr.merged != true end)
+  defp all_merged?(repos), do: repos != [] and Enum.all?(repos, fn r -> r.pr != nil and r.pr.merged end)
 
   defp legacy_state(%{state: state}), do: state
 

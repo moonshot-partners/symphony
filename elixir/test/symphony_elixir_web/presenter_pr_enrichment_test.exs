@@ -126,6 +126,7 @@ defmodule SymphonyElixirWeb.PresenterPrEnrichmentTest do
 
     cards = Enum.flat_map(payload.columns, & &1.issues)
     assert length(cards) == 8
+
     assert div(elapsed_us, 1_000) < 200,
            "expected parallel enrichment under 200ms, got #{div(elapsed_us, 1_000)}ms"
   end
