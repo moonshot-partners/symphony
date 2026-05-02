@@ -194,6 +194,44 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 
+## Observability (OpenTelemetry → Honeycomb)
+
+`claude-agent-sdk` (Python shim) emits OTel spans for tool calls, token counts,
+and latency. Symphony enables them through env vars sourced by
+`~/.symphony/launch.sh` and inherited by `Port.open` when starting the shim.
+
+Defaults set by the launcher (override in `~/.symphony/symphony.env` if needed):
+
+```
+CLAUDE_CODE_ENABLE_TELEMETRY=1
+CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
+OTEL_SERVICE_NAME=symphony
+OTEL_TRACES_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
+OTEL_LOG_TOOL_DETAILS=1
+OTEL_LOG_USER_PROMPTS=1
+```
+
+Telemetry stays local until `OTEL_EXPORTER_OTLP_HEADERS` is set with a
+Honeycomb ingest key.
+
+### Wire up Honeycomb (one-time, free tier covers ~10 runs/day)
+
+1. Sign up at https://honeycomb.io and create an environment.
+2. Copy the ingest API key from "Account → Team settings → Environments".
+3. Append to `~/.symphony/symphony.env`:
+
+   ```bash
+   export OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=YOUR_INGEST_KEY"
+   ```
+
+4. New `source ~/.symphony/launch.sh` invocations export the headers and the
+   shim begins shipping spans.
+5. In Honeycomb, filter by `service.name = symphony` to verify ingestion.
+
+Free tier ceiling is 20M events/month; ~10 agent runs/day stay well under it.
+
 ## Project Layout
 
 - `lib/`: application code and Mix tasks
