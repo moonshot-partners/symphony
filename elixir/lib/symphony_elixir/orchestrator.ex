@@ -858,39 +858,65 @@ defmodule SymphonyElixir.Orchestrator do
        when is_binary(issue_id) and is_map(metadata) do
     previous_retry = Map.get(state.retry_attempts, issue_id, %{attempt: 0})
     next_attempt = if is_integer(attempt), do: attempt, else: previous_retry.attempt + 1
-    delay_ms = retry_delay(next_attempt, metadata)
-    old_timer = Map.get(previous_retry, :timer_ref)
-    retry_token = make_ref()
-    due_at_ms = System.monotonic_time(:millisecond) + delay_ms
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
-    worker_host = pick_retry_worker_host(previous_retry, metadata)
-    workspace_path = pick_retry_workspace_path(previous_retry, metadata)
+
+    if failure_retry_cap_exceeded?(next_attempt, metadata) do
+      halt_retry_loop(state, issue_id, identifier, next_attempt, error, previous_retry)
+    else
+      delay_ms = retry_delay(next_attempt, metadata)
+      old_timer = Map.get(previous_retry, :timer_ref)
+      retry_token = make_ref()
+      due_at_ms = System.monotonic_time(:millisecond) + delay_ms
+      worker_host = pick_retry_worker_host(previous_retry, metadata)
+      workspace_path = pick_retry_workspace_path(previous_retry, metadata)
+
+      if is_reference(old_timer) do
+        Process.cancel_timer(old_timer)
+      end
+
+      timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
+
+      error_suffix = if is_binary(error), do: " error=#{error}", else: ""
+
+      Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
+
+      %{
+        state
+        | retry_attempts:
+            Map.put(state.retry_attempts, issue_id, %{
+              attempt: next_attempt,
+              timer_ref: timer_ref,
+              retry_token: retry_token,
+              due_at_ms: due_at_ms,
+              identifier: identifier,
+              error: error,
+              worker_host: worker_host,
+              workspace_path: workspace_path
+            })
+      }
+    end
+  end
+
+  defp failure_retry_cap_exceeded?(next_attempt, metadata) do
+    metadata[:delay_type] != :continuation and
+      next_attempt > Config.settings!().agent.max_failure_retries
+  end
+
+  defp halt_retry_loop(%State{} = state, issue_id, identifier, attempt, error, previous_retry) do
+    error_suffix = if is_binary(error), do: " last_error=#{error}", else: ""
+
+    Logger.error("Retry cap exceeded for issue_id=#{issue_id} issue_identifier=#{identifier} attempt=#{attempt}; halting retry loop#{error_suffix}")
+
+    old_timer = Map.get(previous_retry, :timer_ref)
 
     if is_reference(old_timer) do
       Process.cancel_timer(old_timer)
     end
 
-    timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
-
-    error_suffix = if is_binary(error), do: " error=#{error}", else: ""
-
-    Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
-
-    %{
-      state
-      | retry_attempts:
-          Map.put(state.retry_attempts, issue_id, %{
-            attempt: next_attempt,
-            timer_ref: timer_ref,
-            retry_token: retry_token,
-            due_at_ms: due_at_ms,
-            identifier: identifier,
-            error: error,
-            worker_host: worker_host,
-            workspace_path: workspace_path
-          })
-    }
+    state
+    |> Map.put(:retry_attempts, Map.delete(state.retry_attempts, issue_id))
+    |> release_issue_claim(issue_id)
   end
 
   defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do

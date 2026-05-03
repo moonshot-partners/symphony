@@ -858,6 +858,76 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert body =~ "Blocked. Wrong repo."
   end
 
+  test "orchestrator halts retry loop after max_failure_retries failures" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      max_failure_retries: 2
+    )
+
+    issue_id = "issue-cap"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-CAP",
+      title: "Cap retries",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-CAP"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :RetryCapOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    worker_pid = spawn(fn -> :timer.sleep(:infinity) end)
+    process_ref = make_ref()
+
+    running_entry = %{
+      pid: worker_pid,
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: "thread-cap-turn-cap",
+      turn_count: 1,
+      retry_attempt: 2,
+      worker_host: "local",
+      workspace_path: "/tmp/ws",
+      last_agent_event: :notification,
+      last_agent_text: nil,
+      last_agent_message: nil,
+      last_agent_timestamp: DateTime.utc_now(),
+      agent_input_tokens: 0,
+      agent_output_tokens: 0,
+      agent_total_tokens: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    initial_state = :sys.get_state(pid)
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(pid, {:DOWN, process_ref, :process, worker_pid, :boom})
+    Process.sleep(100)
+
+    state = :sys.get_state(pid)
+
+    refute Map.has_key?(state.retry_attempts, issue_id),
+           "expected no retry scheduled after cap exceeded"
+
+    refute MapSet.member?(state.claimed, issue_id),
+           "expected issue claim released after cap exceeded"
+
+    refute Map.has_key?(state.running, issue_id)
+  end
+
   test "orchestrator snapshot includes retry backoff entries" do
     orchestrator_name = Module.concat(__MODULE__, :RetryOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
