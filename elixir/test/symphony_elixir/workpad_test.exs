@@ -168,6 +168,24 @@ defmodule SymphonyElixir.WorkpadTest do
     refute_receive {:memory_tracker_comment, _, _}, 200
   end
 
+  test "schedules an update on :agent_terminated so the workpad reflects agent exit without PR" do
+    update = %{event: :agent_terminated, timestamp: DateTime.utc_now()}
+
+    entry =
+      running_entry(%{
+        workpad_comment_id: "memory-comment-issue-wp",
+        last_agent_event: :agent_terminated,
+        last_agent_text: "Blocked. Wrong repo. Re-dispatch to fe-next-app."
+      })
+
+    Workpad.maybe_sync(entry, update, self())
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
+    assert body =~ "**Last event**: agent_terminated"
+    assert body =~ "Blocked. Wrong repo."
+    refute_received {:memory_tracker_comment, _, _}
+  end
+
   test "schedules an update on :pr_attached so the workpad reflects PR shipping" do
     update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
 

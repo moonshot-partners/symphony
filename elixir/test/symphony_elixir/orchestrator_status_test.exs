@@ -782,6 +782,82 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert snapshot_entry.agent_total_tokens == 6279
   end
 
+  test "orchestrator emits :agent_terminated workpad sync when worker exits before PR" do
+    Application.put_env(:symphony_elixir, :workpad_enabled, true)
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      Application.delete_env(:symphony_elixir, :workpad_enabled)
+    end)
+
+    issue_id = "issue-terminated-no-pr"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-228",
+      title: "Terminated without PR",
+      description: "Agent exits cleanly but never opens PR",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-228"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :TerminatedNoPrOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    worker_pid = spawn(fn -> :timer.sleep(:infinity) end)
+    process_ref = make_ref()
+    started_at = DateTime.utc_now()
+
+    running_entry = %{
+      pid: worker_pid,
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: "thread-end-turn-end",
+      turn_count: 23,
+      retry_attempt: 0,
+      worker_host: "local",
+      workspace_path: "/tmp/ws",
+      last_agent_event: :session_started,
+      last_agent_text: "Blocked. Wrong repo. Re-dispatch to fe-next-app.",
+      last_agent_message: nil,
+      last_agent_timestamp: started_at,
+      agent_input_tokens: 1220,
+      agent_output_tokens: 5059,
+      agent_total_tokens: 6279,
+      agent_last_reported_input_tokens: 1220,
+      agent_last_reported_output_tokens: 5059,
+      agent_last_reported_total_tokens: 6279,
+      started_at: started_at,
+      workpad_comment_id: "memory-comment-#{issue_id}"
+    }
+
+    initial_state = :sys.get_state(pid)
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+      |> Map.put(:workpads, Map.put(initial_state.workpads, issue_id, "memory-comment-#{issue_id}"))
+    end)
+
+    send(pid, {:DOWN, process_ref, :process, worker_pid, :normal})
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-terminated-no-pr", body},
+                   1_500
+
+    assert body =~ "**Last event**: agent_terminated"
+    assert body =~ "Blocked. Wrong repo."
+  end
+
   test "orchestrator snapshot includes retry backoff entries" do
     orchestrator_name = Module.concat(__MODULE__, :RetryOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)

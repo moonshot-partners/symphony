@@ -126,6 +126,9 @@ defmodule SymphonyElixir.Orchestrator do
         {:noreply, state}
 
       issue_id ->
+        running_entry_before_pop = Map.get(running, issue_id)
+        sync_terminal_workpad(running_entry_before_pop, reason)
+
         {running_entry, state} = pop_running_entry(state, issue_id)
         state = record_session_completion_totals(state, running_entry)
         session_id = running_entry_session_id(running_entry)
@@ -1129,6 +1132,22 @@ defmodule SymphonyElixir.Orchestrator do
       if running_ref == ref, do: issue_id
     end)
   end
+
+  defp sync_terminal_workpad(running_entry, reason) when is_map(running_entry) do
+    update = %{
+      event: :agent_terminated,
+      reason: reason,
+      timestamp: DateTime.utc_now()
+    }
+
+    running_entry
+    |> Map.put(:last_agent_event, :agent_terminated)
+    |> Workpad.maybe_sync(update, self())
+
+    :ok
+  end
+
+  defp sync_terminal_workpad(_running_entry, _reason), do: :ok
 
   defp running_entry_session_id(%{session_id: session_id}) when is_binary(session_id),
     do: session_id
