@@ -85,7 +85,7 @@ No description provided.
 1. Implement only what the ticket's Acceptance Criteria require. No
    out-of-scope changes.
 2. Branch off latest `origin/main`. Branch name:
-   `agents/sodev-{{ issue.identifier | split: "-" | last }}-<short-slug>`
+   `agent/sodev-{{ issue.identifier | split: "-" | last }}-<short-slug>`
    (lowercase, dashes).
 3. One atomic commit per logical change. Concise descriptive messages.
 4. Run quality gates before pushing:
