@@ -15,6 +15,7 @@ tracker:
     - Closed
     - Canceled
     - Duplicate
+    - In QA / Review
   on_pickup_state: "In Development"
   on_complete_state: "In QA / Review"
 polling:

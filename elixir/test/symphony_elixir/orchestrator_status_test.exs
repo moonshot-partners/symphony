@@ -1040,6 +1040,175 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert_receive {:memory_tracker_state_update, ^issue_id, "Done"}, 1_500
   end
 
+  test "orchestrator pr_attached workpad sync reflects on_complete_state, not stale issue.state" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    Application.put_env(:symphony_elixir, :workpad_enabled, true)
+
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-workpad-state-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-workpad-state"
+    issue_identifier = "MT-PR-WPS"
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      Application.delete_env(:symphony_elixir, :workpad_enabled)
+      File.rm_rf(test_root)
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: test_root,
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "Done"
+    )
+
+    File.mkdir_p!(test_root)
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: issue_identifier,
+          issue: %Issue{id: issue_id, state: "In Progress", identifier: issue_identifier, title: "Shipped"},
+          session_id: "thread-pr-wps-turn-1",
+          turn_count: 4,
+          retry_attempt: 0,
+          worker_host: "local",
+          workspace_path: "/tmp/ws",
+          last_agent_event: :turn_completed,
+          last_agent_text: "PR opened",
+          last_agent_timestamp: DateTime.utc_now(),
+          agent_input_tokens: 100,
+          agent_output_tokens: 200,
+          agent_total_tokens: 300,
+          started_at: DateTime.utc_now(),
+          workpad_comment_id: "memory-comment-#{issue_id}"
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      workpads: %{issue_id => "memory-comment-#{issue_id}"}
+    }
+
+    refreshed_issue = %Issue{
+      id: issue_id,
+      identifier: issue_identifier,
+      state: "In Progress",
+      title: "Shipped",
+      description: "PR attached",
+      labels: [],
+      has_pr_attachment: true
+    }
+
+    _ = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-pr-workpad-state", body},
+                   1_500
+
+    assert body =~ "**State**: Done",
+           "expected workpad to reflect on_complete_state Done after PR-attached transition, got body: #{body}"
+
+    refute body =~ "**State**: In Progress",
+           "workpad should not show stale In Progress state after complete transition"
+  end
+
+  test "orchestrator pr_attached workpad sync preserves issue.state when on_complete_state is unset" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    Application.put_env(:symphony_elixir, :workpad_enabled, true)
+
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-workpad-noop-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-workpad-noop"
+    issue_identifier = "MT-PR-WPN"
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      Application.delete_env(:symphony_elixir, :workpad_enabled)
+      File.rm_rf(test_root)
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: test_root,
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: nil
+    )
+
+    File.mkdir_p!(test_root)
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: issue_identifier,
+          issue: %Issue{id: issue_id, state: "In Progress", identifier: issue_identifier, title: "Shipped"},
+          session_id: "thread-pr-wpn-turn-1",
+          turn_count: 4,
+          retry_attempt: 0,
+          worker_host: "local",
+          workspace_path: "/tmp/ws",
+          last_agent_event: :turn_completed,
+          last_agent_text: "PR opened",
+          last_agent_timestamp: DateTime.utc_now(),
+          agent_input_tokens: 100,
+          agent_output_tokens: 200,
+          agent_total_tokens: 300,
+          started_at: DateTime.utc_now(),
+          workpad_comment_id: "memory-comment-#{issue_id}"
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      workpads: %{issue_id => "memory-comment-#{issue_id}"}
+    }
+
+    refreshed_issue = %Issue{
+      id: issue_id,
+      identifier: issue_identifier,
+      state: "In Progress",
+      title: "Shipped",
+      description: "PR attached",
+      labels: [],
+      has_pr_attachment: true
+    }
+
+    _ = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-pr-workpad-noop", body},
+                   1_500
+
+    assert body =~ "**State**: In Progress",
+           "expected workpad to preserve original issue.state when on_complete_state is unset, got body: #{body}"
+  end
+
   test "orchestrator snapshot includes retry backoff entries" do
     orchestrator_name = Module.concat(__MODULE__, :RetryOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)

@@ -526,10 +526,24 @@ defmodule SymphonyElixir.Orchestrator do
           running_entry
           |> Map.put(:last_agent_event, :pr_attached)
           |> maybe_put_workpad_comment_id(comment_id)
+          |> apply_complete_state_to_entry()
 
         update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
         _ = Workpad.maybe_sync(entry, update, self())
         state
+    end
+  end
+
+  defp apply_complete_state_to_entry(running_entry) do
+    case Config.settings!().tracker.on_complete_state do
+      state_name when is_binary(state_name) and state_name != "" ->
+        case Map.get(running_entry, :issue) do
+          %Issue{} = issue -> Map.put(running_entry, :issue, %{issue | state: state_name})
+          _ -> running_entry
+        end
+
+      _ ->
+        running_entry
     end
   end
 
