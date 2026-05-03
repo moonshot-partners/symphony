@@ -353,6 +353,18 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
+  @spec apply_on_pickup_state_transition_for_test(String.t()) :: :ok
+  def apply_on_pickup_state_transition_for_test(issue_id) when is_binary(issue_id) do
+    apply_on_pickup_state_transition(issue_id)
+  end
+
+  @doc false
+  @spec apply_on_complete_state_transition_for_test(String.t()) :: :ok
+  def apply_on_complete_state_transition_for_test(issue_id) when is_binary(issue_id) do
+    apply_on_complete_state_transition(issue_id)
+  end
+
+  @doc false
   @spec revalidate_issue_for_dispatch_for_test(Issue.t(), ([String.t()] -> term())) ::
           {:ok, Issue.t()} | {:skip, Issue.t() | :missing} | {:error, term()}
   def revalidate_issue_for_dispatch_for_test(%Issue{} = issue, issue_fetcher)
@@ -500,6 +512,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp sync_workpad_pr_attached(%State{} = state, issue_id) when is_binary(issue_id) do
+    apply_on_complete_state_transition(issue_id)
+
     case Map.get(state.running, issue_id) do
       nil ->
         state
@@ -517,6 +531,38 @@ defmodule SymphonyElixir.Orchestrator do
         _ = Workpad.maybe_sync(entry, update, self())
         state
     end
+  end
+
+  defp apply_on_pickup_state_transition(issue_id) when is_binary(issue_id) do
+    apply_state_transition(issue_id, Config.settings!().tracker.on_pickup_state, :pickup)
+  end
+
+  defp apply_on_complete_state_transition(issue_id) when is_binary(issue_id) do
+    apply_state_transition(issue_id, Config.settings!().tracker.on_complete_state, :complete)
+  end
+
+  defp apply_state_transition(_issue_id, nil, _kind), do: :ok
+  defp apply_state_transition(_issue_id, "", _kind), do: :ok
+
+  defp apply_state_transition(issue_id, state_name, kind)
+       when is_binary(issue_id) and is_binary(state_name) do
+    case safely_call(fn -> Tracker.update_issue_state(issue_id, state_name) end) do
+      :ok ->
+        Logger.info("Applied #{kind} state transition: issue_id=#{issue_id} state=#{state_name}")
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to apply #{kind} state transition: issue_id=#{issue_id} state=#{state_name} reason=#{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp safely_call(fun) do
+    fun.()
+  rescue
+    error -> {:error, {:exception, Exception.message(error)}}
+  catch
+    kind, value -> {:error, {kind, value}}
   end
 
   defp maybe_put_workpad_comment_id(entry, nil), do: entry
@@ -779,6 +825,7 @@ defmodule SymphonyElixir.Orchestrator do
          end) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
+        apply_on_pickup_state_transition(issue.id)
 
         Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
 

@@ -928,6 +928,116 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     refute Map.has_key?(state.running, issue_id)
   end
 
+  test "orchestrator pickup transition fires Tracker.update_issue_state when on_pickup_state is configured" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_on_pickup_state: "In Progress"
+    )
+
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
+
+    Orchestrator.apply_on_pickup_state_transition_for_test("issue-pick")
+
+    assert_receive {:memory_tracker_state_update, "issue-pick", "In Progress"}, 1_000
+  end
+
+  test "orchestrator complete transition fires Tracker.update_issue_state when on_complete_state is configured" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_on_complete_state: "In Review"
+    )
+
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
+
+    Orchestrator.apply_on_complete_state_transition_for_test("issue-complete")
+
+    assert_receive {:memory_tracker_state_update, "issue-complete", "In Review"}, 1_000
+  end
+
+  test "orchestrator state transitions no-op when on_pickup_state and on_complete_state are nil" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
+
+    Orchestrator.apply_on_pickup_state_transition_for_test("issue-noop")
+    Orchestrator.apply_on_complete_state_transition_for_test("issue-noop")
+
+    refute_receive {:memory_tracker_state_update, _, _}, 200
+  end
+
+  test "orchestrator pr_attached reconcile fires on_complete_state transition" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    Application.put_env(:symphony_elixir, :workpad_enabled, false)
+
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-complete-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-complete"
+    issue_identifier = "MT-PR-DONE"
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      Application.delete_env(:symphony_elixir, :workpad_enabled)
+      File.rm_rf(test_root)
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: test_root,
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "Done"
+    )
+
+    File.mkdir_p!(test_root)
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: issue_identifier,
+          issue: %Issue{id: issue_id, state: "Scheduled", identifier: issue_identifier},
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      workpads: %{}
+    }
+
+    refreshed_issue = %Issue{
+      id: issue_id,
+      identifier: issue_identifier,
+      state: "Scheduled",
+      title: "Shipped",
+      description: "PR attached",
+      labels: [],
+      has_pr_attachment: true
+    }
+
+    _ = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "Done"}, 1_500
+  end
+
   test "orchestrator snapshot includes retry backoff entries" do
     orchestrator_name = Module.concat(__MODULE__, :RetryOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
