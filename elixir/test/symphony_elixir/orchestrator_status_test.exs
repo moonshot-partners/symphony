@@ -933,6 +933,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
+      tracker_active_states: ["Todo", "In Progress"],
       tracker_on_pickup_state: "In Progress"
     )
 
@@ -948,14 +949,15 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
-      tracker_on_complete_state: "In Review"
+      tracker_terminal_states: ["Done", "Cancelled"],
+      tracker_on_complete_state: "Done"
     )
 
     on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
 
     Orchestrator.apply_on_complete_state_transition_for_test("issue-complete")
 
-    assert_receive {:memory_tracker_state_update, "issue-complete", "In Review"}, 1_000
+    assert_receive {:memory_tracker_state_update, "issue-complete", "Done"}, 1_000
   end
 
   test "orchestrator state transitions no-op when on_pickup_state and on_complete_state are nil" do

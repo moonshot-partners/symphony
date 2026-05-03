@@ -546,7 +546,16 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp apply_state_transition(issue_id, state_name, kind)
        when is_binary(issue_id) and is_binary(state_name) do
-    case safely_call(fn -> Tracker.update_issue_state(issue_id, state_name) end) do
+    result =
+      try do
+        Tracker.update_issue_state(issue_id, state_name)
+      rescue
+        error -> {:error, {:exception, Exception.message(error)}}
+      catch
+        catch_kind, value -> {:error, {catch_kind, value}}
+      end
+
+    case result do
       :ok ->
         Logger.info("Applied #{kind} state transition: issue_id=#{issue_id} state=#{state_name}")
         :ok
@@ -555,14 +564,6 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.warning("Failed to apply #{kind} state transition: issue_id=#{issue_id} state=#{state_name} reason=#{inspect(reason)}")
         :ok
     end
-  end
-
-  defp safely_call(fun) do
-    fun.()
-  rescue
-    error -> {:error, {:exception, Exception.message(error)}}
-  catch
-    kind, value -> {:error, {kind, value}}
   end
 
   defp maybe_put_workpad_comment_id(entry, nil), do: entry

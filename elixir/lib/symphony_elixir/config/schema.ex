@@ -76,6 +76,30 @@ defmodule SymphonyElixir.Config.Schema do
         ],
         empty_values: []
       )
+      |> validate_state_in_known_set(:on_pickup_state)
+      |> validate_state_in_known_set(:on_complete_state)
+    end
+
+    defp validate_state_in_known_set(changeset, field) do
+      value = Ecto.Changeset.get_field(changeset, field)
+
+      if is_nil(value) or value == "" do
+        changeset
+      else
+        active = Ecto.Changeset.get_field(changeset, :active_states) || []
+        terminal = Ecto.Changeset.get_field(changeset, :terminal_states) || []
+        known = MapSet.new(active ++ terminal)
+
+        if MapSet.member?(known, value) do
+          changeset
+        else
+          Ecto.Changeset.add_error(
+            changeset,
+            field,
+            "must be one of tracker.active_states or tracker.terminal_states"
+          )
+        end
+      end
     end
   end
 

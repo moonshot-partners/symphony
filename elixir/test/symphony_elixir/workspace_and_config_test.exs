@@ -1080,6 +1080,35 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert message =~ "agent_runtime.turn_sandbox_policy"
 
     write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Done", "Cancelled"],
+      tracker_on_pickup_state: "Bogus"
+    )
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "tracker.on_pickup_state"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Done", "Cancelled"],
+      tracker_on_complete_state: "Doen"
+    )
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "tracker.on_complete_state"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Done", "Cancelled"],
+      tracker_on_pickup_state: "In Progress",
+      tracker_on_complete_state: "Done"
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.on_pickup_state == "In Progress"
+    assert Config.settings!().tracker.on_complete_state == "Done"
+
+    write_workflow_file!(Workflow.workflow_file_path(),
       agent_runtime_approval_policy: "future-policy",
       agent_runtime_thread_sandbox: "future-sandbox",
       agent_runtime_turn_sandbox_policy: %{
