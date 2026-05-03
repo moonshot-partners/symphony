@@ -1691,16 +1691,28 @@ defmodule SymphonyElixir.Orchestrator do
         :completionTokens
       ])
 
-  defp get_token_usage(usage, :total),
-    do:
-      payload_get(usage, [
-        "total_tokens",
-        "total",
-        :total_tokens,
-        :total,
-        "totalTokens",
-        :totalTokens
-      ])
+  defp get_token_usage(usage, :total) do
+    case payload_get(usage, [
+           "total_tokens",
+           "total",
+           :total_tokens,
+           :total,
+           "totalTokens",
+           :totalTokens
+         ]) do
+      nil -> derived_total_token_usage(usage)
+      value -> value
+    end
+  end
+
+  defp derived_total_token_usage(usage) do
+    with input when is_integer(input) <- get_token_usage(usage, :input),
+         output when is_integer(output) <- get_token_usage(usage, :output) do
+      input + output
+    else
+      _ -> nil
+    end
+  end
 
   defp payload_get(payload, fields) when is_list(fields) do
     Enum.find_value(fields, fn field -> map_integer_value(payload, field) end)

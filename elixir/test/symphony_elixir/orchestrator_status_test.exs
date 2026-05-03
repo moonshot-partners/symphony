@@ -713,6 +713,75 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert snapshot_entry.agent_total_tokens == 0
   end
 
+  test "orchestrator derives agent_total_tokens from input + output when total field is missing" do
+    issue_id = "issue-token-derived-total"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-225",
+      title: "Derived total",
+      description: "Derive total from input + output",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-225"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :DerivedTotalOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+    started_at = DateTime.utc_now()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: nil,
+      last_agent_message: nil,
+      last_agent_timestamp: nil,
+      last_agent_event: nil,
+      agent_input_tokens: 0,
+      agent_output_tokens: 0,
+      agent_total_tokens: 0,
+      agent_last_reported_input_tokens: 0,
+      agent_last_reported_output_tokens: 0,
+      agent_last_reported_total_tokens: 0,
+      started_at: started_at
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(
+      pid,
+      {:agent_worker_update, issue_id,
+       %{
+         event: :turn_completed,
+         payload: %{
+           method: "turn/completed",
+           usage: %{"input_tokens" => 1220, "output_tokens" => 5059}
+         },
+         timestamp: DateTime.utc_now()
+       }}
+    )
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.agent_input_tokens == 1220
+    assert snapshot_entry.agent_output_tokens == 5059
+    assert snapshot_entry.agent_total_tokens == 6279
+  end
+
   test "orchestrator snapshot includes retry backoff entries" do
     orchestrator_name = Module.concat(__MODULE__, :RetryOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
