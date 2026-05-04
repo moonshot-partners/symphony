@@ -1542,16 +1542,6 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert StatusDashboard.humanize_codex_message(fallback_reasoning) == "reasoning update"
   end
 
-  test "application stop renders offline status" do
-    rendered =
-      ExUnit.CaptureIO.capture_io(fn ->
-        assert :ok = SymphonyElixir.Application.stop(:normal)
-      end)
-
-    assert rendered =~ "app_status=offline"
-    refute rendered =~ "Timestamp:"
-  end
-
   defp wait_for_snapshot(pid, predicate, timeout_ms \\ 200) when is_function(predicate, 1) do
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
     do_wait_for_snapshot(pid, predicate, deadline_ms)

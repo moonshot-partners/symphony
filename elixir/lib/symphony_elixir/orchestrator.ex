@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -847,9 +847,7 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp notify_dashboard do
-    StatusDashboard.notify_update()
-  end
+  defp notify_dashboard, do: :ok
 
   defp handle_active_retry(state, issue, attempt, metadata) do
     if retry_candidate_issue?(issue, terminal_state_set()) and

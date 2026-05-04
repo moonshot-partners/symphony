@@ -28,8 +28,7 @@ defmodule SymphonyElixir.Application do
       {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
       SymphonyElixir.WorkflowStore,
       SymphonyElixir.Orchestrator,
-      SymphonyElixir.HttpServer,
-      SymphonyElixir.StatusDashboard
+      SymphonyElixir.HttpServer
     ]
 
     Supervisor.start_link(
@@ -40,8 +39,5 @@ defmodule SymphonyElixir.Application do
   end
 
   @impl true
-  def stop(_state) do
-    SymphonyElixir.StatusDashboard.render_offline_status()
-    :ok
-  end
+  def stop(_state), do: :ok
 end
