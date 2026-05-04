@@ -8,7 +8,7 @@ defmodule SymphonyElixir.CoreTest do
       poll_interval_ms: nil,
       tracker_active_states: nil,
       tracker_terminal_states: nil,
-      codex_command: nil
+      agent_runtime_command: nil
     )
 
     config = Config.settings!()
@@ -50,39 +50,39 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_project_slug: "project",
-      codex_command: ""
+      agent_runtime_command: ""
     )
 
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.command"
+    assert message =~ "agent_runtime.command"
     assert message =~ "can't be blank"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_command: "   ")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_command: "   ")
     assert :ok = Config.validate!()
-    assert Config.settings!().codex.command == "   "
+    assert Config.settings!().agent_runtime.command == "   "
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_command: "/bin/sh app-server")
-    assert :ok = Config.validate!()
-
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: "definitely-not-valid")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_command: "/bin/sh app-server")
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: "unsafe-ish")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_approval_policy: "definitely-not-valid")
+    assert :ok = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_thread_sandbox: "unsafe-ish")
     assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
-      codex_turn_sandbox_policy: %{type: "workspaceWrite", writableRoots: ["relative/path"]}
+      agent_runtime_turn_sandbox_policy: %{type: "workspaceWrite", writableRoots: ["relative/path"]}
     )
 
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: 123)
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_approval_policy: 123)
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.approval_policy"
+    assert message =~ "agent_runtime.approval_policy"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: 123)
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_thread_sandbox: 123)
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.thread_sandbox"
+    assert message =~ "agent_runtime.thread_sandbox"
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "123")
     assert {:error, {:unsupported_tracker_kind, "123"}} = Config.validate!()
@@ -125,7 +125,7 @@ defmodule SymphonyElixir.CoreTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
       tracker_project_slug: "project",
-      codex_command: "/bin/sh app-server"
+      agent_runtime_command: "/bin/sh app-server"
     )
 
     assert Config.settings!().tracker.api_key == env_api_key
@@ -143,7 +143,7 @@ defmodule SymphonyElixir.CoreTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_assignee: nil,
       tracker_project_slug: "project",
-      codex_command: "/bin/sh app-server"
+      agent_runtime_command: "/bin/sh app-server"
     )
 
     assert Config.settings!().tracker.assignee == env_assignee
@@ -224,6 +224,152 @@ defmodule SymphonyElixir.CoreTest do
     assert {:ok, []} = Client.fetch_issue_states_by_ids([])
   end
 
+  test "reconcile stops running agent and skips retry when issue has a PR attachment" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-attachment-reconcile-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-attached"
+    issue_identifier = "MT-PR-1"
+    workspace = Path.join(test_root, issue_identifier)
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: test_root,
+        tracker_active_states: ["Scheduled", "In Progress"],
+        tracker_terminal_states: ["Closed", "Done", "Cancelled"]
+      )
+
+      File.mkdir_p!(test_root)
+      File.mkdir_p!(workspace)
+
+      agent_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      state = %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: issue_identifier,
+            issue: %Issue{id: issue_id, state: "Scheduled", identifier: issue_identifier},
+            started_at: DateTime.utc_now()
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{},
+        workpads: %{issue_id => "wp-comment-1"}
+      }
+
+      refreshed_issue = %Issue{
+        id: issue_id,
+        identifier: issue_identifier,
+        state: "Scheduled",
+        title: "Already shipped",
+        description: "PR attached",
+        labels: [],
+        has_pr_attachment: true
+      }
+
+      updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+      refute Map.has_key?(updated_state.running, issue_id)
+      refute MapSet.member?(updated_state.claimed, issue_id)
+      refute Map.has_key?(updated_state.retry_attempts, issue_id)
+      refute Process.alive?(agent_pid)
+      assert File.exists?(workspace)
+      assert Map.get(updated_state.workpads, issue_id) == "wp-comment-1"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "reconcile fires a workpad pr_attached sync before terminating the running agent" do
+    previous_enabled = Application.get_env(:symphony_elixir, :workpad_enabled)
+    Application.put_env(:symphony_elixir, :workpad_enabled, true)
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-pr-workpad-sync-#{System.unique_integer([:positive])}"
+      )
+
+    issue_id = "issue-pr-workpad"
+    issue_identifier = "MT-PR-WP"
+    workspace = Path.join(test_root, issue_identifier)
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: test_root,
+        tracker_kind: "memory",
+        tracker_active_states: ["Scheduled", "In Progress"],
+        tracker_terminal_states: ["Closed", "Done", "Cancelled"]
+      )
+
+      File.mkdir_p!(test_root)
+      File.mkdir_p!(workspace)
+
+      agent_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      state = %Orchestrator.State{
+        running: %{
+          issue_id => %{
+            pid: agent_pid,
+            ref: nil,
+            identifier: issue_identifier,
+            issue: %Issue{id: issue_id, state: "Scheduled", identifier: issue_identifier},
+            started_at: DateTime.utc_now(),
+            last_agent_text: "ready for review"
+          }
+        },
+        claimed: MapSet.new([issue_id]),
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{},
+        workpads: %{issue_id => "wp-comment-pr-attached"}
+      }
+
+      refreshed_issue = %Issue{
+        id: issue_id,
+        identifier: issue_identifier,
+        state: "Scheduled",
+        title: "Already shipped",
+        description: "PR attached",
+        labels: [],
+        has_pr_attachment: true
+      }
+
+      updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
+
+      assert_receive {:memory_tracker_comment_update, "wp-comment-pr-attached", body}, 1_000
+      assert body =~ "**Last event**: pr_attached"
+      assert body =~ "ready for review"
+
+      refute Map.has_key?(updated_state.running, issue_id)
+      assert Map.get(updated_state.workpads, issue_id) == "wp-comment-pr-attached"
+    after
+      File.rm_rf(test_root)
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+
+      case previous_enabled do
+        nil -> Application.delete_env(:symphony_elixir, :workpad_enabled)
+        value -> Application.put_env(:symphony_elixir, :workpad_enabled, value)
+      end
+    end
+  end
+
   test "non-active issue state stops running agent without cleaning workspace" do
     test_root =
       Path.join(
@@ -263,7 +409,7 @@ defmodule SymphonyElixir.CoreTest do
           }
         },
         claimed: MapSet.new([issue_id]),
-        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
         retry_attempts: %{}
       }
 
@@ -326,8 +472,9 @@ defmodule SymphonyElixir.CoreTest do
           }
         },
         claimed: MapSet.new([issue_id]),
-        codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-        retry_attempts: %{}
+        agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+        retry_attempts: %{},
+        workpads: %{issue_id => "wp-comment-terminal"}
       }
 
       issue = %Issue{
@@ -345,6 +492,7 @@ defmodule SymphonyElixir.CoreTest do
       refute MapSet.member?(updated_state.claimed, issue_id)
       refute Process.alive?(agent_pid)
       refute File.exists?(workspace)
+      refute Map.has_key?(updated_state.workpads, issue_id)
     after
       File.rm_rf(test_root)
     end
@@ -446,7 +594,7 @@ defmodule SymphonyElixir.CoreTest do
         }
       },
       claimed: MapSet.new([issue_id]),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -493,7 +641,7 @@ defmodule SymphonyElixir.CoreTest do
         }
       },
       claimed: MapSet.new([issue_id]),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -684,8 +832,8 @@ defmodule SymphonyElixir.CoreTest do
       poll_check_in_progress: false,
       tick_timer_ref: nil,
       tick_token: stale_tick_token,
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      codex_rate_limits: nil
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_rate_limits: nil
     }
 
     assert {:reply, %{queued: true, coalesced: false}, refreshed_state} =
@@ -703,10 +851,59 @@ defmodule SymphonyElixir.CoreTest do
     assert {:noreply, ^coalesced_state} = Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
   end
 
+  test "select_worker_host_for_test skips full ssh hosts under the shared per-host cap" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      worker_ssh_hosts: ["worker-a", "worker-b"],
+      worker_max_concurrent_agents_per_host: 1
+    )
+
+    state = %Orchestrator.State{
+      running: %{
+        "issue-1" => %{worker_host: "worker-a"}
+      }
+    }
+
+    assert Orchestrator.select_worker_host_for_test(state, nil) == "worker-b"
+  end
+
+  test "select_worker_host_for_test returns no_worker_capacity when every ssh host is full" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      worker_ssh_hosts: ["worker-a", "worker-b"],
+      worker_max_concurrent_agents_per_host: 1
+    )
+
+    state = %Orchestrator.State{
+      running: %{
+        "issue-1" => %{worker_host: "worker-a"},
+        "issue-2" => %{worker_host: "worker-b"}
+      }
+    }
+
+    assert Orchestrator.select_worker_host_for_test(state, nil) == :no_worker_capacity
+  end
+
+  test "select_worker_host_for_test keeps the preferred ssh host when it still has capacity" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      worker_ssh_hosts: ["worker-a", "worker-b"],
+      worker_max_concurrent_agents_per_host: 2
+    )
+
+    state = %Orchestrator.State{
+      running: %{
+        "issue-1" => %{worker_host: "worker-a"},
+        "issue-2" => %{worker_host: "worker-b"}
+      }
+    }
+
+    assert Orchestrator.select_worker_host_for_test(state, "worker-a") == "worker-a"
+  end
+
+  @scheduling_slop_ms 200
+
   defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
     remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
 
-    assert remaining_ms >= min_remaining_ms
+    assert remaining_ms >= min_remaining_ms - @scheduling_slop_ms
     assert remaining_ms <= max_remaining_ms
   end
 
@@ -996,7 +1193,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1081,7 +1278,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1103,7 +1300,7 @@ defmodule SymphonyElixir.CoreTest do
                  issue_state_fetcher: fn [_issue_id] -> {:ok, [%{issue | state: "Done"}]} end
                )
 
-      assert_receive {:codex_worker_update, "issue-live-updates",
+      assert_receive {:agent_worker_update, "issue-live-updates",
                       %{
                         event: :session_started,
                         timestamp: %DateTime{},
@@ -1177,7 +1374,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
+        agent_runtime_command: "#{codex_binary} app-server",
         max_turns: 3
       )
 
@@ -1248,6 +1445,35 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "continuation_decision marks issue done when a GitHub PR attachment is present" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: ["In Progress"])
+
+    issue_with_pr = %Issue{
+      id: "issue-pr",
+      identifier: "MT-901",
+      state: "In Progress",
+      has_pr_attachment: true
+    }
+
+    issue_without_pr = %Issue{
+      id: "issue-no-pr",
+      identifier: "MT-902",
+      state: "In Progress",
+      has_pr_attachment: false
+    }
+
+    issue_terminal = %Issue{
+      id: "issue-terminal",
+      identifier: "MT-903",
+      state: "Done",
+      has_pr_attachment: false
+    }
+
+    assert AgentRunner.continuation_decision_for_test(issue_with_pr) == :done
+    assert AgentRunner.continuation_decision_for_test(issue_without_pr) == :continue
+    assert AgentRunner.continuation_decision_for_test(issue_terminal) == :done
+  end
+
   test "agent runner stops continuing once agent.max_turns is reached" do
     test_root =
       Path.join(
@@ -1307,7 +1533,7 @@ defmodule SymphonyElixir.CoreTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
+        agent_runtime_command: "#{codex_binary} app-server",
         max_turns: 2
       )
 
@@ -1405,7 +1631,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        agent_runtime_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1549,7 +1775,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
+        agent_runtime_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
       )
 
       issue = %Issue{
@@ -1638,10 +1864,10 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_approval_policy: "on-request",
-        codex_thread_sandbox: "workspace-write",
-        codex_turn_sandbox_policy: %{
+        agent_runtime_command: "#{codex_binary} app-server",
+        agent_runtime_approval_policy: "on-request",
+        agent_runtime_thread_sandbox: "workspace-write",
+        agent_runtime_turn_sandbox_policy: %{
           type: "workspaceWrite",
           writableRoots: [Path.expand(workspace), workspace_cache]
         }

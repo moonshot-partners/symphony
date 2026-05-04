@@ -302,3 +302,18 @@ If Symphony documents token reporting externally, the contract should be:
 - Key totals by `thread_id`
 - Do not classify generic `usage` by field name alone
 - Do not double-count turn-completed usage after live updates
+
+## Field rename: Codex → Claude
+
+When the agent backend is `symphony_agent_shim`, `turn/completed.params.usage`
+contains Anthropic's field names instead of OpenAI's:
+
+| Old (Codex)               | New (Claude SDK)                   |
+|---------------------------|------------------------------------|
+| `prompt_tokens`           | `input_tokens`                     |
+| `completion_tokens`       | `output_tokens`                    |
+| (n/a)                     | `cache_creation_input_tokens`      |
+| (n/a)                     | `cache_read_input_tokens`          |
+| (n/a in events)           | `total_cost_usd` (top-level param) |
+
+The dashboard reads these fields verbatim — no translation layer.

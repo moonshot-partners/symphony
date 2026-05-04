@@ -6,21 +6,23 @@ defmodule SymphonyElixir.TestSupport do
       use ExUnit.Case
       import ExUnit.CaptureLog
 
+      alias SymphonyElixir.Agent.AppServer
       alias SymphonyElixir.AgentRunner
       alias SymphonyElixir.CLI
-      alias SymphonyElixir.Codex.AppServer
       alias SymphonyElixir.Config
+      alias SymphonyElixir.HttpServer
       alias SymphonyElixir.Linear.Client
       alias SymphonyElixir.Linear.Issue
       alias SymphonyElixir.Orchestrator
       alias SymphonyElixir.PromptBuilder
+      alias SymphonyElixir.StatusDashboard
       alias SymphonyElixir.Tracker
       alias SymphonyElixir.Workflow
       alias SymphonyElixir.WorkflowStore
       alias SymphonyElixir.Workspace
 
       import SymphonyElixir.TestSupport,
-        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2]
+        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0]
 
       setup do
         workflow_root =
@@ -34,6 +36,7 @@ defmodule SymphonyElixir.TestSupport do
         write_workflow_file!(workflow_file)
         Workflow.set_workflow_file_path(workflow_file)
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
+        stop_default_http_server()
 
         on_exit(fn ->
           Application.delete_env(:symphony_elixir, :workflow_file_path)
@@ -66,6 +69,25 @@ defmodule SymphonyElixir.TestSupport do
   def restore_env(key, nil), do: System.delete_env(key)
   def restore_env(key, value), do: System.put_env(key, value)
 
+  def stop_default_http_server do
+    case Enum.find(Supervisor.which_children(SymphonyElixir.Supervisor), fn
+           {SymphonyElixir.HttpServer, _pid, _type, _modules} -> true
+           _child -> false
+         end) do
+      {SymphonyElixir.HttpServer, pid, _type, _modules} when is_pid(pid) ->
+        :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.HttpServer)
+
+        if Process.alive?(pid) do
+          Process.exit(pid, :normal)
+        end
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
   defp workflow_content(overrides) do
     config =
       Keyword.merge(
@@ -79,16 +101,19 @@ defmodule SymphonyElixir.TestSupport do
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
+          worker_ssh_hosts: [],
+          worker_max_concurrent_agents_per_host: nil,
           max_concurrent_agents: 10,
           max_turns: 20,
           max_retry_backoff_ms: 300_000,
-          codex_command: "codex app-server",
-          codex_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
-          codex_thread_sandbox: "workspace-write",
-          codex_turn_sandbox_policy: nil,
-          codex_turn_timeout_ms: 3_600_000,
-          codex_read_timeout_ms: 5_000,
-          codex_stall_timeout_ms: 300_000,
+          max_concurrent_agents_by_state: %{},
+          agent_runtime_command: "python -m symphony_agent_shim",
+          agent_runtime_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
+          agent_runtime_thread_sandbox: "workspace-write",
+          agent_runtime_turn_sandbox_policy: nil,
+          agent_runtime_turn_timeout_ms: 3_600_000,
+          agent_runtime_read_timeout_ms: 5_000,
+          agent_runtime_stall_timeout_ms: 300_000,
           hook_after_create: nil,
           hook_before_run: nil,
           hook_after_run: nil,
@@ -113,16 +138,19 @@ defmodule SymphonyElixir.TestSupport do
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
+    worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
+    worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
     max_turns = Keyword.get(config, :max_turns)
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
-    codex_command = Keyword.get(config, :codex_command)
-    codex_approval_policy = Keyword.get(config, :codex_approval_policy)
-    codex_thread_sandbox = Keyword.get(config, :codex_thread_sandbox)
-    codex_turn_sandbox_policy = Keyword.get(config, :codex_turn_sandbox_policy)
-    codex_turn_timeout_ms = Keyword.get(config, :codex_turn_timeout_ms)
-    codex_read_timeout_ms = Keyword.get(config, :codex_read_timeout_ms)
-    codex_stall_timeout_ms = Keyword.get(config, :codex_stall_timeout_ms)
+    max_concurrent_agents_by_state = Keyword.get(config, :max_concurrent_agents_by_state)
+    agent_runtime_command = Keyword.get(config, :agent_runtime_command)
+    agent_runtime_approval_policy = Keyword.get(config, :agent_runtime_approval_policy)
+    agent_runtime_thread_sandbox = Keyword.get(config, :agent_runtime_thread_sandbox)
+    agent_runtime_turn_sandbox_policy = Keyword.get(config, :agent_runtime_turn_sandbox_policy)
+    agent_runtime_turn_timeout_ms = Keyword.get(config, :agent_runtime_turn_timeout_ms)
+    agent_runtime_read_timeout_ms = Keyword.get(config, :agent_runtime_read_timeout_ms)
+    agent_runtime_stall_timeout_ms = Keyword.get(config, :agent_runtime_stall_timeout_ms)
     hook_after_create = Keyword.get(config, :hook_after_create)
     hook_before_run = Keyword.get(config, :hook_before_run)
     hook_after_run = Keyword.get(config, :hook_after_run)
@@ -150,18 +178,20 @@ defmodule SymphonyElixir.TestSupport do
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
         "  root: #{yaml_value(workspace_root)}",
+        worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
         "agent:",
         "  max_concurrent_agents: #{yaml_value(max_concurrent_agents)}",
         "  max_turns: #{yaml_value(max_turns)}",
         "  max_retry_backoff_ms: #{yaml_value(max_retry_backoff_ms)}",
-        "codex:",
-        "  command: #{yaml_value(codex_command)}",
-        "  approval_policy: #{yaml_value(codex_approval_policy)}",
-        "  thread_sandbox: #{yaml_value(codex_thread_sandbox)}",
-        "  turn_sandbox_policy: #{yaml_value(codex_turn_sandbox_policy)}",
-        "  turn_timeout_ms: #{yaml_value(codex_turn_timeout_ms)}",
-        "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
-        "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
+        "  max_concurrent_agents_by_state: #{yaml_value(max_concurrent_agents_by_state)}",
+        "agent_runtime:",
+        "  command: #{yaml_value(agent_runtime_command)}",
+        "  approval_policy: #{yaml_value(agent_runtime_approval_policy)}",
+        "  thread_sandbox: #{yaml_value(agent_runtime_thread_sandbox)}",
+        "  turn_sandbox_policy: #{yaml_value(agent_runtime_turn_sandbox_policy)}",
+        "  turn_timeout_ms: #{yaml_value(agent_runtime_turn_timeout_ms)}",
+        "  read_timeout_ms: #{yaml_value(agent_runtime_read_timeout_ms)}",
+        "  stall_timeout_ms: #{yaml_value(agent_runtime_stall_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
@@ -207,6 +237,21 @@ defmodule SymphonyElixir.TestSupport do
       hook_entry("before_remove", hook_before_remove)
     ]
     |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp worker_yaml(ssh_hosts, max_concurrent_agents_per_host)
+       when ssh_hosts in [nil, []] and is_nil(max_concurrent_agents_per_host),
+       do: nil
+
+  defp worker_yaml(ssh_hosts, max_concurrent_agents_per_host) do
+    [
+      "worker:",
+      ssh_hosts not in [nil, []] && "  ssh_hosts: #{yaml_value(ssh_hosts)}",
+      !is_nil(max_concurrent_agents_per_host) &&
+        "  max_concurrent_agents_per_host: #{yaml_value(max_concurrent_agents_per_host)}"
+    ]
+    |> Enum.reject(&(&1 in [nil, false]))
     |> Enum.join("\n")
   end
 

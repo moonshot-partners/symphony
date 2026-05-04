@@ -151,6 +151,40 @@ codex:
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 
+## Authentication
+
+Symphony's agent subprocess pushes branches and opens PRs against `origin`. It
+can authenticate to GitHub two ways:
+
+### 1. GitHub App (recommended)
+
+Run the bootstrap CLI once:
+
+```bash
+cd priv/agent_shim
+uv run symphony-setup-github-app --org <your-org>
+```
+
+The CLI creates the `symphony-orchestrator` GitHub App via the manifest flow,
+persists the private key to `~/.symphony/github-app.pem` (chmod 600) and an
+env file to `~/.symphony/github-app.env`. After the org owner approves the
+install, finalize with `symphony-setup-github-app --finalize <installation_id>`
+and `source ~/.symphony/github-app.env` before launching Symphony.
+
+PRs are authored by `symphony-orchestrator[bot]`, and you become a natural
+reviewer (no HTTP 422 self-review block). The shim mints a fresh installation
+token every 55 minutes — no long-lived secrets in the agent environment.
+
+Full runbook: [`docs/github-app-setup.md`](docs/github-app-setup.md).
+
+### 2. Personal Access Token (fallback)
+
+If `SYMPHONY_GITHUB_APP_ID`, `SYMPHONY_GITHUB_APP_INSTALLATION_ID`, or
+`SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH` is unset, the shim passes the operator's
+`GH_TOKEN` (or `GITHUB_TOKEN`) through to the agent. This keeps older setups
+working but means PRs are authored by the operator and they cannot self-request
+review.
+
 ## Web dashboard
 
 The observability UI now runs on a minimal Phoenix stack:

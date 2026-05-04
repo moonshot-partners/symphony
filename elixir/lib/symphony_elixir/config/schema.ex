@@ -5,6 +5,8 @@ defmodule SymphonyElixir.Config.Schema do
 
   import Ecto.Changeset
 
+  require Logger
+
   alias SymphonyElixir.PathSafety
 
   @primary_key false
@@ -100,16 +102,38 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  defmodule Agent do
+  defmodule Worker do
     @moduledoc false
     use Ecto.Schema
     import Ecto.Changeset
 
     @primary_key false
     embedded_schema do
+      field(:ssh_hosts, {:array, :string}, default: [])
+      field(:max_concurrent_agents_per_host, :integer)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:ssh_hosts, :max_concurrent_agents_per_host], empty_values: [])
+      |> validate_number(:max_concurrent_agents_per_host, greater_than: 0)
+    end
+  end
+
+  defmodule Agent do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    alias SymphonyElixir.Config.Schema
+
+    @primary_key false
+    embedded_schema do
       field(:max_concurrent_agents, :integer, default: 10)
       field(:max_turns, :integer, default: 20)
       field(:max_retry_backoff_ms, :integer, default: 300_000)
+      field(:max_concurrent_agents_by_state, :map, default: %{})
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -117,23 +141,25 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:max_concurrent_agents, :max_turns, :max_retry_backoff_ms],
+        [:max_concurrent_agents, :max_turns, :max_retry_backoff_ms, :max_concurrent_agents_by_state],
         empty_values: []
       )
       |> validate_number(:max_concurrent_agents, greater_than: 0)
       |> validate_number(:max_turns, greater_than: 0)
       |> validate_number(:max_retry_backoff_ms, greater_than: 0)
+      |> update_change(:max_concurrent_agents_by_state, &Schema.normalize_state_limits/1)
+      |> Schema.validate_state_limits(:max_concurrent_agents_by_state)
     end
   end
 
-  defmodule Codex do
+  defmodule AgentRuntime do
     @moduledoc false
     use Ecto.Schema
     import Ecto.Changeset
 
     @primary_key false
     embedded_schema do
-      field(:command, :string, default: "codex app-server")
+      field(:command, :string, default: "python -m symphony_agent_shim")
 
       field(:approval_policy, StringOrMap,
         default: %{
@@ -241,8 +267,9 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:tracker, Tracker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:polling, Polling, on_replace: :update, defaults_to_struct: true)
     embeds_one(:workspace, Workspace, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:worker, Worker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:agent, Agent, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:agent_runtime, AgentRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
@@ -253,6 +280,7 @@ defmodule SymphonyElixir.Config.Schema do
     config
     |> normalize_keys()
     |> drop_nil_values()
+    |> migrate_codex_alias()
     |> changeset()
     |> apply_action(:validate)
     |> case do
@@ -266,7 +294,7 @@ defmodule SymphonyElixir.Config.Schema do
 
   @spec resolve_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil) :: map()
   def resolve_turn_sandbox_policy(settings, workspace \\ nil) do
-    case settings.codex.turn_sandbox_policy do
+    case settings.agent_runtime.turn_sandbox_policy do
       %{} = policy ->
         policy
 
@@ -278,17 +306,17 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  @spec resolve_runtime_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil) ::
+  @spec resolve_runtime_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil, keyword()) ::
           {:ok, map()} | {:error, term()}
-  def resolve_runtime_turn_sandbox_policy(settings, workspace \\ nil) do
-    case settings.codex.turn_sandbox_policy do
+  def resolve_runtime_turn_sandbox_policy(settings, workspace \\ nil, opts \\ []) do
+    case settings.agent_runtime.turn_sandbox_policy do
       %{} = policy ->
         {:ok, policy}
 
       _ ->
         workspace
         |> default_workspace_root(settings.workspace.root)
-        |> default_runtime_turn_sandbox_policy()
+        |> default_runtime_turn_sandbox_policy(opts)
     end
   end
 
@@ -297,14 +325,44 @@ defmodule SymphonyElixir.Config.Schema do
     String.downcase(state_name)
   end
 
+  @doc false
+  @spec normalize_state_limits(nil | map()) :: map()
+  def normalize_state_limits(nil), do: %{}
+
+  def normalize_state_limits(limits) when is_map(limits) do
+    Enum.reduce(limits, %{}, fn {state_name, limit}, acc ->
+      Map.put(acc, normalize_issue_state(to_string(state_name)), limit)
+    end)
+  end
+
+  @doc false
+  @spec validate_state_limits(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
+  def validate_state_limits(changeset, field) do
+    validate_change(changeset, field, fn ^field, limits ->
+      Enum.flat_map(limits, fn {state_name, limit} ->
+        cond do
+          to_string(state_name) == "" ->
+            [{field, "state names must not be blank"}]
+
+          not is_integer(limit) or limit <= 0 ->
+            [{field, "limits must be positive integers"}]
+
+          true ->
+            []
+        end
+      end)
+    end)
+  end
+
   defp changeset(attrs) do
     %__MODULE__{}
     |> cast(attrs, [])
     |> cast_embed(:tracker, with: &Tracker.changeset/2)
     |> cast_embed(:polling, with: &Polling.changeset/2)
     |> cast_embed(:workspace, with: &Workspace.changeset/2)
+    |> cast_embed(:worker, with: &Worker.changeset/2)
     |> cast_embed(:agent, with: &Agent.changeset/2)
-    |> cast_embed(:codex, with: &Codex.changeset/2)
+    |> cast_embed(:agent_runtime, with: &AgentRuntime.changeset/2)
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
@@ -322,13 +380,13 @@ defmodule SymphonyElixir.Config.Schema do
       | root: resolve_path_value(settings.workspace.root, Path.join(System.tmp_dir!(), "symphony_workspaces"))
     }
 
-    codex = %{
-      settings.codex
-      | approval_policy: normalize_keys(settings.codex.approval_policy),
-        turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
+    agent_runtime = %{
+      settings.agent_runtime
+      | approval_policy: normalize_keys(settings.agent_runtime.approval_policy),
+        turn_sandbox_policy: normalize_optional_map(settings.agent_runtime.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    %{settings | tracker: tracker, workspace: workspace, agent_runtime: agent_runtime}
   end
 
   defp normalize_keys(value) when is_map(value) do
@@ -357,6 +415,24 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp drop_nil_values(value) when is_list(value), do: Enum.map(value, &drop_nil_values/1)
   defp drop_nil_values(value), do: value
+
+  defp migrate_codex_alias(%{"codex" => codex_block} = config) when is_map(codex_block) do
+    case Map.fetch(config, "agent_runtime") do
+      {:ok, _existing} ->
+        Logger.warning("workflow.yml: both `codex:` and `agent_runtime:` set — using `agent_runtime:`. Remove the deprecated `codex:` block.")
+
+        Map.delete(config, "codex")
+
+      :error ->
+        Logger.warning("workflow.yml: `codex:` block is deprecated — rename to `agent_runtime:`. Alias will be removed in a future release.")
+
+        config
+        |> Map.delete("codex")
+        |> Map.put("agent_runtime", codex_block)
+    end
+  end
+
+  defp migrate_codex_alias(config), do: config
 
   defp resolve_secret_setting(nil, fallback), do: normalize_secret_value(fallback)
 
@@ -435,14 +511,18 @@ defmodule SymphonyElixir.Config.Schema do
     }
   end
 
-  defp default_runtime_turn_sandbox_policy(workspace_root) when is_binary(workspace_root) do
-    with expanded_workspace_root <- expand_local_workspace_root(workspace_root),
-         {:ok, canonical_workspace_root} <- PathSafety.canonicalize(expanded_workspace_root) do
-      {:ok, default_turn_sandbox_policy(canonical_workspace_root)}
+  defp default_runtime_turn_sandbox_policy(workspace_root, opts) when is_binary(workspace_root) do
+    if Keyword.get(opts, :remote, false) do
+      {:ok, default_turn_sandbox_policy(workspace_root)}
+    else
+      with expanded_workspace_root <- expand_local_workspace_root(workspace_root),
+           {:ok, canonical_workspace_root} <- PathSafety.canonicalize(expanded_workspace_root) do
+        {:ok, default_turn_sandbox_policy(canonical_workspace_root)}
+      end
     end
   end
 
-  defp default_runtime_turn_sandbox_policy(workspace_root) do
+  defp default_runtime_turn_sandbox_policy(workspace_root, _opts) do
     {:error, {:unsafe_turn_sandbox_policy, {:invalid_workspace_root, workspace_root}}}
   end
 
