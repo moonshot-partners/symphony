@@ -21,8 +21,57 @@ hooks:
   after_create: |
     git clone --depth 1 https://github.com/openai/symphony .
     if command -v mise >/dev/null 2>&1; then
-      cd elixir && mise trust && mise exec -- mix deps.get
+      cd elixir && mise trust && mise exec -- mix deps.get && cd ..
     fi
+    mkdir -p .git/hooks
+    cat > .git/hooks/pre-commit <<'PRECOMMIT_EOF'
+    #!/bin/sh
+    # Symphony pre-commit quality gate.
+    # Bypass with SYMPHONY_DISABLE_PRECOMMIT=1 only for local debugging.
+    set -e
+    [ "${SYMPHONY_DISABLE_PRECOMMIT:-0}" = "1" ] && exit 0
+
+    if command -v mise >/dev/null 2>&1; then
+      MIX="mise exec -- mix"
+    elif command -v mix >/dev/null 2>&1; then
+      MIX="mix"
+    else
+      echo "pre-commit: neither mise nor mix found; skipping format check." >&2
+      exit 0
+    fi
+
+    # Symphony-style monorepo (elixir/ subdir).
+    if [ -f elixir/.formatter.exs ]; then
+      staged=$(git diff --cached --name-only --diff-filter=ACM \
+        | grep -E '^elixir/.*\.(ex|exs)$' \
+        | grep -v '^elixir/\.formatter\.exs$' \
+        || true)
+      if [ -n "$staged" ]; then
+        rel=$(echo "$staged" | sed 's|^elixir/||')
+        (cd elixir && $MIX format --check-formatted $rel) || {
+          echo "pre-commit: mix format failed. Run: cd elixir && $MIX format $rel" >&2
+          exit 1
+        }
+      fi
+    fi
+
+    # Flat Elixir layout.
+    if [ -f .formatter.exs ]; then
+      staged=$(git diff --cached --name-only --diff-filter=ACM \
+        | grep -E '\.(ex|exs)$' \
+        | grep -v '^\.formatter\.exs$' \
+        || true)
+      if [ -n "$staged" ]; then
+        $MIX format --check-formatted $staged || {
+          echo "pre-commit: mix format failed. Run: $MIX format $staged" >&2
+          exit 1
+        }
+      fi
+    fi
+
+    exit 0
+    PRECOMMIT_EOF
+    chmod +x .git/hooks/pre-commit
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
@@ -92,6 +141,20 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - Move status only when the matching quality bar is met.
 - Operate autonomously end-to-end unless blocked by missing requirements, secrets, or permissions.
 - Use the blocked-access escape hatch only for true external blockers (missing required tools/auth) after exhausting documented fallbacks.
+
+## Quality Gates (mandatory)
+
+These rules are non-negotiable for every implementation step. They are enforced both by the workspace pre-commit hook and by reviewer expectation.
+
+- TDD cycle: write failing test first (RED), implement minimum to pass (GREEN), refactor without breaking (REFACTOR), commit per behavior. Skip TDD only for pure config/docs/infra changes.
+- Atomic commits: one behavior per commit, descriptive subject, never mix unrelated changes in the same commit.
+- File length budget: warn at >400 lines, mandatory split at >600 lines. When a file under edit exceeds 600 lines, split before adding new logic.
+- No silent TODOs: every TODO in code must reference an open Linear issue. If you would write a TODO without an issue, file the follow-up Backlog issue first (same project, `related` link to current).
+- Verification before push: run lint and the full test suite for the touched scope. If lint or tests fail, fix or revert before pushing. Never bypass with `--no-verify`.
+- Pre-commit hook: the workspace ships with a `.git/hooks/pre-commit` that runs `mix format --check-formatted` on staged Elixir files. Do not delete or skip it. `SYMPHONY_DISABLE_PRECOMMIT=1` is for emergency local debugging only, never for pushed commits.
+- Over-abstraction (Karpathy rule): do not introduce an interface or abstract class for a single concrete implementation. Prefer the concrete type until a second use case forces the abstraction.
+- Drive-by refactors: do not rename, reformat, or rewrite code outside the scope of the current ticket. Out-of-scope improvements go to a separate Backlog issue, not into the current diff.
+- Frontend changes: prioritize visual silence and low cognitive load. Reuse design tokens. WCAG AA contrast minimum. Replace default browser focus rings with custom states.
 
 ## Related skills
 
