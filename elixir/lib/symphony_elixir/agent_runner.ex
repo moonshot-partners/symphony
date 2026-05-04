@@ -1,17 +1,22 @@
 defmodule SymphonyElixir.AgentRunner do
   @moduledoc """
-  Executes a single Linear issue in its workspace with Codex.
+  Executes a single Linear issue in its workspace with the Agent.
   """
 
   require Logger
-  alias SymphonyElixir.Codex.AppServer
+  alias SymphonyElixir.Agent.AppServer
   alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
-  @spec run(map(), pid() | nil, keyword()) :: :ok | no_return()
-  def run(issue, codex_update_recipient \\ nil, opts \\ []) do
-    Logger.info("Starting agent run for #{issue_context(issue)}")
+  @type worker_host :: String.t() | nil
 
-    case run_locally(issue, codex_update_recipient, opts) do
+  @spec run(map(), pid() | nil, keyword()) :: :ok | no_return()
+  def run(issue, agent_update_recipient \\ nil, opts \\ []) do
+    # The orchestrator owns host retries so one worker lifetime never hops machines.
+    worker_host = selected_worker_host(Keyword.get(opts, :worker_host), Config.settings!().worker.ssh_hosts)
+
+    Logger.info("Starting agent run for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
+
+    case run_on_worker_host(issue, agent_update_recipient, opts, worker_host) do
       :ok ->
         :ok
 
@@ -21,17 +26,19 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp run_locally(issue, codex_update_recipient, opts) do
-    case Workspace.create_for_issue(issue, nil) do
+  defp run_on_worker_host(issue, agent_update_recipient, opts, worker_host) do
+    Logger.info("Starting worker attempt for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
+
+    case Workspace.create_for_issue(issue, worker_host) do
       {:ok, workspace} ->
-        send_worker_runtime_info(codex_update_recipient, issue, workspace)
+        send_worker_runtime_info(agent_update_recipient, issue, worker_host, workspace)
 
         try do
-          with :ok <- Workspace.run_before_run_hook(workspace, issue, nil) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts)
+          with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
+            run_agent_turns(workspace, issue, agent_update_recipient, opts, worker_host)
           end
         after
-          Workspace.run_after_run_hook(workspace, issue, nil)
+          Workspace.run_after_run_hook(workspace, issue, worker_host)
         end
 
       {:error, reason} ->
@@ -39,27 +46,27 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp codex_message_handler(recipient, issue) do
+  defp agent_message_handler(recipient, issue) do
     fn message ->
-      send_codex_update(recipient, issue, message)
+      send_agent_update(recipient, issue, message)
     end
   end
 
-  defp send_codex_update(recipient, %Issue{id: issue_id}, message)
+  defp send_agent_update(recipient, %Issue{id: issue_id}, message)
        when is_binary(issue_id) and is_pid(recipient) do
-    send(recipient, {:codex_worker_update, issue_id, message})
+    send(recipient, {:agent_worker_update, issue_id, message})
     :ok
   end
 
-  defp send_codex_update(_recipient, _issue, _message), do: :ok
+  defp send_agent_update(_recipient, _issue, _message), do: :ok
 
-  defp send_worker_runtime_info(recipient, %Issue{id: issue_id}, workspace)
+  defp send_worker_runtime_info(recipient, %Issue{id: issue_id}, worker_host, workspace)
        when is_binary(issue_id) and is_pid(recipient) and is_binary(workspace) do
     send(
       recipient,
       {:worker_runtime_info, issue_id,
        %{
-         worker_host: nil,
+         worker_host: worker_host,
          workspace_path: workspace
        }}
     )
@@ -67,22 +74,22 @@ defmodule SymphonyElixir.AgentRunner do
     :ok
   end
 
-  defp send_worker_runtime_info(_recipient, _issue, _workspace), do: :ok
+  defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
-  defp run_codex_turns(workspace, issue, codex_update_recipient, opts) do
+  defp run_agent_turns(workspace, issue, agent_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: nil) do
+    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
       try do
-        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
+        do_run_agent_turns(session, workspace, issue, agent_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
         AppServer.stop_session(session)
       end
     end
   end
 
-  defp do_run_codex_turns(app_session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
+  defp do_run_agent_turns(app_session, workspace, issue, agent_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
     prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
 
     with {:ok, turn_session} <-
@@ -90,7 +97,7 @@ defmodule SymphonyElixir.AgentRunner do
              app_session,
              prompt,
              issue,
-             on_message: codex_message_handler(codex_update_recipient, issue)
+             on_message: agent_message_handler(agent_update_recipient, issue)
            ) do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
@@ -98,11 +105,11 @@ defmodule SymphonyElixir.AgentRunner do
         {:continue, refreshed_issue} when turn_number < max_turns ->
           Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
-          do_run_codex_turns(
+          do_run_agent_turns(
             app_session,
             workspace,
             refreshed_issue,
-            codex_update_recipient,
+            agent_update_recipient,
             opts,
             issue_state_fetcher,
             turn_number + 1,
@@ -129,7 +136,7 @@ defmodule SymphonyElixir.AgentRunner do
     """
     Continuation guidance:
 
-    - The previous Codex turn completed normally, but the Linear issue is still in an active state.
+    - The previous Agent turn completed normally, but the Linear issue is still in an active state.
     - This is continuation turn ##{turn_number} of #{max_turns} for the current agent run.
     - Resume from the current workspace and workpad state instead of restarting from scratch.
     - The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.
@@ -140,11 +147,7 @@ defmodule SymphonyElixir.AgentRunner do
   defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do
     case issue_state_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if active_issue_state?(refreshed_issue.state) do
-          {:continue, refreshed_issue}
-        else
-          {:done, refreshed_issue}
-        end
+        decide_continuation(refreshed_issue)
 
       {:ok, []} ->
         {:done, issue}
@@ -156,6 +159,29 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
 
+  defp decide_continuation(%Issue{} = refreshed_issue) do
+    case continuation_decision(refreshed_issue) do
+      :continue -> {:continue, refreshed_issue}
+      :done -> done_with_log(refreshed_issue)
+    end
+  end
+
+  defp done_with_log(%Issue{has_pr_attachment: true} = issue) do
+    Logger.info("PR attachment detected for #{issue_context(issue)}; stopping continuation loop")
+    {:done, issue}
+  end
+
+  defp done_with_log(%Issue{} = issue), do: {:done, issue}
+
+  @spec continuation_decision_for_test(Issue.t()) :: :continue | :done
+  def continuation_decision_for_test(%Issue{} = issue), do: continuation_decision(issue)
+
+  defp continuation_decision(%Issue{has_pr_attachment: true}), do: :done
+
+  defp continuation_decision(%Issue{state: state}) do
+    if active_issue_state?(state), do: :continue, else: :done
+  end
+
   defp active_issue_state?(state_name) when is_binary(state_name) do
     normalized_state = normalize_issue_state(state_name)
 
@@ -164,6 +190,25 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp active_issue_state?(_state_name), do: false
+
+  defp selected_worker_host(nil, []), do: nil
+
+  defp selected_worker_host(preferred_host, configured_hosts) when is_list(configured_hosts) do
+    hosts =
+      configured_hosts
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    case preferred_host do
+      host when is_binary(host) and host != "" -> host
+      _ when hosts == [] -> nil
+      _ -> List.first(hosts)
+    end
+  end
+
+  defp worker_host_for_log(nil), do: "local"
+  defp worker_host_for_log(worker_host), do: worker_host
 
   defp normalize_issue_state(state_name) when is_binary(state_name) do
     state_name

@@ -1,7 +1,8 @@
 defmodule SymphonyElixir.WorkspaceAndConfigTest do
   use SymphonyElixir.TestSupport
+  alias Ecto.Changeset
   alias SymphonyElixir.Config.Schema
-  alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
+  alias SymphonyElixir.Config.Schema.{AgentRuntime, StringOrMap}
   alias SymphonyElixir.Linear.Client
 
   test "workspace bootstrap can be implemented in after_create hook" do
@@ -354,6 +355,30 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert issue.assigned_to_worker
   end
 
+  test "linear client keeps assignee name and display_name on the issue struct" do
+    raw_issue = %{
+      "id" => "issue-1",
+      "identifier" => "SODEV-1",
+      "title" => "T",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-1",
+        "name" => "Vini Freitas",
+        "displayName" => "vini",
+        "email" => "v@example.com"
+      },
+      "labels" => %{"nodes" => []},
+      "attachments" => %{"nodes" => []},
+      "inverseRelations" => %{"nodes" => []}
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    assert issue.assignee_id == "user-1"
+    assert issue.assignee_name == "Vini Freitas"
+    assert issue.assignee_display_name == "vini"
+  end
+
   test "linear client marks explicitly unassigned issues as not routed to worker" do
     raw_issue = %{
       "id" => "issue-99",
@@ -366,6 +391,178 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     }
 
     issue = Client.normalize_issue_for_test(raw_issue, "user-1")
+
+    refute issue.assigned_to_worker
+  end
+
+  test "linear client matches assignee filter against email" do
+    raw_issue = %{
+      "id" => "issue-email",
+      "identifier" => "MT-EMAIL",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "cba6b899-138e-465b-a79d-250eff3508e0",
+        "email" => "vinicius.freitas@moonshot.partners",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client matches assignee filter against email case-insensitively" do
+    raw_issue = %{
+      "id" => "issue-email-ci",
+      "identifier" => "MT-EMAIL-CI",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-x",
+        "email" => "Vinicius.Freitas@Moonshot.Partners",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client matches assignee filter against name case-insensitively" do
+    raw_issue = %{
+      "id" => "issue-name",
+      "identifier" => "MT-NAME",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-y",
+        "email" => "other@example.com",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "vinicius freitas")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client marks has_pr_attachment when a GitHub PR url is present" do
+    raw_issue = %{
+      "id" => "issue-pr",
+      "identifier" => "MT-PR",
+      "state" => %{"name" => "In Progress"},
+      "attachments" => %{
+        "nodes" => [
+          %{"url" => "https://example.org/random/link"},
+          %{"url" => "https://github.com/owner/repo/pull/728"}
+        ]
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    assert issue.has_pr_attachment
+  end
+
+  test "linear client leaves has_pr_attachment false when no GitHub PR url is attached" do
+    raw_issue = %{
+      "id" => "issue-no-pr",
+      "identifier" => "MT-NOPR",
+      "state" => %{"name" => "In Progress"},
+      "attachments" => %{
+        "nodes" => [
+          %{"url" => "https://github.com/owner/repo/issues/1"},
+          %{"url" => "https://example.org/foo"}
+        ]
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    refute issue.has_pr_attachment
+  end
+
+  test "linear client leaves has_pr_attachment false when attachments are absent" do
+    raw_issue = %{
+      "id" => "issue-blank",
+      "identifier" => "MT-BLANK",
+      "state" => %{"name" => "In Progress"}
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue)
+
+    refute issue.has_pr_attachment
+  end
+
+  test "linear client matches assignee filter against displayName" do
+    raw_issue = %{
+      "id" => "issue-display",
+      "identifier" => "MT-DISP",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-z",
+        "email" => "other@example.com",
+        "name" => "Other Person",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue = Client.normalize_issue_for_test(raw_issue, "Vinicius")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client preserves UUID match for assignee filter" do
+    raw_issue = %{
+      "id" => "issue-uuid",
+      "identifier" => "MT-UUID",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "cba6b899-138e-465b-a79d-250eff3508e0",
+        "email" => "vinicius.freitas@moonshot.partners",
+        "name" => "Vinicius Freitas",
+        "displayName" => "vinicius"
+      }
+    }
+
+    issue =
+      Client.normalize_issue_for_test(raw_issue, "cba6b899-138e-465b-a79d-250eff3508e0")
+
+    assert issue.assigned_to_worker
+  end
+
+  test "linear client rejects assignee when no field matches the filter" do
+    raw_issue = %{
+      "id" => "issue-miss",
+      "identifier" => "MT-MISS",
+      "state" => %{"name" => "Todo"},
+      "assignee" => %{
+        "id" => "user-other",
+        "email" => "other@example.com",
+        "name" => "Other Person",
+        "displayName" => "other"
+      }
+    }
+
+    issue =
+      Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
+
+    refute issue.assigned_to_worker
+  end
+
+  test "linear client rejects nil assignee when filter is active" do
+    raw_issue = %{
+      "id" => "issue-nil",
+      "identifier" => "MT-NIL",
+      "state" => %{"name" => "Todo"},
+      "assignee" => nil
+    }
+
+    issue =
+      Client.normalize_issue_for_test(raw_issue, "vinicius.freitas@moonshot.partners")
 
     refute issue.assigned_to_worker
   end
@@ -500,7 +697,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       max_concurrent_agents: 3,
       running: %{},
       claimed: MapSet.new(),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -522,7 +719,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       max_concurrent_agents: 3,
       running: %{},
       claimed: MapSet.new(),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -537,12 +734,32 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Orchestrator.should_dispatch_issue_for_test(issue, state)
   end
 
+  test "issue with an attached pull request is not dispatch-eligible" do
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: "with-pr-1",
+      identifier: "MT-1099",
+      title: "PR already shipped",
+      state: "In Progress",
+      has_pr_attachment: true
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+  end
+
   test "todo issue with terminal blockers remains dispatch-eligible" do
     state = %Orchestrator.State{
       max_concurrent_agents: 3,
       running: %{},
       claimed: MapSet.new(),
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       retry_attempts: %{}
     }
 
@@ -726,12 +943,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       workspace_root: nil,
       max_concurrent_agents: nil,
-      codex_approval_policy: nil,
-      codex_thread_sandbox: nil,
-      codex_turn_sandbox_policy: nil,
-      codex_turn_timeout_ms: nil,
-      codex_read_timeout_ms: nil,
-      codex_stall_timeout_ms: nil,
+      agent_runtime_approval_policy: nil,
+      agent_runtime_thread_sandbox: nil,
+      agent_runtime_turn_sandbox_policy: nil,
+      agent_runtime_turn_timeout_ms: nil,
+      agent_runtime_read_timeout_ms: nil,
+      agent_runtime_stall_timeout_ms: nil,
       tracker_api_token: nil,
       tracker_project_slug: nil
     )
@@ -741,10 +958,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.tracker.api_key == nil
     assert config.tracker.project_slug == nil
     assert config.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
+    assert config.worker.max_concurrent_agents_per_host == nil
     assert config.agent.max_concurrent_agents == 10
-    assert config.codex.command == "codex app-server"
+    assert config.agent_runtime.command == "python -m symphony_agent_shim"
 
-    assert config.codex.approval_policy == %{
+    assert config.agent_runtime.approval_policy == %{
              "reject" => %{
                "sandbox_approval" => true,
                "rules" => true,
@@ -752,12 +970,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              }
            }
 
-    assert config.codex.thread_sandbox == "workspace-write"
+    assert config.agent_runtime.thread_sandbox == "workspace-write"
 
     assert {:ok, canonical_default_workspace_root} =
              SymphonyElixir.PathSafety.canonicalize(Path.join(System.tmp_dir!(), "symphony_workspaces"))
 
-    assert Config.codex_turn_sandbox_policy() == %{
+    assert Config.agent_runtime_turn_sandbox_policy() == %{
              "type" => "workspaceWrite",
              "writableRoots" => [canonical_default_workspace_root],
              "readOnlyAccess" => %{"type" => "fullAccess"},
@@ -766,15 +984,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "excludeSlashTmp" => false
            }
 
-    assert config.codex.turn_timeout_ms == 3_600_000
-    assert config.codex.read_timeout_ms == 5_000
-    assert config.codex.stall_timeout_ms == 300_000
+    assert config.agent_runtime.turn_timeout_ms == 3_600_000
+    assert config.agent_runtime.read_timeout_ms == 5_000
+    assert config.agent_runtime.stall_timeout_ms == 300_000
 
     write_workflow_file!(Workflow.workflow_file_path(),
-      codex_command: "codex --config 'model=\"gpt-5.5\"' app-server"
+      agent_runtime_command: "codex --config 'model=\"gpt-5.5\"' app-server"
     )
 
-    assert Config.settings!().codex.command ==
+    assert Config.settings!().agent_runtime.command ==
              "codex --config 'model=\"gpt-5.5\"' app-server"
 
     explicit_root =
@@ -791,19 +1009,19 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       workspace_root: explicit_root,
-      codex_approval_policy: "on-request",
-      codex_thread_sandbox: "workspace-write",
-      codex_turn_sandbox_policy: %{
+      agent_runtime_approval_policy: "on-request",
+      agent_runtime_thread_sandbox: "workspace-write",
+      agent_runtime_turn_sandbox_policy: %{
         type: "workspaceWrite",
         writableRoots: [explicit_workspace, explicit_cache]
       }
     )
 
     config = Config.settings!()
-    assert config.codex.approval_policy == "on-request"
-    assert config.codex.thread_sandbox == "workspace-write"
+    assert config.agent_runtime.approval_policy == "on-request"
+    assert config.agent_runtime.thread_sandbox == "workspace-write"
 
-    assert Config.codex_turn_sandbox_policy(explicit_workspace) == %{
+    assert Config.agent_runtime_turn_sandbox_policy(explicit_workspace) == %{
              "type" => "workspaceWrite",
              "writableRoots" => [explicit_workspace, explicit_cache]
            }
@@ -816,17 +1034,21 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
     assert message =~ "agent.max_concurrent_agents"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_turn_timeout_ms: "bad")
+    write_workflow_file!(Workflow.workflow_file_path(), worker_max_concurrent_agents_per_host: 0)
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.turn_timeout_ms"
+    assert message =~ "worker.max_concurrent_agents_per_host"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_read_timeout_ms: "bad")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_turn_timeout_ms: "bad")
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.read_timeout_ms"
+    assert message =~ "agent_runtime.turn_timeout_ms"
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_stall_timeout_ms: "bad")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_read_timeout_ms: "bad")
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.stall_timeout_ms"
+    assert message =~ "agent_runtime.read_timeout_ms"
+
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_stall_timeout_ms: "bad")
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "agent_runtime.stall_timeout_ms"
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: %{todo: true},
@@ -834,6 +1056,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       poll_interval_ms: %{bad: true},
       workspace_root: 123,
       max_retry_backoff_ms: 0,
+      max_concurrent_agents_by_state: %{"Todo" => "1", "Review" => 0, "Done" => "bad"},
       hook_timeout_ms: 0,
       observability_enabled: "maybe",
       observability_refresh_ms: %{bad: true},
@@ -844,40 +1067,40 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert {:error, {:invalid_workflow_config, _message}} = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: "")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_approval_policy: "")
     assert :ok = Config.validate!()
-    assert Config.settings!().codex.approval_policy == ""
+    assert Config.settings!().agent_runtime.approval_policy == ""
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: "")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_thread_sandbox: "")
     assert :ok = Config.validate!()
-    assert Config.settings!().codex.thread_sandbox == ""
+    assert Config.settings!().agent_runtime.thread_sandbox == ""
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_turn_sandbox_policy: "bad")
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_turn_sandbox_policy: "bad")
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "codex.turn_sandbox_policy"
+    assert message =~ "agent_runtime.turn_sandbox_policy"
 
     write_workflow_file!(Workflow.workflow_file_path(),
-      codex_approval_policy: "future-policy",
-      codex_thread_sandbox: "future-sandbox",
-      codex_turn_sandbox_policy: %{
+      agent_runtime_approval_policy: "future-policy",
+      agent_runtime_thread_sandbox: "future-sandbox",
+      agent_runtime_turn_sandbox_policy: %{
         type: "futureSandbox",
         nested: %{flag: true}
       }
     )
 
     config = Config.settings!()
-    assert config.codex.approval_policy == "future-policy"
-    assert config.codex.thread_sandbox == "future-sandbox"
+    assert config.agent_runtime.approval_policy == "future-policy"
+    assert config.agent_runtime.thread_sandbox == "future-sandbox"
 
     assert :ok = Config.validate!()
 
-    assert Config.codex_turn_sandbox_policy() == %{
+    assert Config.agent_runtime_turn_sandbox_policy() == %{
              "type" => "futureSandbox",
              "nested" => %{"flag" => true}
            }
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_command: "codex app-server")
-    assert Config.settings!().codex.command == "codex app-server"
+    write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_command: "codex app-server")
+    assert Config.settings!().agent_runtime.command == "codex app-server"
   end
 
   test "config resolves $VAR references for env-backed secret and path values" do
@@ -901,13 +1124,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "$#{api_key_env_var}",
       workspace_root: "$#{workspace_env_var}",
-      codex_command: "#{codex_bin} app-server"
+      agent_runtime_command: "#{codex_bin} app-server"
     )
 
     config = Config.settings!()
     assert config.tracker.api_key == api_key
     assert config.workspace.root == Path.expand(workspace_root)
-    assert config.codex.command == "#{codex_bin} app-server"
+    assert config.agent_runtime.command == "#{codex_bin} app-server"
   end
 
   test "config no longer resolves legacy env: references" do
@@ -937,7 +1160,33 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.workspace.root == "env:#{workspace_env_var}"
   end
 
-  test "schema helpers cover custom type for string-or-map fields" do
+  test "config supports per-state max concurrent agent overrides" do
+    workflow = """
+    ---
+    agent:
+      max_concurrent_agents: 10
+      max_concurrent_agents_by_state:
+        todo: 1
+        "In Progress": 4
+        "In Review": 2
+    ---
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+
+    assert Config.settings!().agent.max_concurrent_agents == 10
+    assert Config.max_concurrent_agents_for_state("Todo") == 1
+    assert Config.max_concurrent_agents_for_state("In Progress") == 4
+    assert Config.max_concurrent_agents_for_state("In Review") == 2
+    assert Config.max_concurrent_agents_for_state("Closed") == 10
+    assert Config.max_concurrent_agents_for_state(:not_a_string) == 10
+
+    write_workflow_file!(Workflow.workflow_file_path(), worker_max_concurrent_agents_per_host: 2)
+    assert :ok = Config.validate!()
+    assert Config.settings!().worker.max_concurrent_agents_per_host == 2
+  end
+
+  test "schema helpers cover custom type and state limit validation" do
     assert StringOrMap.type() == :map
     assert StringOrMap.embed_as(:json) == :self
     assert StringOrMap.equal?(%{"a" => 1}, %{"a" => 1})
@@ -952,6 +1201,23 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert {:ok, %{"a" => 1}} = StringOrMap.dump(%{"a" => 1})
     assert :error = StringOrMap.dump(123)
+
+    assert Schema.normalize_state_limits(nil) == %{}
+
+    assert Schema.normalize_state_limits(%{"In Progress" => 2, todo: 1}) == %{
+             "todo" => 1,
+             "in progress" => 2
+           }
+
+    changeset =
+      {%{}, %{limits: :map}}
+      |> Changeset.cast(%{limits: %{"" => 1, "todo" => 0}}, [:limits])
+      |> Schema.validate_state_limits(:limits)
+
+    assert changeset.errors == [
+             limits: {"state names must not be blank", []},
+             limits: {"limits must be positive integers", []}
+           ]
   end
 
   test "schema parse normalizes policy keys and env-backed fallbacks" do
@@ -980,13 +1246,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              Schema.parse(%{
                tracker: %{api_key: "$#{empty_secret_env}"},
                workspace: %{root: "$#{missing_workspace_env}"},
-               codex: %{approval_policy: %{reject: %{sandbox_approval: true}}}
+               agent_runtime: %{approval_policy: %{reject: %{sandbox_approval: true}}}
              })
 
     assert settings.tracker.api_key == nil
     assert settings.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
 
-    assert settings.codex.approval_policy == %{
+    assert settings.agent_runtime.approval_policy == %{
              "reject" => %{"sandbox_approval" => true}
            }
 
@@ -1000,16 +1266,47 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
   end
 
+  test "schema parse accepts deprecated `codex:` block as alias for `agent_runtime:`" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, settings} =
+                 Schema.parse(%{
+                   "codex" => %{"command" => "legacy-codex app-server"}
+                 })
+
+        assert settings.agent_runtime.command == "legacy-codex app-server"
+      end)
+
+    assert log =~ "deprecated"
+    assert log =~ "agent_runtime"
+  end
+
+  test "schema parse prefers `agent_runtime:` when both blocks set, warning about `codex:`" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, settings} =
+                 Schema.parse(%{
+                   "codex" => %{"command" => "ignored-legacy"},
+                   "agent_runtime" => %{"command" => "winning-runtime"}
+                 })
+
+        assert settings.agent_runtime.command == "winning-runtime"
+      end)
+
+    assert log =~ "both"
+    assert log =~ "agent_runtime"
+  end
+
   test "schema resolves sandbox policies from explicit and default workspaces" do
     explicit_policy = %{"type" => "workspaceWrite", "writableRoots" => ["/tmp/explicit"]}
 
     assert Schema.resolve_turn_sandbox_policy(%Schema{
-             codex: %Codex{turn_sandbox_policy: explicit_policy},
+             agent_runtime: %AgentRuntime{turn_sandbox_policy: explicit_policy},
              workspace: %Schema.Workspace{root: "/tmp/ignored"}
            }) == explicit_policy
 
     assert Schema.resolve_turn_sandbox_policy(%Schema{
-             codex: %Codex{turn_sandbox_policy: nil},
+             agent_runtime: %AgentRuntime{turn_sandbox_policy: nil},
              workspace: %Schema.Workspace{root: ""}
            }) == %{
              "type" => "workspaceWrite",
@@ -1022,7 +1319,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Schema.resolve_turn_sandbox_policy(
              %Schema{
-               codex: %Codex{turn_sandbox_policy: nil},
+               agent_runtime: %AgentRuntime{turn_sandbox_policy: nil},
                workspace: %Schema.Workspace{root: "/tmp/ignored"}
              },
              "/tmp/workspace"
@@ -1040,7 +1337,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert {:ok, settings} =
              Schema.parse(%{
                workspace: %{root: "~/.symphony-workspaces"},
-               codex: %{}
+               agent_runtime: %{}
              })
 
     assert settings.workspace.root == "~/.symphony-workspaces"
@@ -1048,6 +1345,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Schema.resolve_turn_sandbox_policy(settings) == %{
              "type" => "workspaceWrite",
              "writableRoots" => [Path.expand("~/.symphony-workspaces")],
+             "readOnlyAccess" => %{"type" => "fullAccess"},
+             "networkAccess" => false,
+             "excludeTmpdirEnvVar" => false,
+             "excludeSlashTmp" => false
+           }
+
+    assert {:ok, remote_policy} =
+             Schema.resolve_runtime_turn_sandbox_policy(settings, nil, remote: true)
+
+    assert remote_policy == %{
+             "type" => "workspaceWrite",
+             "writableRoots" => ["~/.symphony-workspaces"],
              "readOnlyAccess" => %{"type" => "fullAccess"},
              "networkAccess" => false,
              "excludeTmpdirEnvVar" => false,
@@ -1069,14 +1378,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_turn_sandbox_policy: %{
+        agent_runtime_turn_sandbox_policy: %{
           type: "workspaceWrite",
           writableRoots: ["relative/path"],
           networkAccess: true
         }
       )
 
-      assert {:ok, runtime_settings} = Config.codex_runtime_settings(issue_workspace)
+      assert {:ok, runtime_settings} = Config.agent_runtime_settings(issue_workspace)
 
       assert runtime_settings.turn_sandbox_policy == %{
                "type" => "workspaceWrite",
@@ -1086,13 +1395,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_turn_sandbox_policy: %{
+        agent_runtime_turn_sandbox_policy: %{
           type: "futureSandbox",
           nested: %{flag: true}
         }
       )
 
-      assert {:ok, runtime_settings} = Config.codex_runtime_settings(issue_workspace)
+      assert {:ok, runtime_settings} = Config.agent_runtime_settings(issue_workspace)
 
       assert runtime_settings.turn_sandbox_policy == %{
                "type" => "futureSandbox",
@@ -1143,7 +1452,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       read_only_settings = %{
         settings
-        | codex: %{settings.codex | turn_sandbox_policy: %{"type" => "readOnly", "networkAccess" => true}}
+        | agent_runtime: %{settings.agent_runtime | turn_sandbox_policy: %{"type" => "readOnly", "networkAccess" => true}}
       }
 
       assert {:ok, %{"type" => "readOnly", "networkAccess" => true}} =
@@ -1151,7 +1460,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       future_settings = %{
         settings
-        | codex: %{settings.codex | turn_sandbox_policy: %{"type" => "futureSandbox", "nested" => %{"flag" => true}}}
+        | agent_runtime: %{settings.agent_runtime | turn_sandbox_policy: %{"type" => "futureSandbox", "nested" => %{"flag" => true}}}
       }
 
       assert {:ok, %{"type" => "futureSandbox", "nested" => %{"flag" => true}}} =
@@ -1170,5 +1479,4 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
     assert Config.workflow_prompt() == workflow_prompt
   end
-
 end

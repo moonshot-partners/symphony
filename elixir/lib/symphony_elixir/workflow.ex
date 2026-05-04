@@ -6,11 +6,21 @@ defmodule SymphonyElixir.Workflow do
   alias SymphonyElixir.WorkflowStore
 
   @workflow_file_name "WORKFLOW.md"
+  @workflow_file_env_var "SYMPHONY_WORKFLOW_FILE"
 
   @spec workflow_file_path() :: Path.t()
   def workflow_file_path do
     Application.get_env(:symphony_elixir, :workflow_file_path) ||
+      resolve_env_workflow_file() ||
       Path.join(File.cwd!(), @workflow_file_name)
+  end
+
+  defp resolve_env_workflow_file do
+    case System.get_env(@workflow_file_env_var) do
+      nil -> nil
+      "" -> nil
+      path -> if Path.type(path) == :absolute, do: path, else: Path.join(File.cwd!(), path)
+    end
   end
 
   @spec set_workflow_file_path(Path.t()) :: :ok

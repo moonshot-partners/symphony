@@ -25,6 +25,9 @@ defmodule SymphonyElixir.Linear.Client do
         url
         assignee {
           id
+          email
+          name
+          displayName
         }
         labels {
           nodes {
@@ -41,6 +44,11 @@ defmodule SymphonyElixir.Linear.Client do
                 name
               }
             }
+          }
+        }
+        attachments(first: 25) {
+          nodes {
+            url
           }
         }
         createdAt
@@ -70,6 +78,9 @@ defmodule SymphonyElixir.Linear.Client do
         url
         assignee {
           id
+          email
+          name
+          displayName
         }
         labels {
           nodes {
@@ -86,6 +97,11 @@ defmodule SymphonyElixir.Linear.Client do
                 name
               }
             }
+          }
+        }
+        attachments(first: 25) {
+          nodes {
+            url
           }
         }
         createdAt
@@ -182,6 +198,12 @@ defmodule SymphonyElixir.Linear.Client do
         Logger.error("Linear GraphQL request failed: #{inspect(reason)}")
         {:error, {:linear_api_request, reason}}
     end
+  end
+
+  @doc false
+  @spec normalize_issue_for_test(map()) :: Issue.t() | nil
+  def normalize_issue_for_test(issue) when is_map(issue) do
+    normalize_issue(issue, nil)
   end
 
   @doc false
@@ -445,18 +467,62 @@ defmodule SymphonyElixir.Linear.Client do
       description: issue["description"],
       priority: parse_priority(issue["priority"]),
       state: get_in(issue, ["state", "name"]),
+      state_type: get_in(issue, ["state", "type"]),
       branch_name: issue["branchName"],
       url: issue["url"],
       assignee_id: assignee_field(assignee, "id"),
+      assignee_name: assignee_field(assignee, "name"),
+      assignee_display_name: assignee_field(assignee, "displayName"),
       blocked_by: extract_blockers(issue),
       labels: extract_labels(issue),
+      repos: extract_repos(issue),
       assigned_to_worker: assigned_to_worker?(assignee, assignee_filter),
+      has_pr_attachment: pr_attachment?(issue),
       created_at: parse_datetime(issue["createdAt"]),
       updated_at: parse_datetime(issue["updatedAt"])
     }
   end
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
+
+  @github_pr_url ~r{^https://github\.com/[^/]+/(?<repo>[^/]+)/pull/\d+(?:/|$)}i
+
+  defp pr_attachment?(%{"attachments" => %{"nodes" => nodes}}) when is_list(nodes) do
+    Enum.any?(nodes, fn
+      %{"url" => url} when is_binary(url) -> Regex.match?(@github_pr_url, url)
+      _ -> false
+    end)
+  end
+
+  defp pr_attachment?(_issue), do: false
+
+  @doc """
+  Extracts GitHub PR attachments from a raw Linear issue payload into the
+  normalized `[%{name, pr: %{url, merged, review}}]` shape consumed by the board
+  presenter. Non-PR URLs are ignored. Duplicate PR URLs collapse to one entry.
+  Merge/review fields default to `false`/`nil` and are filled by
+  `Symphony.GitHub.PrStatus` enrichment downstream.
+  """
+  @spec extract_repos(map()) :: [SymphonyElixir.Linear.Issue.repo()]
+  def extract_repos(%{"attachments" => %{"nodes" => nodes}}) when is_list(nodes) do
+    nodes
+    |> Enum.flat_map(fn
+      %{"url" => url} when is_binary(url) ->
+        case Regex.named_captures(@github_pr_url, url) do
+          %{"repo" => repo} -> [{repo, url}]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.uniq_by(fn {_repo, url} -> url end)
+    |> Enum.map(fn {repo, url} ->
+      %{name: repo, pr: %{url: url, merged: false, review: nil}}
+    end)
+  end
+
+  def extract_repos(_issue), do: []
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil
@@ -466,14 +532,20 @@ defmodule SymphonyElixir.Linear.Client do
   defp assigned_to_worker?(%{} = assignee, %{match_values: match_values})
        when is_struct(match_values, MapSet) do
     assignee
-    |> assignee_id()
-    |> then(fn
-      nil -> false
-      assignee_id -> MapSet.member?(match_values, assignee_id)
-    end)
+    |> assignee_match_candidates()
+    |> Enum.any?(&MapSet.member?(match_values, &1))
   end
 
   defp assigned_to_worker?(_assignee, _assignee_filter), do: false
+
+  defp assignee_match_candidates(%{} = assignee) do
+    Enum.flat_map(["id", "email", "name", "displayName"], fn field ->
+      case normalize_assignee_match_value(assignee[field]) do
+        nil -> []
+        value -> [String.downcase(value)]
+      end
+    end)
+  end
 
   defp assignee_id(%{} = assignee), do: normalize_assignee_match_value(assignee["id"])
 
@@ -496,7 +568,11 @@ defmodule SymphonyElixir.Linear.Client do
         resolve_viewer_assignee_filter()
 
       normalized ->
-        {:ok, %{configured_assignee: assignee, match_values: MapSet.new([normalized])}}
+        {:ok,
+         %{
+           configured_assignee: assignee,
+           match_values: MapSet.new([String.downcase(normalized)])
+         }}
     end
   end
 
@@ -508,7 +584,11 @@ defmodule SymphonyElixir.Linear.Client do
             {:error, :missing_linear_viewer_identity}
 
           viewer_id ->
-            {:ok, %{configured_assignee: "me", match_values: MapSet.new([viewer_id])}}
+            {:ok,
+             %{
+               configured_assignee: "me",
+               match_values: MapSet.new([String.downcase(viewer_id)])
+             }}
         end
 
       {:ok, _body} ->

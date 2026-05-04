@@ -1,10 +1,10 @@
-defmodule SymphonyElixir.Codex.AppServer do
+defmodule SymphonyElixir.Agent.AppServer do
   @moduledoc """
-  Minimal client for the Codex app-server JSON-RPC 2.0 stream over stdio.
+  Minimal client for the Agent app-server JSON-RPC 2.0 stream over stdio.
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety}
+  alias SymphonyElixir.{Agent.DynamicTool, Config, PathSafety}
 
   @initialize_id 1
   @thread_start_id 2
@@ -21,7 +21,8 @@ defmodule SymphonyElixir.Codex.AppServer do
           thread_sandbox: String.t(),
           turn_sandbox_policy: map(),
           thread_id: String.t(),
-          workspace: Path.t()
+          workspace: Path.t(),
+          worker_host: String.t() | nil
         }
 
   @spec run(Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -36,12 +37,14 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
-  def start_session(workspace, _opts \\ []) do
-    with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace),
-         {:ok, port} <- start_port(expanded_workspace) do
-      metadata = port_metadata(port)
+  def start_session(workspace, opts \\ []) do
+    worker_host = Keyword.get(opts, :worker_host)
 
-      with {:ok, session_policies} <- session_policies(expanded_workspace),
+    with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
+         {:ok, port} <- start_port(expanded_workspace, worker_host) do
+      metadata = port_metadata(port, worker_host)
+
+      with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
            {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies) do
         {:ok,
          %{
@@ -52,7 +55,8 @@ defmodule SymphonyElixir.Codex.AppServer do
            thread_sandbox: session_policies.thread_sandbox,
            turn_sandbox_policy: session_policies.turn_sandbox_policy,
            thread_id: thread_id,
-           workspace: expanded_workspace
+           workspace: expanded_workspace,
+           worker_host: worker_host
          }}
       else
         {:error, reason} ->
@@ -87,7 +91,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
-        Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
+        Logger.info("Agent session started for #{issue_context(issue)} session_id=#{session_id}")
 
         emit_message(
           on_message,
@@ -102,7 +106,7 @@ defmodule SymphonyElixir.Codex.AppServer do
 
         case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
           {:ok, result} ->
-            Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
+            Logger.info("Agent session completed for #{issue_context(issue)} session_id=#{session_id}")
 
             {:ok,
              %{
@@ -113,7 +117,7 @@ defmodule SymphonyElixir.Codex.AppServer do
              }}
 
           {:error, reason} ->
-            Logger.warning("Codex session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
+            Logger.warning("Agent session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
 
             emit_message(
               on_message,
@@ -129,7 +133,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         end
 
       {:error, reason} ->
-        Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
+        Logger.error("Agent session failed for #{issue_context(issue)}: #{inspect(reason)}")
         emit_message(on_message, :startup_failed, %{reason: reason}, metadata)
         {:error, reason}
     end
@@ -140,7 +144,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     stop_port(port)
   end
 
-  defp validate_workspace_cwd(workspace) when is_binary(workspace) do
+  defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
     expanded_workspace = Path.expand(workspace)
     expanded_root = Path.expand(Config.settings!().workspace.root)
     expanded_root_prefix = expanded_root <> "/"
@@ -168,7 +172,21 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace) do
+  defp validate_workspace_cwd(workspace, worker_host)
+       when is_binary(workspace) and is_binary(worker_host) do
+    cond do
+      String.trim(workspace) == "" ->
+        {:error, {:invalid_workspace_cwd, :empty_remote_workspace, worker_host}}
+
+      String.contains?(workspace, ["\n", "\r", <<0>>]) ->
+        {:error, {:invalid_workspace_cwd, :invalid_remote_workspace, worker_host, workspace}}
+
+      true ->
+        {:ok, workspace}
+    end
+  end
+
+  defp start_port(workspace, nil) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -181,7 +199,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.settings!().codex.command)],
+            args: [~c"-lc", String.to_charlist(Config.settings!().agent_runtime.command)],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]
@@ -191,10 +209,19 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp port_metadata(port) when is_port(port) do
-    case :erlang.port_info(port, :os_pid) do
-      {:os_pid, os_pid} -> %{codex_app_server_pid: to_string(os_pid)}
-      _ -> %{}
+  defp port_metadata(port, worker_host) when is_port(port) do
+    base_metadata =
+      case :erlang.port_info(port, :os_pid) do
+        {:os_pid, os_pid} ->
+          %{agent_pid: to_string(os_pid)}
+
+        _ ->
+          %{}
+      end
+
+    case worker_host do
+      host when is_binary(host) -> Map.put(base_metadata, :worker_host, host)
+      _ -> base_metadata
     end
   end
 
@@ -222,8 +249,12 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp session_policies(workspace) do
-    Config.codex_runtime_settings(workspace)
+  defp session_policies(workspace, nil) do
+    Config.agent_runtime_settings(workspace)
+  end
+
+  defp session_policies(workspace, worker_host) when is_binary(worker_host) do
+    Config.agent_runtime_settings(workspace, remote: true)
   end
 
   defp do_start_session(port, workspace, session_policies) do
@@ -286,7 +317,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     receive_loop(
       port,
       on_message,
-      Config.settings!().codex.turn_timeout_ms,
+      Config.settings!().agent_runtime.turn_timeout_ms,
       "",
       tool_executor,
       auto_approve_requests
@@ -473,7 +504,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             metadata
           )
 
-          Logger.debug("Codex notification: #{inspect(method)}")
+          Logger.debug("Agent notification: #{inspect(method)}")
           receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
         end
     end
@@ -876,7 +907,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp await_response(port, request_id) do
-    with_timeout_response(port, request_id, Config.settings!().codex.read_timeout_ms, "")
+    with_timeout_response(port, request_id, Config.settings!().agent_runtime.read_timeout_ms, "")
   end
 
   defp with_timeout_response(port, request_id, timeout_ms, pending_line) do
@@ -928,9 +959,9 @@ defmodule SymphonyElixir.Codex.AppServer do
 
     if text != "" do
       if String.match?(text, ~r/\b(error|warn|warning|failed|fatal|panic|exception)\b/i) do
-        Logger.warning("Codex #{stream_label} output: #{text}")
+        Logger.warning("Agent #{stream_label} output: #{text}")
       else
-        Logger.debug("Codex #{stream_label} output: #{text}")
+        Logger.debug("Agent #{stream_label} output: #{text}")
       end
     end
   end
@@ -968,7 +999,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp metadata_from_message(port, payload) do
-    port |> port_metadata() |> maybe_set_usage(payload)
+    port |> port_metadata(nil) |> maybe_set_usage(payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
