@@ -15,6 +15,8 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Config,
           SymphonyElixir.Linear.Client,
           SymphonyElixir.Orchestrator,
+          SymphonyElixir.Orchestrator.CodexTelemetry,
+          SymphonyElixir.Orchestrator.IssueFilter,
           SymphonyElixir.Orchestrator.State,
           SymphonyElixir.AgentRunner,
           SymphonyElixir.CLI,
