@@ -82,6 +82,7 @@ agent_runtime:
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
   approval_policy: never
   thread_sandbox: workspace-write
+  read_timeout_ms: 120000
   turn_sandbox_policy:
     type: workspaceWrite
 server:
