@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Orchestrator do
   alias SymphonyElixir.{AgentRunner, Config, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.CodexTelemetry
+  alias SymphonyElixir.Orchestrator.IssueFilter
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -283,8 +284,8 @@ defmodule SymphonyElixir.Orchestrator do
           issues
           |> reconcile_running_issue_states(
             state,
-            active_state_set(),
-            terminal_state_set()
+            IssueFilter.active_state_set(),
+            IssueFilter.terminal_state_set()
           )
           |> reconcile_missing_running_issue_ids(running_ids, issues)
 
@@ -299,17 +300,17 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
   def reconcile_issue_states_for_test(issues, %State{} = state) when is_list(issues) do
-    reconcile_running_issue_states(issues, state, active_state_set(), terminal_state_set())
+    reconcile_running_issue_states(issues, state, IssueFilter.active_state_set(), IssueFilter.terminal_state_set())
   end
 
   def reconcile_issue_states_for_test(issues, state) when is_list(issues) do
-    reconcile_running_issue_states(issues, state, active_state_set(), terminal_state_set())
+    reconcile_running_issue_states(issues, state, IssueFilter.active_state_set(), IssueFilter.terminal_state_set())
   end
 
   @doc false
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set())
+    should_dispatch_issue?(issue, state, IssueFilter.active_state_set(), IssueFilter.terminal_state_set())
   end
 
   @doc false
@@ -317,13 +318,13 @@ defmodule SymphonyElixir.Orchestrator do
           {:ok, Issue.t()} | {:skip, Issue.t() | :missing} | {:error, term()}
   def revalidate_issue_for_dispatch_for_test(%Issue{} = issue, issue_fetcher)
       when is_function(issue_fetcher, 1) do
-    revalidate_issue_for_dispatch(issue, issue_fetcher, terminal_state_set())
+    revalidate_issue_for_dispatch(issue, issue_fetcher, IssueFilter.terminal_state_set())
   end
 
   @doc false
   @spec sort_issues_for_dispatch_for_test([Issue.t()]) :: [Issue.t()]
   def sort_issues_for_dispatch_for_test(issues) when is_list(issues) do
-    sort_issues_for_dispatch(issues)
+    IssueFilter.sort_issues_for_dispatch(issues)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
@@ -339,17 +340,17 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
-      terminal_issue_state?(issue.state, terminal_states) ->
+      IssueFilter.terminal_issue_state?(issue.state, terminal_states) ->
         Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_running_issue(state, issue.id, true)
 
-      !issue_routable_to_worker?(issue) ->
+      !IssueFilter.issue_routable_to_worker?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
         terminate_running_issue(state, issue.id, false)
 
-      active_issue_state?(issue.state, active_states) ->
+      IssueFilter.active_issue_state?(issue.state, active_states) ->
         refresh_running_issue_state(state, issue)
 
       true ->
@@ -509,11 +510,11 @@ defmodule SymphonyElixir.Orchestrator do
   defp terminate_task(_pid), do: :ok
 
   defp choose_issues(issues, state) do
-    active_states = active_state_set()
-    terminal_states = terminal_state_set()
+    active_states = IssueFilter.active_state_set()
+    terminal_states = IssueFilter.terminal_state_set()
 
     issues
-    |> sort_issues_for_dispatch()
+    |> IssueFilter.sort_issues_for_dispatch()
     |> Enum.reduce(state, fn issue, state_acc ->
       if should_dispatch_issue?(issue, state_acc, active_states, terminal_states) do
         dispatch_issue(state_acc, issue)
@@ -523,34 +524,14 @@ defmodule SymphonyElixir.Orchestrator do
     end)
   end
 
-  defp sort_issues_for_dispatch(issues) when is_list(issues) do
-    Enum.sort_by(issues, fn
-      %Issue{} = issue ->
-        {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}
-
-      _ ->
-        {priority_rank(nil), issue_created_at_sort_key(nil), ""}
-    end)
-  end
-
-  defp priority_rank(priority) when is_integer(priority) and priority in 1..4, do: priority
-  defp priority_rank(_priority), do: 5
-
-  defp issue_created_at_sort_key(%Issue{created_at: %DateTime{} = created_at}) do
-    DateTime.to_unix(created_at, :microsecond)
-  end
-
-  defp issue_created_at_sort_key(%Issue{}), do: 9_223_372_036_854_775_807
-  defp issue_created_at_sort_key(_issue), do: 9_223_372_036_854_775_807
-
   defp should_dispatch_issue?(
          %Issue{} = issue,
          %State{running: running, claimed: claimed} = state,
          active_states,
          terminal_states
        ) do
-    candidate_issue?(issue, active_states, terminal_states) and
-      !todo_issue_blocked_by_non_terminal?(issue, terminal_states) and
+    IssueFilter.candidate_issue?(issue, active_states, terminal_states) and
+      !IssueFilter.todo_issue_blocked_by_non_terminal?(issue, terminal_states) and
       !MapSet.member?(claimed, issue.id) and
       !Map.has_key?(running, issue.id) and
       available_slots(state) > 0 and
@@ -559,77 +540,8 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
 
-  defp candidate_issue?(
-         %Issue{
-           id: id,
-           identifier: identifier,
-           title: title,
-           state: state_name
-         } = issue,
-         active_states,
-         terminal_states
-       )
-       when is_binary(id) and is_binary(identifier) and is_binary(title) and is_binary(state_name) do
-    issue_routable_to_worker?(issue) and
-      active_issue_state?(state_name, active_states) and
-      !terminal_issue_state?(state_name, terminal_states)
-  end
-
-  defp candidate_issue?(_issue, _active_states, _terminal_states), do: false
-
-  defp issue_routable_to_worker?(%Issue{assigned_to_worker: assigned_to_worker})
-       when is_boolean(assigned_to_worker),
-       do: assigned_to_worker
-
-  defp issue_routable_to_worker?(_issue), do: true
-
-  defp todo_issue_blocked_by_non_terminal?(
-         %Issue{state: issue_state, blocked_by: blockers},
-         terminal_states
-       )
-       when is_binary(issue_state) and is_list(blockers) do
-    normalize_issue_state(issue_state) == "todo" and
-      Enum.any?(blockers, fn
-        %{state: blocker_state} when is_binary(blocker_state) ->
-          !terminal_issue_state?(blocker_state, terminal_states)
-
-        _ ->
-          true
-      end)
-  end
-
-  defp todo_issue_blocked_by_non_terminal?(_issue, _terminal_states), do: false
-
-  defp terminal_issue_state?(state_name, terminal_states) when is_binary(state_name) do
-    MapSet.member?(terminal_states, normalize_issue_state(state_name))
-  end
-
-  defp terminal_issue_state?(_state_name, _terminal_states), do: false
-
-  defp active_issue_state?(state_name, active_states) when is_binary(state_name) do
-    MapSet.member?(active_states, normalize_issue_state(state_name))
-  end
-
-  defp normalize_issue_state(state_name) when is_binary(state_name) do
-    String.downcase(String.trim(state_name))
-  end
-
-  defp terminal_state_set do
-    Config.settings!().tracker.terminal_states
-    |> Enum.map(&normalize_issue_state/1)
-    |> Enum.filter(&(&1 != ""))
-    |> MapSet.new()
-  end
-
-  defp active_state_set do
-    Config.settings!().tracker.active_states
-    |> Enum.map(&normalize_issue_state/1)
-    |> Enum.filter(&(&1 != ""))
-    |> MapSet.new()
-  end
-
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil) do
-    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
+    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, IssueFilter.terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
         spawn_issue_locally(state, refreshed_issue, attempt)
 
@@ -802,10 +714,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_retry_issue_lookup(%Issue{} = issue, state, issue_id, attempt, metadata) do
-    terminal_states = terminal_state_set()
+    terminal_states = IssueFilter.terminal_state_set()
 
     cond do
-      terminal_issue_state?(issue.state, terminal_states) ->
+      IssueFilter.terminal_issue_state?(issue.state, terminal_states) ->
         Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
 
         cleanup_issue_workspace(issue.identifier)
@@ -852,7 +764,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp notify_dashboard, do: :ok
 
   defp handle_active_retry(state, issue, attempt, metadata) do
-    if retry_candidate_issue?(issue, terminal_state_set()) and
+    if retry_candidate_issue?(issue, IssueFilter.terminal_state_set()) and
          dispatch_slots_available?(issue, state) do
       {:noreply, dispatch_issue(state, issue, attempt)}
     else
@@ -1099,8 +1011,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
-    candidate_issue?(issue, active_state_set(), terminal_states) and
-      !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
+    IssueFilter.candidate_issue?(issue, IssueFilter.active_state_set(), terminal_states) and
+      !IssueFilter.todo_issue_blocked_by_non_terminal?(issue, terminal_states)
   end
 
   defp dispatch_slots_available?(%Issue{} = _issue, %State{} = state) do
