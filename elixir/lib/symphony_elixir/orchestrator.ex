@@ -552,31 +552,10 @@ defmodule SymphonyElixir.Orchestrator do
       !MapSet.member?(claimed, issue.id) and
       !Map.has_key?(running, issue.id) and
       available_slots(state) > 0 and
-      state_slots_available?(issue, running) and
       worker_slots_available?(state)
   end
 
   defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
-
-  defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
-    limit = Config.max_concurrent_agents_for_state(issue_state)
-    used = running_issue_count_for_state(running, issue_state)
-    limit > used
-  end
-
-  defp state_slots_available?(_issue, _running), do: false
-
-  defp running_issue_count_for_state(running, issue_state) when is_map(running) do
-    normalized_state = normalize_issue_state(issue_state)
-
-    Enum.count(running, fn
-      {_id, %{issue: %Issue{state: state_name}}} ->
-        normalize_issue_state(state_name) == normalized_state
-
-      _ ->
-        false
-    end)
-  end
 
   defp candidate_issue?(
          %Issue{
@@ -1215,8 +1194,8 @@ defmodule SymphonyElixir.Orchestrator do
       !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
   end
 
-  defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do
-    available_slots(state) > 0 and state_slots_available?(issue, state.running)
+  defp dispatch_slots_available?(%Issue{} = _issue, %State{} = state) do
+    available_slots(state) > 0
   end
 
   defp apply_codex_token_delta(
