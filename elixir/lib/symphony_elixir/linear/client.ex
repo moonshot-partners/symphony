@@ -185,12 +185,6 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   @doc false
-  @spec normalize_issue_for_test(map()) :: Issue.t() | nil
-  def normalize_issue_for_test(issue) when is_map(issue) do
-    normalize_issue(issue, nil)
-  end
-
-  @doc false
   @spec normalize_issue_for_test(map(), String.t() | nil) :: Issue.t() | nil
   def normalize_issue_for_test(issue, assignee) when is_map(issue) do
     assignee_filter =
@@ -207,10 +201,6 @@ defmodule SymphonyElixir.Linear.Client do
 
     normalize_issue(issue, assignee_filter)
   end
-
-  @doc false
-  @spec next_page_cursor_for_test(map()) :: {:ok, String.t()} | :done | {:error, term()}
-  def next_page_cursor_for_test(page_info) when is_map(page_info), do: next_page_cursor(page_info)
 
   @doc false
   @spec merge_issue_pages_for_test([[Issue.t()]]) :: [Issue.t()]
