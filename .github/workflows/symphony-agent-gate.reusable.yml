@@ -1,0 +1,63 @@
+name: symphony-agent-gate (reusable)
+
+# Reusable scope-discipline gate for Symphony agent-authored PRs. Caller
+# workflows in schoolsoutapp/schools-out and schoolsoutapp/fe-next-app
+# reference this via `uses:` so updating the rules here propagates to both
+# target repos on the next PR run. Single source of truth.
+
+on:
+  workflow_call:
+    secrets:
+      claude_code_oauth_token:
+        required: true
+
+jobs:
+  scope-discipline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tooling sanity (Ruby/rubocop incompat)
+        if: hashFiles('Gemfile.lock') != ''
+        run: |
+          set -u
+          RUBOCOP_VER=$(grep -E "^\s+rubocop \(" Gemfile.lock | head -1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)
+          RUBY_VER=$(head -c 3 .ruby-version 2>/dev/null || true)
+          if [ -n "$RUBOCOP_VER" ] && [ "$RUBY_VER" = "3.4" ]; then
+            MAJOR_MINOR=$(awk -F. '{ printf "%d.%02d", $1, $2 }' <<<"$RUBOCOP_VER")
+            if awk -v v="$MAJOR_MINOR" 'BEGIN { exit !(v + 0 < 1.62) }'; then
+              echo "::warning title=Tooling incompat::rubocop $RUBOCOP_VER crashes on Ruby 3.4 dstr nodes (rubocop/rubocop#11929). Bump to >=1.62 to unblock CI. This is an infra-failure, not a code-failure."
+            fi
+          fi
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          prompt: |
+            Review this Symphony agent-authored PR. Apply ONLY the two rules below — do not bikeshed.
+
+            RULE 1 — AC-TRACE
+            The PR body must include a numbered list mapping each Linear AC item to the file:line-range it changes (format `AC#N -> path/file.ext:start-end`).
+            For every changed file in the diff, verify it appears in that mapping.
+            If a file is in the diff but NOT in the AC mapping -> request changes with comment: `Out-of-scope file: <path> (no AC mapping)`.
+            If the AC mapping section is missing entirely -> request changes with comment: `PR body missing AC-trace mapping (required by WORKFLOW.schools-out.md operating rule 1)`.
+
+            RULE 2 — KARPATHY / NO DRIVE-BY
+            Reject any new abstraction (class, module, service, builder, wrapper, factory, helper) introduced in this PR with fewer than 2 real call sites in the same diff.
+            Reject: quote-style swaps in unrelated lines, spontaneous docstrings on stable code, whitespace reformat outside the fix area, identity renames outside the fix area.
+            For each violation, leave an inline comment in the format: `file:line - <RULE 1 or RULE 2>: <one-line reason>`.
+
+            DO NOT comment on:
+            - style preferences, naming bikeshedding
+            - performance suggestions unless they regress AC behavior
+            - documentation completeness
+            - test framework choice
+            - anything not covered by RULE 1 or RULE 2
+
+            If both rules pass, leave one approval comment: `scope-discipline: PASS`.
+            If either fails, leave inline comments and a final summary comment: `scope-discipline: FAIL - <count> violations`.

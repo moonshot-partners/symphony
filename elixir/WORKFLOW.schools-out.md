@@ -23,14 +23,20 @@ workspace:
   root: ~/code/schoolsout-workspaces
 hooks:
   after_create: |
+    # Primary repo at workspace root.
     git clone --depth 1 https://github.com/schoolsoutapp/schools-out .
+    # Frontend repo at ./fe-next-app — eliminates the SODEV-827 class of
+    # bugs where the agent had to clone the right repo mid-run after
+    # burning turns on the wrong one. Whitelist mirrored in the prompt
+    # body's "Allowed repositories" section.
+    git clone --depth 1 https://github.com/schoolsoutapp/fe-next-app fe-next-app
     if [ -f Gemfile ]; then
       bundle install --quiet || true
     fi
   before_remove: |
     : # no-op (do not modify branches on workspace teardown)
 agent:
-  max_concurrent_agents: 1
+  max_concurrent_agents: 4
   max_turns: 25
 agent_runtime:
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
@@ -80,10 +86,43 @@ Description:
 No description provided.
 {% endif %}
 
+## Allowed repositories (whitelist)
+
+Both repos are cloned at workspace creation. Touch only these:
+
+- `./` — `schoolsoutapp/schools-out` (Rails backend; default)
+- `./fe-next-app/` — `schoolsoutapp/fe-next-app` (Next.js frontend)
+
+If diagnosis points to a repo NOT in this list, STOP and report. Do
+NOT clone any other repo.
+
+## Mandatory turn-1 deliverable: understanding.md
+
+Before any `Edit` / `Write` / mutating `Bash` call, write
+`state/<session>/understanding.md` with three sections:
+
+1. **target_repos** — which whitelisted repo(s) the fix touches. Cite a
+   code reference (`path/to/file.ext:line`) or a verified `curl`/`grep`
+   output for each. No guessing.
+2. **root_cause** — what is wrong and where. Every claim cites a
+   file:line. If you catch yourself writing "I think" / "probably" /
+   "might" — STOP, verify, rewrite without hedging.
+3. **expected_behavior_diff** — smallest possible change. List each
+   numbered AC item (`AC#1`, `AC#2`, …) → file(s) you will change.
+
+Skipping this artifact is a hard stop, not a style preference.
+
 ## Operating rules
 
-1. Implement only what the ticket's Acceptance Criteria require. No
-   out-of-scope changes.
+1. Implement only what the ticket's Acceptance Criteria require.
+   - **AC-trace mandatory.** Every changed file maps to a numbered AC
+     item from the issue description. PR body lists
+     `AC#N → file.ext:line-range` for each AC.
+   - **Karpathy / no-drive-by.** Do NOT introduce a class, service,
+     builder, wrapper, or factory unless it has 2+ real call sites in
+     the same diff. No quote-style swaps, no spontaneous docstrings, no
+     whitespace reformat outside the diff scope. Adjacent tech debt:
+     mention in the PR body, do NOT fix in the same diff.
 2. Branch off latest `origin/main`. Branch name:
    `agents/sodev-{{ issue.identifier | split: "-" | last }}-<short-slug>`
    (lowercase, dashes).
@@ -106,6 +145,9 @@ No description provided.
 - Do not modify paths outside the cloned workspace.
 - Do not push to `main` directly.
 - Do not bypass branch protections, CI, or `--no-verify` git hooks.
+- Do not clone any repo not listed in "Allowed repositories" above.
+- Do not run `Edit` / `Write` before `state/<session>/understanding.md`
+  exists with all three sections populated.
 - If auth/permissions/tooling feels off (token errors, repo not found),
   stop. Do not retry blindly. The orchestrator captures your last message
   on the Linear workpad — say what is wrong and exit.
