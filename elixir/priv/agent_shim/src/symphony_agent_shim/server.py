@@ -63,7 +63,7 @@ async def run_async(*, stdin: Any, stdout: Any) -> None:
         # SIGTERM never hangs the shim past 5s.
         try:
             await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
 
