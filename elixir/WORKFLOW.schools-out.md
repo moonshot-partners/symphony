@@ -110,6 +110,11 @@ Before any `Edit` / `Write` / mutating `Bash` call, write
 3. **expected_behavior_diff** — smallest possible change. List each
    numbered AC item (`AC#1`, `AC#2`, …) → file(s) you will change.
 
+Each section must contain at least one verified `path/to/file.ext:line`
+citation backed by a prior `Read`/`grep`/`curl` call. A section with
+section headers but no citations counts as missing — the file existing
+is not enough.
+
 Skipping this artifact is a hard stop, not a style preference.
 
 ## Operating rules

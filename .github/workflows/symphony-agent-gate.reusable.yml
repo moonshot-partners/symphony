@@ -29,8 +29,9 @@ jobs:
           RUBOCOP_VER=$(grep -E "^\s+rubocop \(" Gemfile.lock | head -1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)
           RUBY_VER=$(head -c 3 .ruby-version 2>/dev/null || true)
           if [ -n "$RUBOCOP_VER" ] && [ "$RUBY_VER" = "3.4" ]; then
-            MAJOR_MINOR=$(awk -F. '{ printf "%d.%02d", $1, $2 }' <<<"$RUBOCOP_VER")
-            if awk -v v="$MAJOR_MINOR" 'BEGIN { exit !(v + 0 < 1.62) }'; then
+            MAJOR=$(awk -F. '{print $1}' <<<"$RUBOCOP_VER")
+            MINOR=$(awk -F. '{print $2}' <<<"$RUBOCOP_VER")
+            if [ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 62 ]; then
               echo "::warning title=Tooling incompat::rubocop $RUBOCOP_VER crashes on Ruby 3.4 dstr nodes (rubocop/rubocop#11929). Bump to >=1.62 to unblock CI. This is an infra-failure, not a code-failure."
             fi
           fi
