@@ -48,19 +48,6 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec max_concurrent_agents_for_state(term()) :: pos_integer()
-  def max_concurrent_agents_for_state(state_name) when is_binary(state_name) do
-    config = settings!()
-
-    Map.get(
-      config.agent.max_concurrent_agents_by_state,
-      Schema.normalize_issue_state(state_name),
-      config.agent.max_concurrent_agents
-    )
-  end
-
-  def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
-
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
   def codex_turn_sandbox_policy(workspace \\ nil) do
     case Schema.resolve_runtime_turn_sandbox_policy(settings!(), workspace) do
@@ -98,12 +85,12 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
+  @spec codex_runtime_settings(Path.t() | nil) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
-  def codex_runtime_settings(workspace \\ nil, opts \\ []) do
+  def codex_runtime_settings(workspace \\ nil) do
     with {:ok, settings} <- settings() do
       with {:ok, turn_sandbox_policy} <-
-             Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts) do
+             Schema.resolve_runtime_turn_sandbox_policy(settings, workspace) do
         {:ok,
          %{
            approval_policy: settings.codex.approval_policy,

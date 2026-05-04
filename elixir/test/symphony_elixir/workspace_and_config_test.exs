@@ -1,6 +1,5 @@
 defmodule SymphonyElixir.WorkspaceAndConfigTest do
   use SymphonyElixir.TestSupport
-  alias Ecto.Changeset
   alias SymphonyElixir.Config.Schema
   alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
   alias SymphonyElixir.Linear.Client
@@ -742,7 +741,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.tracker.api_key == nil
     assert config.tracker.project_slug == nil
     assert config.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
-    assert config.worker.max_concurrent_agents_per_host == nil
     assert config.agent.max_concurrent_agents == 10
     assert config.codex.command == "codex app-server"
 
@@ -818,10 +816,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
     assert message =~ "agent.max_concurrent_agents"
 
-    write_workflow_file!(Workflow.workflow_file_path(), worker_max_concurrent_agents_per_host: 0)
-    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "worker.max_concurrent_agents_per_host"
-
     write_workflow_file!(Workflow.workflow_file_path(), codex_turn_timeout_ms: "bad")
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
     assert message =~ "codex.turn_timeout_ms"
@@ -840,7 +834,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       poll_interval_ms: %{bad: true},
       workspace_root: 123,
       max_retry_backoff_ms: 0,
-      max_concurrent_agents_by_state: %{"Todo" => "1", "Review" => 0, "Done" => "bad"},
       hook_timeout_ms: 0,
       observability_enabled: "maybe",
       observability_refresh_ms: %{bad: true},
@@ -944,33 +937,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.workspace.root == "env:#{workspace_env_var}"
   end
 
-  test "config supports per-state max concurrent agent overrides" do
-    workflow = """
-    ---
-    agent:
-      max_concurrent_agents: 10
-      max_concurrent_agents_by_state:
-        todo: 1
-        "In Progress": 4
-        "In Review": 2
-    ---
-    """
-
-    File.write!(Workflow.workflow_file_path(), workflow)
-
-    assert Config.settings!().agent.max_concurrent_agents == 10
-    assert Config.max_concurrent_agents_for_state("Todo") == 1
-    assert Config.max_concurrent_agents_for_state("In Progress") == 4
-    assert Config.max_concurrent_agents_for_state("In Review") == 2
-    assert Config.max_concurrent_agents_for_state("Closed") == 10
-    assert Config.max_concurrent_agents_for_state(:not_a_string) == 10
-
-    write_workflow_file!(Workflow.workflow_file_path(), worker_max_concurrent_agents_per_host: 2)
-    assert :ok = Config.validate!()
-    assert Config.settings!().worker.max_concurrent_agents_per_host == 2
-  end
-
-  test "schema helpers cover custom type and state limit validation" do
+  test "schema helpers cover custom type for string-or-map fields" do
     assert StringOrMap.type() == :map
     assert StringOrMap.embed_as(:json) == :self
     assert StringOrMap.equal?(%{"a" => 1}, %{"a" => 1})
@@ -985,23 +952,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert {:ok, %{"a" => 1}} = StringOrMap.dump(%{"a" => 1})
     assert :error = StringOrMap.dump(123)
-
-    assert Schema.normalize_state_limits(nil) == %{}
-
-    assert Schema.normalize_state_limits(%{"In Progress" => 2, todo: 1}) == %{
-             "todo" => 1,
-             "in progress" => 2
-           }
-
-    changeset =
-      {%{}, %{limits: :map}}
-      |> Changeset.cast(%{limits: %{"" => 1, "todo" => 0}}, [:limits])
-      |> Schema.validate_state_limits(:limits)
-
-    assert changeset.errors == [
-             limits: {"state names must not be blank", []},
-             limits: {"limits must be positive integers", []}
-           ]
   end
 
   test "schema parse normalizes policy keys and env-backed fallbacks" do
@@ -1098,18 +1048,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Schema.resolve_turn_sandbox_policy(settings) == %{
              "type" => "workspaceWrite",
              "writableRoots" => [Path.expand("~/.symphony-workspaces")],
-             "readOnlyAccess" => %{"type" => "fullAccess"},
-             "networkAccess" => false,
-             "excludeTmpdirEnvVar" => false,
-             "excludeSlashTmp" => false
-           }
-
-    assert {:ok, remote_policy} =
-             Schema.resolve_runtime_turn_sandbox_policy(settings, nil, remote: true)
-
-    assert remote_policy == %{
-             "type" => "workspaceWrite",
-             "writableRoots" => ["~/.symphony-workspaces"],
              "readOnlyAccess" => %{"type" => "fullAccess"},
              "networkAccess" => false,
              "excludeTmpdirEnvVar" => false,
@@ -1233,74 +1171,4 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.workflow_prompt() == workflow_prompt
   end
 
-  test "remote workspace lifecycle uses ssh host aliases from worker config" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-remote-workspace-#{System.unique_integer([:positive])}"
-      )
-
-    previous_path = System.get_env("PATH")
-    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
-
-    on_exit(fn ->
-      restore_env("PATH", previous_path)
-      restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
-    end)
-
-    try do
-      trace_file = Path.join(test_root, "ssh.trace")
-      fake_ssh = Path.join(test_root, "ssh")
-      workspace_root = "~/.symphony-remote-workspaces"
-      workspace_path = "/remote/home/.symphony-remote-workspaces/MT-SSH-WS"
-
-      File.mkdir_p!(test_root)
-      System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
-      System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
-
-      File.write!(fake_ssh, """
-      #!/bin/sh
-      trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
-      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
-
-      case "$*" in
-        *"__SYMPHONY_WORKSPACE__"*)
-          printf '%s\\t%s\\t%s\\n' '__SYMPHONY_WORKSPACE__' '1' '#{workspace_path}'
-          ;;
-      esac
-
-      exit 0
-      """)
-
-      File.chmod!(fake_ssh, 0o755)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        worker_ssh_hosts: ["worker-01:2200"],
-        hook_before_run: "echo before-run",
-        hook_after_run: "echo after-run",
-        hook_before_remove: "echo before-remove"
-      )
-
-      assert Config.settings!().worker.ssh_hosts == ["worker-01:2200"]
-      assert Config.settings!().workspace.root == workspace_root
-      assert {:ok, ^workspace_path} = Workspace.create_for_issue("MT-SSH-WS", "worker-01:2200")
-      assert :ok = Workspace.run_before_run_hook(workspace_path, "MT-SSH-WS", "worker-01:2200")
-      assert :ok = Workspace.run_after_run_hook(workspace_path, "MT-SSH-WS", "worker-01:2200")
-      assert :ok = Workspace.remove_issue_workspaces("MT-SSH-WS", "worker-01:2200")
-
-      trace = File.read!(trace_file)
-      assert trace =~ "-p 2200 worker-01 bash -lc"
-      assert trace =~ "__SYMPHONY_WORKSPACE__"
-      assert trace =~ "~/.symphony-remote-workspaces/MT-SSH-WS"
-      assert trace =~ "${workspace#~/}"
-      assert trace =~ "echo before-run"
-      assert trace =~ "echo after-run"
-      assert trace =~ "echo before-remove"
-      assert trace =~ "rm -rf"
-      assert trace =~ workspace_path
-    after
-      File.rm_rf(test_root)
-    end
-  end
 end

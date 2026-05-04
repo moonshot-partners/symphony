@@ -24,12 +24,9 @@ defmodule SymphonyElixir.Application do
     :ok = SymphonyElixir.LogFile.configure()
 
     children = [
-      {Phoenix.PubSub, name: SymphonyElixir.PubSub},
       {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
       SymphonyElixir.WorkflowStore,
-      SymphonyElixir.Orchestrator,
-      SymphonyElixir.HttpServer,
-      SymphonyElixir.StatusDashboard
+      SymphonyElixir.Orchestrator
     ]
 
     Supervisor.start_link(
@@ -40,8 +37,5 @@ defmodule SymphonyElixir.Application do
   end
 
   @impl true
-  def stop(_state) do
-    SymphonyElixir.StatusDashboard.render_offline_status()
-    :ok
-  end
+  def stop(_state), do: :ok
 end

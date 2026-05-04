@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety}
 
   @initialize_id 1
   @thread_start_id 2
@@ -21,8 +21,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           thread_sandbox: String.t(),
           turn_sandbox_policy: map(),
           thread_id: String.t(),
-          workspace: Path.t(),
-          worker_host: String.t() | nil
+          workspace: Path.t()
         }
 
   @spec run(Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -37,14 +36,12 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
-  def start_session(workspace, opts \\ []) do
-    worker_host = Keyword.get(opts, :worker_host)
+  def start_session(workspace, _opts \\ []) do
+    with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace),
+         {:ok, port} <- start_port(expanded_workspace) do
+      metadata = port_metadata(port)
 
-    with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host) do
-      metadata = port_metadata(port, worker_host)
-
-      with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
+      with {:ok, session_policies} <- session_policies(expanded_workspace),
            {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies) do
         {:ok,
          %{
@@ -55,8 +52,7 @@ defmodule SymphonyElixir.Codex.AppServer do
            thread_sandbox: session_policies.thread_sandbox,
            turn_sandbox_policy: session_policies.turn_sandbox_policy,
            thread_id: thread_id,
-           workspace: expanded_workspace,
-           worker_host: worker_host
+           workspace: expanded_workspace
          }}
       else
         {:error, reason} ->
@@ -144,7 +140,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     stop_port(port)
   end
 
-  defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
+  defp validate_workspace_cwd(workspace) when is_binary(workspace) do
     expanded_workspace = Path.expand(workspace)
     expanded_root = Path.expand(Config.settings!().workspace.root)
     expanded_root_prefix = expanded_root <> "/"
@@ -172,21 +168,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp validate_workspace_cwd(workspace, worker_host)
-       when is_binary(workspace) and is_binary(worker_host) do
-    cond do
-      String.trim(workspace) == "" ->
-        {:error, {:invalid_workspace_cwd, :empty_remote_workspace, worker_host}}
-
-      String.contains?(workspace, ["\n", "\r", <<0>>]) ->
-        {:error, {:invalid_workspace_cwd, :invalid_remote_workspace, worker_host, workspace}}
-
-      true ->
-        {:ok, workspace}
-    end
-  end
-
-  defp start_port(workspace, nil) do
+  defp start_port(workspace) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -209,32 +191,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_port(workspace, worker_host) when is_binary(worker_host) do
-    remote_command = remote_launch_command(workspace)
-    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
-  end
-
-  defp remote_launch_command(workspace) when is_binary(workspace) do
-    [
-      "cd #{shell_escape(workspace)}",
-      "exec #{Config.settings!().codex.command}"
-    ]
-    |> Enum.join(" && ")
-  end
-
-  defp port_metadata(port, worker_host) when is_port(port) do
-    base_metadata =
-      case :erlang.port_info(port, :os_pid) do
-        {:os_pid, os_pid} ->
-          %{codex_app_server_pid: to_string(os_pid)}
-
-        _ ->
-          %{}
-      end
-
-    case worker_host do
-      host when is_binary(host) -> Map.put(base_metadata, :worker_host, host)
-      _ -> base_metadata
+  defp port_metadata(port) when is_port(port) do
+    case :erlang.port_info(port, :os_pid) do
+      {:os_pid, os_pid} -> %{codex_app_server_pid: to_string(os_pid)}
+      _ -> %{}
     end
   end
 
@@ -262,12 +222,8 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp session_policies(workspace, nil) do
+  defp session_policies(workspace) do
     Config.codex_runtime_settings(workspace)
-  end
-
-  defp session_policies(workspace, worker_host) when is_binary(worker_host) do
-    Config.codex_runtime_settings(workspace, remote: true)
   end
 
   defp do_start_session(port, workspace, session_policies) do
@@ -1012,7 +968,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp metadata_from_message(port, payload) do
-    port |> port_metadata(nil) |> maybe_set_usage(payload)
+    port |> port_metadata() |> maybe_set_usage(payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
@@ -1026,10 +982,6 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_set_usage(metadata, _payload), do: metadata
-
-  defp shell_escape(value) when is_binary(value) do
-    "'" <> String.replace(value, "'", "'\"'\"'") <> "'"
-  end
 
   defp default_on_message(_message), do: :ok
 
