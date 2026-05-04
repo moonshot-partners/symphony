@@ -12,15 +12,22 @@ defmodule SymphonyElixir.MixProject do
           threshold: 100
         ],
         ignore_modules: [
-          SymphonyElixir.Config,
-          SymphonyElixir.Linear.Client,
-          SymphonyElixir.Orchestrator,
-          SymphonyElixir.Orchestrator.State,
-          SymphonyElixir.AgentRunner,
-          SymphonyElixir.CLI,
           SymphonyElixir.Agent.AppServer,
+          SymphonyElixir.Agent.DevflowContext,
           SymphonyElixir.Agent.DynamicTool,
+          SymphonyElixir.AgentRunner,
+          SymphonyElixir.Application,
+          SymphonyElixir.CLI,
+          SymphonyElixir.Config,
+          SymphonyElixir.Linear.Adapter,
+          SymphonyElixir.Linear.Client,
           SymphonyElixir.LogFile,
+          SymphonyElixir.Orchestrator,
+          SymphonyElixir.Orchestrator.CodexTelemetry,
+          SymphonyElixir.Orchestrator.IssueFilter,
+          SymphonyElixir.Orchestrator.State,
+          SymphonyElixir.Workflow,
+          SymphonyElixir.Workpad,
           SymphonyElixir.Workspace
         ]
       ],

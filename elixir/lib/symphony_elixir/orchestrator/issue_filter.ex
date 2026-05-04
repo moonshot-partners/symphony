@@ -12,8 +12,7 @@ defmodule SymphonyElixir.Orchestrator.IssueFilter do
   def sort_issues_for_dispatch(issues) when is_list(issues) do
     Enum.sort_by(issues, fn
       %Issue{} = issue ->
-        {priority_rank(issue.priority), issue_created_at_sort_key(issue),
-         issue.identifier || issue.id || ""}
+        {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}
 
       _ ->
         {priority_rank(nil), issue_created_at_sort_key(nil), ""}
