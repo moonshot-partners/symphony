@@ -6,6 +6,8 @@ defmodule SymphonyElixir.Agent.AppServer do
   require Logger
   alias SymphonyElixir.{Agent.DynamicTool, Config, PathSafety}
 
+  @dialyzer {:nowarn_function, port_metadata: 2, session_policies: 2}
+
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
