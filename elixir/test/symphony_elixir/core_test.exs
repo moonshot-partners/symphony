@@ -43,13 +43,45 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
-      tracker_project_slug: nil
+      tracker_project_slug: nil,
+      tracker_team_key: nil
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_project_or_team_key} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: "",
+      tracker_team_key: ""
+    )
+
+    assert {:error, :missing_linear_project_or_team_key} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_team_key: "SODEV",
+      agent_runtime_command: "/bin/sh app-server"
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.team_key == "SODEV"
+    assert Config.settings!().tracker.project_slug == nil
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: "project",
+      tracker_team_key: "SODEV",
+      agent_runtime_command: "/bin/sh app-server"
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.team_key == "SODEV"
+    assert Config.settings!().tracker.project_slug == "project"
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_project_slug: "project",
+      tracker_team_key: nil,
       agent_runtime_command: ""
     )
 
