@@ -1,6 +1,8 @@
 defmodule SymphonyElixir.WorkflowStore do
   @moduledoc """
   Caches the last known good workflow and reloads it when `WORKFLOW.md` changes.
+  Also pulls the workflow repo every 60 s so a long-running orchestrator always
+  picks up updated instructions without requiring a restart.
   """
 
   use GenServer
@@ -9,6 +11,7 @@ defmodule SymphonyElixir.WorkflowStore do
   alias SymphonyElixir.Workflow
 
   @poll_interval_ms 1_000
+  @git_pull_interval_ms 60_000
 
   defmodule State do
     @moduledoc false
@@ -51,6 +54,7 @@ defmodule SymphonyElixir.WorkflowStore do
     case load_state(Workflow.workflow_file_path()) do
       {:ok, state} ->
         schedule_poll()
+        schedule_git_pull()
         {:ok, state}
 
       {:error, reason} ->
@@ -89,8 +93,30 @@ defmodule SymphonyElixir.WorkflowStore do
     end
   end
 
+  def handle_info(:git_pull, %State{} = state) do
+    pull_workflow_repo(state.path)
+    schedule_git_pull()
+    {:noreply, state}
+  end
+
   defp schedule_poll do
     Process.send_after(self(), :poll, @poll_interval_ms)
+  end
+
+  defp schedule_git_pull do
+    Process.send_after(self(), :git_pull, @git_pull_interval_ms)
+  end
+
+  defp pull_workflow_repo(workflow_path) do
+    dir = Path.dirname(workflow_path)
+
+    case System.cmd("git", ["-C", dir, "pull", "--ff-only"], stderr_to_stdout: true) do
+      {_output, 0} ->
+        :ok
+
+      {output, code} ->
+        Logger.warning("WorkflowStore: git pull failed (exit #{code}): #{String.trim(output)}")
+    end
   end
 
   defp reload_state(%State{} = state) do
