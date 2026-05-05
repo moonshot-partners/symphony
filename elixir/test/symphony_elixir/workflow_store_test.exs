@@ -33,9 +33,7 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     System.cmd("git", ["-C", work, "commit", "-m", "init"], stderr_to_stdout: true)
     System.cmd("git", ["-C", work, "push", "origin", "HEAD:main"], stderr_to_stdout: true)
 
-    System.cmd("git", ["-C", work, "branch", "--set-upstream-to=origin/main", "main"],
-      stderr_to_stdout: true
-    )
+    System.cmd("git", ["-C", work, "branch", "--set-upstream-to=origin/main", "main"], stderr_to_stdout: true)
 
     workflow_path
   end
