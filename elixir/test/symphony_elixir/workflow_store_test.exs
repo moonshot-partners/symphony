@@ -31,9 +31,18 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     File.write!(workflow_path, "---\nfoo: bar\n---\n# Test\n")
     System.cmd("git", ["-C", work, "add", "."], stderr_to_stdout: true)
     System.cmd("git", ["-C", work, "commit", "-m", "init"], stderr_to_stdout: true)
-    System.cmd("git", ["-C", work, "push", "origin", "HEAD:main"], stderr_to_stdout: true)
 
-    System.cmd("git", ["-C", work, "branch", "--set-upstream-to=origin/main", "main"], stderr_to_stdout: true)
+    {branch, 0} =
+      System.cmd("git", ["-C", work, "rev-parse", "--abbrev-ref", "HEAD"], stderr_to_stdout: true)
+
+    branch = String.trim(branch)
+    System.cmd("git", ["-C", work, "push", "origin", "HEAD:#{branch}"], stderr_to_stdout: true)
+
+    System.cmd(
+      "git",
+      ["-C", work, "branch", "--set-upstream-to=origin/#{branch}", branch],
+      stderr_to_stdout: true
+    )
 
     workflow_path
   end
