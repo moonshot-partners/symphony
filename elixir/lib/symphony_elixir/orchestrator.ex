@@ -269,8 +269,8 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.error("Linear API token missing in WORKFLOW.md")
         state
 
-      {:error, :missing_linear_project_slug} ->
-        Logger.error("Linear project slug missing in WORKFLOW.md")
+      {:error, :missing_linear_project_or_team_key} ->
+        Logger.error("Linear filter missing in WORKFLOW.md: set project_slug, team_key, or both")
         state
 
       {:error, :missing_tracker_kind} ->

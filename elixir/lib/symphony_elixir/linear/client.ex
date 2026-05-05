@@ -10,8 +10,8 @@ defmodule SymphonyElixir.Linear.Client do
   @max_error_body_log_bytes 1_000
 
   @query """
-  query SymphonyLinearPoll($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
-    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+  query SymphonyLinearPoll($filter: IssueFilter!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: $filter, first: $first, after: $after) {
       nodes {
         id
         identifier
@@ -122,18 +122,17 @@ defmodule SymphonyElixir.Linear.Client do
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do
     tracker = Config.settings!().tracker
-    project_slug = tracker.project_slug
 
     cond do
       is_nil(tracker.api_key) ->
         {:error, :missing_linear_api_token}
 
-      is_nil(project_slug) ->
-        {:error, :missing_linear_project_slug}
+      not present_string?(tracker.project_slug) and not present_string?(tracker.team_key) ->
+        {:error, :missing_linear_project_or_team_key}
 
       true ->
         with {:ok, assignee_filter} <- routing_assignee_filter() do
-          do_fetch_by_states(project_slug, tracker.active_states, assignee_filter)
+          do_fetch_by_states(tracker, tracker.active_states, assignee_filter)
         end
     end
   end
@@ -146,17 +145,16 @@ defmodule SymphonyElixir.Linear.Client do
       {:ok, []}
     else
       tracker = Config.settings!().tracker
-      project_slug = tracker.project_slug
 
       cond do
         is_nil(tracker.api_key) ->
           {:error, :missing_linear_api_token}
 
-        is_nil(project_slug) ->
-          {:error, :missing_linear_project_slug}
+        is_nil(tracker.project_slug) and is_nil(tracker.team_key) ->
+          {:error, :missing_linear_project_or_team_key}
 
         true ->
-          do_fetch_by_states(project_slug, normalized_states, nil)
+          do_fetch_by_states(tracker, normalized_states, nil)
       end
     end
   end
@@ -248,15 +246,14 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
-    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
+  defp do_fetch_by_states(tracker, state_names, assignee_filter) do
+    do_fetch_by_states_page(tracker, state_names, assignee_filter, nil, [])
   end
 
-  defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
+  defp do_fetch_by_states_page(tracker, state_names, assignee_filter, after_cursor, acc_issues) do
     with {:ok, body} <-
            graphql(@query, %{
-             projectSlug: project_slug,
-             stateNames: state_names,
+             filter: build_issue_filter(tracker, state_names),
              first: @issue_page_size,
              relationFirst: @issue_page_size,
              after: after_cursor
@@ -266,7 +263,7 @@ defmodule SymphonyElixir.Linear.Client do
 
       case next_page_cursor(page_info) do
         {:ok, next_cursor} ->
-          do_fetch_by_states_page(project_slug, state_names, assignee_filter, next_cursor, updated_acc)
+          do_fetch_by_states_page(tracker, state_names, assignee_filter, next_cursor, updated_acc)
 
         :done ->
           {:ok, finalize_paginated_issues(updated_acc)}
@@ -276,6 +273,29 @@ defmodule SymphonyElixir.Linear.Client do
       end
     end
   end
+
+  @doc false
+  @spec build_issue_filter(map(), [String.t()]) :: map()
+  def build_issue_filter(tracker, state_names) when is_list(state_names) do
+    %{state: %{name: %{in: state_names}}}
+    |> maybe_put_project_filter(tracker.project_slug)
+    |> maybe_put_team_filter(tracker.team_key)
+  end
+
+  defp maybe_put_project_filter(filter, slug) when is_binary(slug) and slug != "" do
+    Map.put(filter, :project, %{slugId: %{eq: slug}})
+  end
+
+  defp maybe_put_project_filter(filter, _slug), do: filter
+
+  defp maybe_put_team_filter(filter, team_key) when is_binary(team_key) and team_key != "" do
+    Map.put(filter, :team, %{key: %{eq: team_key}})
+  end
+
+  defp maybe_put_team_filter(filter, _team_key), do: filter
+
+  defp present_string?(value) when is_binary(value) and value != "", do: true
+  defp present_string?(_value), do: false
 
   defp prepend_page_issues(issues, acc_issues) when is_list(issues) and is_list(acc_issues) do
     Enum.reverse(issues, acc_issues)

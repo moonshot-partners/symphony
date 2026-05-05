@@ -125,13 +125,18 @@ defmodule SymphonyElixir.Config do
       settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
         {:error, :missing_linear_api_token}
 
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_linear_project_slug}
+      settings.tracker.kind == "linear" and
+        not present_string?(settings.tracker.project_slug) and
+          not present_string?(settings.tracker.team_key) ->
+        {:error, :missing_linear_project_or_team_key}
 
       true ->
         :ok
     end
   end
+
+  defp present_string?(value) when is_binary(value) and value != "", do: true
+  defp present_string?(_value), do: false
 
   defp format_config_error(reason) do
     case reason do
