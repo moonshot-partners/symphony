@@ -35,6 +35,7 @@ hooks:
     fi
   before_remove: |
     : # no-op (do not modify branches on workspace teardown)
+  timeout_ms: 300000
 agent:
   max_concurrent_agents: 11
   max_turns: 25
@@ -146,11 +147,15 @@ Skipping this artifact is a hard stop, not a style preference.
    - **AC-trace mandatory.** Every changed file maps to a numbered AC
      item from the issue description. PR body lists
      `AC#N → file.ext:line-range` for each AC.
-   - **Karpathy / no-drive-by.** Do NOT introduce a class, service,
-     builder, wrapper, or factory unless it has 2+ real call sites in
-     the same diff. No quote-style swaps, no spontaneous docstrings, no
-     whitespace reformat outside the diff scope. Adjacent tech debt:
-     mention in the PR body, do NOT fix in the same diff.
+   - **Karpathy / no-drive-by.** Default: inline new logic into the
+     existing caller (controller, job, model). Extract to a class,
+     service, builder, wrapper, or factory ONLY when call site #2
+     already exists in the same diff — if you catch yourself writing a
+     new class with 1 caller, stop and inline it instead. Test files do
+     not count as a real call site. No quote-style swaps, no
+     spontaneous docstrings, no whitespace reformat outside the diff
+     scope — preserve the exact formatting of unchanged lines. Adjacent
+     tech debt: mention in the PR body, do NOT fix in the same diff.
 2. Branch off the target repo's PR base branch (see "PR base branch per
    repo" table above). Run `git fetch origin <base>` then
    `git checkout -B <branch-name> origin/<base>`. Never branch off
