@@ -164,8 +164,15 @@ Skipping this artifact is a hard stop, not a style preference.
    (lowercase, dashes).
 3. One atomic commit per logical change. Concise descriptive messages.
 4. Run quality gates before pushing:
-   - Lint / static checks (`bundle exec rubocop`, `yarn lint` — pick from
-     `Gemfile` / `package.json`).
+   - **Rails repos** (`Gemfile` present): `bundle exec rubocop --autocorrect-all`; if
+     rubocop changes files, stage them and amend the commit; then verify `bundle exec
+     rubocop` exits 0.
+   - **Next.js / TS repos** (`package.json` present): run `pnpm format` (Prettier
+     write-in-place) first — if it changes any files, stage them and amend the last
+     commit before continuing. Then run `pnpm lint`; if lint reports errors, run
+     `pnpm lint:fix`, re-run `pnpm format` again (ESLint fixes can introduce
+     Prettier violations), re-stage, amend, and verify both `pnpm format:check`
+     and `pnpm lint` exit 0. Do NOT push with outstanding lint or format violations.
    - Tests for changed files.
 5. Push the branch and open a PR with `gh pr create`:
    - **Base branch**: pass `--base <base>` matching the target repo's
