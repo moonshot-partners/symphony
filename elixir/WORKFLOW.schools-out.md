@@ -36,7 +36,7 @@ hooks:
   before_remove: |
     : # no-op (do not modify branches on workspace teardown)
 agent:
-  max_concurrent_agents: 4
+  max_concurrent_agents: 11
   max_turns: 25
 agent_runtime:
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
