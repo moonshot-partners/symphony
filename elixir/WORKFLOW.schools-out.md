@@ -96,6 +96,29 @@ Both repos are cloned at workspace creation. Touch only these:
 If diagnosis points to a repo NOT in this list, STOP and report. Do
 NOT clone any other repo.
 
+## PR base branch per repo
+
+Team uses gitflow: the GitHub default branch (`main`) is NOT the
+integration branch. PRs target the team's working branch; releases are
+cut from there to `main`. Always branch off and PR against the base
+branch listed below. Never target `main` unless the repo has no
+integration branch.
+
+| Repo | PR base |
+| --- | --- |
+| `schoolsoutapp/schools-out` | `dev` |
+| `schoolsoutapp/fe-next-app` | `dev` |
+| `schoolsoutapp/claude-camps-crawler` | `dev` |
+| `schoolsoutapp/data-ingestion-admin` | `dev` |
+| `schoolsoutapp/temporal-crawler` | `dev` |
+| `schoolsoutapp/schoolsout-crawler` | `main` |
+| `schoolsoutapp/v0-schools-out` | `main` |
+| `schoolsoutapp/terraform-runners` | `main` |
+| `schoolsoutapp/data-ingestion-tool` | `master` |
+
+If a repo not listed above ever enters the whitelist, the table must be
+updated in the same diff. Do not guess the base branch.
+
 ## Mandatory turn-1 deliverable: understanding.md
 
 Before any `Edit` / `Write` / mutating `Bash` call, write
@@ -128,7 +151,10 @@ Skipping this artifact is a hard stop, not a style preference.
      the same diff. No quote-style swaps, no spontaneous docstrings, no
      whitespace reformat outside the diff scope. Adjacent tech debt:
      mention in the PR body, do NOT fix in the same diff.
-2. Branch off latest `origin/main`. Branch name:
+2. Branch off the target repo's PR base branch (see "PR base branch per
+   repo" table above). Run `git fetch origin <base>` then
+   `git checkout -B <branch-name> origin/<base>`. Never branch off
+   `main` when the table lists a different base. Branch name:
    `agents/sodev-{{ issue.identifier | split: "-" | last }}-<short-slug>`
    (lowercase, dashes).
 3. One atomic commit per logical change. Concise descriptive messages.
@@ -137,6 +163,11 @@ Skipping this artifact is a hard stop, not a style preference.
      `Gemfile` / `package.json`).
    - Tests for changed files.
 5. Push the branch and open a PR with `gh pr create`:
+   - **Base branch**: pass `--base <base>` matching the target repo's
+     row in the table above. For `schools-out` and `fe-next-app` this is
+     `dev`. Never PR against `main` unless the table says so. A PR with
+     the wrong base must be closed and reopened — do not retarget after
+     the fact.
    - Title: `[{{ issue.identifier }}] <one-line>`
    - Body: 2–4 sentence summary + `Linear: {{ issue.url }}`
    - Apply label `symphony` (create with color `#7C3AED` if missing).
@@ -148,7 +179,9 @@ Skipping this artifact is a hard stop, not a style preference.
 ## Hard stops
 
 - Do not modify paths outside the cloned workspace.
-- Do not push to `main` directly.
+- Do not push to `main` directly. Do not push to any base branch listed
+  in the "PR base branch per repo" table directly — always go through a
+  PR.
 - Do not bypass branch protections, CI, or `--no-verify` git hooks.
 - Do not clone any repo not listed in "Allowed repositories" above.
 - Do not run `Edit` / `Write` before `state/<session>/understanding.md`
