@@ -2,7 +2,7 @@
 tracker:
   kind: linear
   project_slug: "c2bd55c135ce"
-  assignee: vinicius.freitas@moonshot.partners
+  assignee: $LINEAR_ASSIGNEE
   active_states:
     - Scheduled
     - In Development

@@ -181,6 +181,22 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.settings!().tracker.assignee == env_assignee
   end
 
+  test "tracker.assignee in current WORKFLOW.md resolves $LINEAR_ASSIGNEE env-reference" do
+    original_workflow_path = Workflow.workflow_file_path()
+    previous_linear_assignee = System.get_env("LINEAR_ASSIGNEE")
+    env_assignee = "vps-bot@example.com"
+
+    on_exit(fn ->
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env("LINEAR_ASSIGNEE", previous_linear_assignee)
+    end)
+
+    Workflow.clear_workflow_file_path()
+    System.put_env("LINEAR_ASSIGNEE", env_assignee)
+
+    assert Config.settings!().tracker.assignee == env_assignee
+  end
+
   test "workflow file path defaults to WORKFLOW.md in the current working directory when app env is unset" do
     original_workflow_path = Workflow.workflow_file_path()
 
