@@ -55,9 +55,6 @@ agent_runtime:
     - SYMPHONY_GITHUB_APP_ID
     - SYMPHONY_GITHUB_APP_INSTALLATION_ID
     - SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH
-server:
-  host: 127.0.0.1
-  port: 4000
 ---
 
 # Schools Out — Symphony Workflow
