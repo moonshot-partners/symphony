@@ -18,7 +18,11 @@ workspace:
   root: ~/code/symphony-workspaces
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/openai/symphony .
+    if [ -z "$SYMPHONY_TARGET_REPO_URL" ]; then
+      echo "after_create: SYMPHONY_TARGET_REPO_URL is not set" >&2
+      exit 1
+    fi
+    git clone --depth 1 "$SYMPHONY_TARGET_REPO_URL" .
     if command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get && cd ..
     fi
