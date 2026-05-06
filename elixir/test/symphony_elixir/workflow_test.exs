@@ -54,4 +54,54 @@ defmodule SymphonyElixir.WorkflowTest do
       assert Workflow.workflow_file_path() == "/tmp/app-env-wins.md"
     end
   end
+
+  describe "WORKFLOW.md prompt body" do
+    test "every state in '## Status map' section is in tracker.active_states or terminal_states" do
+      original_workflow_path = Workflow.workflow_file_path()
+      on_exit(fn -> Workflow.set_workflow_file_path(original_workflow_path) end)
+      Workflow.clear_workflow_file_path()
+
+      {:ok, %{config: config, prompt: prompt}} = Workflow.load()
+
+      tracker = Map.fetch!(config, "tracker")
+      active = Map.get(tracker, "active_states", [])
+      terminal = Map.get(tracker, "terminal_states", [])
+      configured = MapSet.new(active ++ terminal)
+
+      section = extract_status_map_section(prompt)
+      assert section != "", "WORKFLOW.md prompt is missing a '## Status map' section"
+
+      mentioned = extract_state_names_from_status_map(section)
+
+      assert MapSet.size(mentioned) > 0,
+             "Could not parse any state names from '## Status map' section"
+
+      unknown = MapSet.difference(mentioned, configured)
+
+      assert MapSet.size(unknown) == 0,
+             "## Status map mentions states not in tracker.active_states/terminal_states: " <>
+               inspect(MapSet.to_list(unknown))
+    end
+  end
+
+  defp extract_status_map_section(prompt) do
+    case Regex.run(~r/## Status map\n(.*?)(?=\n## |\z)/s, prompt) do
+      [_full, body] -> body
+      _ -> ""
+    end
+  end
+
+  defp extract_state_names_from_status_map(section) do
+    ~r/^-\s+`([^`]+)`/m
+    |> Regex.scan(section)
+    |> Enum.flat_map(fn [_full, captured] -> split_state_list(captured) end)
+    |> MapSet.new()
+  end
+
+  defp split_state_list(text) do
+    text
+    |> String.split(~r/`,\s*`/)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
 end
