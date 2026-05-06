@@ -89,9 +89,6 @@ agent_runtime:
   read_timeout_ms: 120000
   turn_sandbox_policy:
     type: workspaceWrite
-server:
-  host: 127.0.0.1
-  port: 4000
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
