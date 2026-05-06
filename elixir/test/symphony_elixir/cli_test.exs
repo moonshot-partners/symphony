@@ -21,10 +21,6 @@ defmodule SymphonyElixir.CLITest do
         send(parent, :logs_root_set)
         :ok
       end,
-      set_server_port_override: fn _port ->
-        send(parent, :port_set)
-        :ok
-      end,
       ensure_all_started: fn ->
         send(parent, :started)
         {:ok, [:symphony_elixir]}
@@ -39,7 +35,6 @@ defmodule SymphonyElixir.CLITest do
     refute_received :file_checked
     refute_received :workflow_set
     refute_received :logs_root_set
-    refute_received :port_set
     refute_received :started
   end
 
@@ -48,7 +43,6 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn path -> Path.basename(path) == "WORKFLOW.md" end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
-      set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
 
@@ -70,7 +64,6 @@ defmodule SymphonyElixir.CLITest do
         :ok
       end,
       set_logs_root: fn _path -> :ok end,
-      set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
 
@@ -89,7 +82,6 @@ defmodule SymphonyElixir.CLITest do
         send(parent, {:logs_root, path})
         :ok
       end,
-      set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
 
@@ -103,7 +95,6 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn _path -> false end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
-      set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
 
@@ -116,7 +107,6 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn _path -> true end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
-      set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:error, :boom} end
     }
 
@@ -130,7 +120,6 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn _path -> true end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
-      set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
 

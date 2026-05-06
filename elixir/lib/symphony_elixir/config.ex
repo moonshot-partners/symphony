@@ -83,14 +83,6 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec server_port() :: non_neg_integer() | nil
-  def server_port do
-    case Application.get_env(:symphony_elixir, :server_port_override) do
-      port when is_integer(port) and port >= 0 -> port
-      _ -> settings!().server.port
-    end
-  end
-
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, settings} <- settings() do

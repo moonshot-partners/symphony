@@ -1060,9 +1060,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       hook_timeout_ms: 0,
       observability_enabled: "maybe",
       observability_refresh_ms: %{bad: true},
-      observability_render_interval_ms: %{bad: true},
-      server_port: -1,
-      server_host: 123
+      observability_render_interval_ms: %{bad: true}
     )
 
     assert {:error, {:invalid_workflow_config, _message}} = Config.validate!()

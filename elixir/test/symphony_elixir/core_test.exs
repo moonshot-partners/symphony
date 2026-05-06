@@ -137,7 +137,8 @@ defmodule SymphonyElixir.CoreTest do
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
+    assert Map.get(hooks, "after_create") =~ "SYMPHONY_TARGET_REPO_URL is not set"
+    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 \"$SYMPHONY_TARGET_REPO_URL\" ."
     assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
     assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
@@ -177,6 +178,22 @@ defmodule SymphonyElixir.CoreTest do
       tracker_project_slug: "project",
       agent_runtime_command: "/bin/sh app-server"
     )
+
+    assert Config.settings!().tracker.assignee == env_assignee
+  end
+
+  test "tracker.assignee in current WORKFLOW.md resolves $LINEAR_ASSIGNEE env-reference" do
+    original_workflow_path = Workflow.workflow_file_path()
+    previous_linear_assignee = System.get_env("LINEAR_ASSIGNEE")
+    env_assignee = "vps-bot@example.com"
+
+    on_exit(fn ->
+      Workflow.set_workflow_file_path(original_workflow_path)
+      restore_env("LINEAR_ASSIGNEE", previous_linear_assignee)
+    end)
+
+    Workflow.clear_workflow_file_path()
+    System.put_env("LINEAR_ASSIGNEE", env_assignee)
 
     assert Config.settings!().tracker.assignee == env_assignee
   end
@@ -1150,8 +1167,8 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "This is an unattended orchestration session."
     assert prompt =~ "Only stop early for a true blocker"
     assert prompt =~ "Do not include \"next steps for user\""
-    assert prompt =~ "open and follow `.codex/skills/land/SKILL.md`"
-    assert prompt =~ "Do not call `gh pr merge` directly"
+    assert prompt =~ "When the issue is in `In QA / Review`"
+    assert prompt =~ "The agent does not perform the merge itself."
     assert prompt =~ "Continuation context:"
     assert prompt =~ "retry attempt #2"
   end

@@ -78,7 +78,6 @@ If no path is passed, Symphony defaults to `./WORKFLOW.md`.
 Optional flags:
 
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
-- `--port` also starts the Phoenix observability service (default: disabled)
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.
@@ -148,8 +147,6 @@ codex:
 - If `WORKFLOW.md` is missing or has invalid YAML at startup, Symphony does not boot.
 - If a later reload fails, Symphony keeps running with the last known good workflow and logs the
   reload error until the file is fixed.
-- `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
-  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
 
 ## Authentication
 
@@ -185,14 +182,15 @@ If `SYMPHONY_GITHUB_APP_ID`, `SYMPHONY_GITHUB_APP_INSTALLATION_ID`, or
 working but means PRs are authored by the operator and they cannot self-request
 review.
 
-## Web dashboard
+## Observability
 
-The observability UI now runs on a minimal Phoenix stack:
+Symphony has no built-in HTTP dashboard. The current observability surface is:
 
-- LiveView for the dashboard at `/`
-- JSON API for operational debugging under `/api/v1/*`
-- Bandit as the HTTP server
-- Phoenix dependency static assets for the LiveView client bootstrap
+- Structured logs under `./log/` (override with `--logs-root`)
+- Per-issue agent transcripts streamed back to the originating Linear ticket as
+  comments by the running agent
+- Standard BEAM introspection (`:observer`, `:remote_console`) for live runtime
+  inspection
 
 ## Project Layout
 

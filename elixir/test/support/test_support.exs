@@ -40,7 +40,6 @@ defmodule SymphonyElixir.TestSupport do
 
         on_exit(fn ->
           Application.delete_env(:symphony_elixir, :workflow_file_path)
-          Application.delete_env(:symphony_elixir, :server_port_override)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
           File.rm_rf(workflow_root)
@@ -123,8 +122,6 @@ defmodule SymphonyElixir.TestSupport do
           observability_enabled: true,
           observability_refresh_ms: 1_000,
           observability_render_interval_ms: 16,
-          server_port: nil,
-          server_host: nil,
           prompt: @workflow_prompt
         ],
         overrides
@@ -161,8 +158,6 @@ defmodule SymphonyElixir.TestSupport do
     observability_enabled = Keyword.get(config, :observability_enabled)
     observability_refresh_ms = Keyword.get(config, :observability_refresh_ms)
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
-    server_port = Keyword.get(config, :server_port)
-    server_host = Keyword.get(config, :server_host)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -197,7 +192,6 @@ defmodule SymphonyElixir.TestSupport do
         "  stall_timeout_ms: #{yaml_value(agent_runtime_stall_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
-        server_yaml(server_port, server_host),
         "---",
         prompt
       ]
@@ -265,18 +259,6 @@ defmodule SymphonyElixir.TestSupport do
       "  refresh_ms: #{yaml_value(refresh_ms)}",
       "  render_interval_ms: #{yaml_value(render_interval_ms)}"
     ]
-    |> Enum.join("\n")
-  end
-
-  defp server_yaml(nil, nil), do: nil
-
-  defp server_yaml(port, host) do
-    [
-      "server:",
-      port && "  port: #{yaml_value(port)}",
-      host && "  host: #{yaml_value(host)}"
-    ]
-    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
 
