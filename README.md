@@ -34,6 +34,9 @@ help with the setup:
 > Set up Symphony for my repository based on
 > https://github.com/openai/symphony/blob/main/elixir/README.md
 
+- Deploying to a Linux VPS? See [elixir/DEPLOYMENT.md](elixir/DEPLOYMENT.md) for a
+  step-by-step runbook (toolchain, env vars, WORKFLOW.md customization, systemd unit).
+
 ---
 
 ## License
