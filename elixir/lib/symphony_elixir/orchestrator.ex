@@ -364,6 +364,12 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
+  @spec apply_state_transition_for_test(Issue.t(), String.t() | nil) :: :ok
+  def apply_state_transition_for_test(%Issue{} = issue, state_name) do
+    apply_state_transition(issue, state_name)
+  end
+
+  @doc false
   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
@@ -512,9 +518,28 @@ defmodule SymphonyElixir.Orchestrator do
 
         update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
         _ = Workpad.maybe_sync(entry, update, self())
+
+        issue = Map.get(running_entry, :issue)
+        if issue, do: apply_state_transition(issue, Config.settings!().tracker.on_complete_state)
+
         state
     end
   end
+
+  defp apply_state_transition(%Issue{} = issue, state_name)
+       when is_binary(state_name) and state_name != "" do
+    case Tracker.update_issue_state(issue.id, state_name) do
+      :ok ->
+        Logger.info("Linear state transition: #{issue_context(issue)} → #{state_name}")
+
+      {:error, reason} ->
+        Logger.warning("Linear state transition failed: #{issue_context(issue)} → #{state_name}: #{inspect(reason)}")
+    end
+
+    :ok
+  end
+
+  defp apply_state_transition(_issue, _state_name), do: :ok
 
   defp maybe_put_workpad_comment_id(entry, nil), do: entry
 
@@ -771,6 +796,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
+    pickup_state = Config.settings!().tracker.on_pickup_state
+
     case Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
            AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
          end) do
@@ -803,6 +830,8 @@ defmodule SymphonyElixir.Orchestrator do
             started_at: DateTime.utc_now(),
             workpad_comment_id: Map.get(state.workpads, issue.id)
           })
+
+        apply_state_transition(issue, pickup_state)
 
         %{
           state
