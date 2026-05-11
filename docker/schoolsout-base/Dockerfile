@@ -1,18 +1,33 @@
-FROM ruby:3.4.2-slim
+FROM ubuntu:24.04
 
+ARG DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Base tools + Python 3.12 (default in Ubuntu 24.04)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
       git \
       ca-certificates \
       gnupg \
       build-essential \
-      python3.12 \
-      python3.12-dev \
+      libssl-dev \
+      zlib1g-dev \
+      python3 \
+      python3-dev \
       python3-pip \
       python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Make python/python3 point to python3.12
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
+
+# Ruby 3.4.2 via mise (precompiled)
+ENV HOME=/root
+RUN curl https://mise.run | bash
+ENV PATH=/root/.local/bin:/root/.local/share/mise/shims:$PATH
+RUN mise settings ruby.compile=false \
+    && mise install ruby@3.4.2 \
+    && mise use -g ruby@3.4.2
 
 # Node 22 via NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -29,10 +44,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
-
-# Make python3.12 the default python3
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
 # Install devflow-agent (vendored) then shim
 COPY docker/schoolsout-base/vendor/devflow-agent /opt/devflow-agent
