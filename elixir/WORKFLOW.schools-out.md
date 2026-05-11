@@ -177,7 +177,21 @@ Skipping this artifact is a hard stop, not a style preference.
      `pnpm lint:fix`, re-run `pnpm format` again (ESLint fixes can introduce
      Prettier violations), re-stage, amend, and verify both `pnpm format:check`
      and `pnpm lint` exit 0. Do NOT push with outstanding lint or format violations.
-   - Tests for changed files.
+   - **Tests — before and after (mandatory):**
+     - **Rails (`Gemfile` present):** For each file you will edit, run
+       `bundle exec rubocop <path/to/file.rb>` before any edit and record the
+       output. After implementing, run the same command again — it must not
+       introduce new violations. If the repo has an RSpec spec matching the
+       changed file (`spec/**/*_spec.rb`), run
+       `bundle exec rspec <spec_file> --format progress` before and after;
+       both runs must pass (skip if Postgres is unavailable — document it).
+     - **Next.js (`fe-next-app/package.json` present):** For each file you
+       will edit, run
+       `pnpm --filter fe-next-app test --passWithNoTests --testPathPattern="<filename>"`
+       before any edit and record the result. After implementing, run the same
+       command again — both runs must exit 0. If the before-run already fails,
+       document it in `state/<session>/understanding.md` and do not regress it
+       further.
 5. Push the branch and open a PR with `gh pr create`:
    - **Pre-PR base branch check (mandatory before any `gh pr create` call)**:
      Run `git log --oneline origin/dev..HEAD` (or the repo's base per the
