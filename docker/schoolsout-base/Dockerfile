@@ -72,6 +72,9 @@ RUN chmod 755 /root \
 
 USER agent
 ENV HOME=/home/agent
+# mise global config lives under the root home where it was installed;
+# point all users at it so `ruby`, `gem`, etc. resolve via the same shims.
+ENV MISE_GLOBAL_CONFIG_FILE=/root/.config/mise/config.toml
 WORKDIR /workspace
 
 CMD ["python", "-m", "symphony_agent_shim"]
