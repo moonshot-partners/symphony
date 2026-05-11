@@ -380,6 +380,11 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @doc false
+  def extract_token_delta_for_test(running_entry, update) do
+    extract_token_delta(running_entry, update)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -1548,13 +1553,21 @@ defmodule SymphonyElixir.Orchestrator do
     }
     |> Tuple.to_list()
     |> then(fn [input, output, total] ->
+      # Anthropic SDK usage has no total_tokens field — derive from input + output.
+      effective_total =
+        if is_nil(get_token_usage(usage, :total)) do
+          %{delta: input.delta + output.delta, reported: input.reported + output.reported}
+        else
+          total
+        end
+
       %{
         input_tokens: input.delta,
         output_tokens: output.delta,
-        total_tokens: total.delta,
+        total_tokens: effective_total.delta,
         input_reported: input.reported,
         output_reported: output.reported,
-        total_reported: total.reported
+        total_reported: effective_total.reported
       }
     end)
   end
