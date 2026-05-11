@@ -592,11 +592,18 @@ defmodule SymphonyElixir.Orchestrator do
         _ = Workpad.maybe_sync(entry, update, self())
 
         issue = Map.get(running_entry, :issue)
-        if issue, do: apply_state_transition(issue, Config.settings!().tracker.on_complete_state)
-        if issue, do: Task.start(fn -> apply_github_pr_label(issue) end)
+        run_pr_attached_side_effects(issue)
 
         state
     end
+  end
+
+  defp run_pr_attached_side_effects(nil), do: :ok
+
+  defp run_pr_attached_side_effects(issue) do
+    apply_state_transition(issue, Config.settings!().tracker.on_complete_state)
+    Task.start(fn -> apply_github_pr_label(issue) end)
+    :ok
   end
 
   defp apply_state_transition(%Issue{} = issue, state_name)
@@ -648,11 +655,7 @@ defmodule SymphonyElixir.Orchestrator do
             :ok
 
           {out, _code} when is_binary(out) ->
-            if String.contains?(out, "already exists") do
-              :ok
-            else
-              Logger.warning("gh label create failed for #{full_repo}: #{String.trim(out)}")
-            end
+            handle_label_create_output(out, full_repo)
         end
 
         case System.cmd(
@@ -669,6 +672,12 @@ defmodule SymphonyElixir.Orchestrator do
 
       :error ->
         Logger.warning("Cannot parse GitHub PR URL for labeling: #{inspect(pr_url)}")
+    end
+  end
+
+  defp handle_label_create_output(out, repo) do
+    unless String.contains?(out, "already exists") do
+      Logger.warning("gh label create failed for #{repo}: #{String.trim(out)}")
     end
   end
 

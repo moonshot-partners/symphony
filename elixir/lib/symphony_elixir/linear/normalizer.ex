@@ -82,8 +82,6 @@ defmodule SymphonyElixir.Linear.Normalizer do
 
   defp matches_routing_filter?(_assignee, _labels, _routing_filter), do: false
 
-  defp assigned_to_worker?(_assignee, nil), do: true
-
   defp assigned_to_worker?(%{} = assignee, %{match_values: match_values})
        when is_struct(match_values, MapSet) do
     assignee

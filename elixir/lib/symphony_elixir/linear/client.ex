@@ -228,6 +228,19 @@ defmodule SymphonyElixir.Linear.Client do
     Normalizer.normalize_issue(issue, %{assignee: nil, label: String.downcase(label)})
   end
 
+  @doc false
+  @spec normalize_issue_for_label_and_assignee_test(map(), String.t(), String.t()) :: Issue.t() | nil
+  def normalize_issue_for_label_and_assignee_test(issue, label, assignee)
+      when is_map(issue) and is_binary(label) and is_binary(assignee) do
+    assignee_filter =
+      case build_assignee_filter(assignee) do
+        {:ok, filter} -> filter
+        {:error, _} -> nil
+      end
+
+    Normalizer.normalize_issue(issue, %{assignee: assignee_filter, label: String.downcase(label)})
+  end
+
   defdelegate extract_repos(issue), to: Normalizer
 
   @doc false

@@ -22,11 +22,17 @@ hooks:
   after_create: |
     # Primary repo at workspace root.
     git clone --depth 1 https://github.com/schoolsoutapp/schools-out .
+    # Point origin/HEAD → dev so `gh pr create` defaults to dev (not main).
+    # Pre-fetch dev so `git checkout -B ... origin/dev` works without extra fetch.
+    git remote set-head origin dev
+    git fetch --depth=1 origin dev
     # Frontend repo at ./fe-next-app — eliminates the SODEV-827 class of
     # bugs where the agent had to clone the right repo mid-run after
     # burning turns on the wrong one. Whitelist mirrored in the prompt
     # body's "Allowed repositories" section.
     git clone --depth 1 https://github.com/schoolsoutapp/fe-next-app fe-next-app
+    git -C fe-next-app remote set-head origin dev
+    git -C fe-next-app fetch --depth=1 origin dev
     if [ -f Gemfile ]; then
       bundle install --quiet || true
     fi
@@ -172,11 +178,15 @@ Skipping this artifact is a hard stop, not a style preference.
      and `pnpm lint` exit 0. Do NOT push with outstanding lint or format violations.
    - Tests for changed files.
 5. Push the branch and open a PR with `gh pr create`:
-   - **Base branch**: pass `--base <base>` matching the target repo's
-     row in the table above. For `schools-out` and `fe-next-app` this is
-     `dev`. Never PR against `main` unless the table says so. A PR with
-     the wrong base must be closed and reopened — do not retarget after
-     the fact.
+   - **Pre-PR base branch check (mandatory before any `gh pr create` call)**:
+     Run `git log --oneline origin/dev..HEAD` (or the repo's base per the
+     table). The output must show only your commits. If it is empty or shows
+     unrelated history, you branched off the wrong ref — stop, re-branch from
+     `origin/dev`, cherry-pick your commits, and verify again before pushing.
+   - **Base branch**: pass `--base dev` for `schools-out` and `fe-next-app`
+     (see table above). Never omit `--base`. Never PR against `main` unless
+     the table says so. A PR with the wrong base must be closed and reopened —
+     do not retarget after the fact.
    - Title: `[{{ issue.identifier }}] <one-line>`
    - Body: 2–4 sentence summary + `Linear: {{ issue.url }}`
    - Apply label `symphony` (create with color `#7C3AED` if missing).
