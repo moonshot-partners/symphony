@@ -995,6 +995,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().agent_runtime.command ==
              "codex --config 'model=\"gpt-5.5\"' app-server"
 
+    write_workflow_file!(Workflow.workflow_file_path(),
+      agent_runtime_docker_image: "schoolsout-base:latest"
+    )
+
+    assert Config.settings!().agent_runtime.docker_image == "schoolsout-base:latest"
+
+    write_workflow_file!(Workflow.workflow_file_path())
+    assert is_nil(Config.settings!().agent_runtime.docker_image)
+
     explicit_root =
       Path.join(
         System.tmp_dir!(),
