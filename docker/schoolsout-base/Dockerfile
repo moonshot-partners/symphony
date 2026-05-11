@@ -61,6 +61,17 @@ RUN gem install bundler --no-document
 RUN git config --global credential.https://github.com.helper '!/usr/bin/gh auth git-credential' \
     && git config --global credential.https://gist.github.com.helper '!/usr/bin/gh auth git-credential'
 
+# Create non-root agent user. Claude Code refuses --dangerously-skip-permissions
+# when running as root, so all agent sessions must run as a non-root user.
+# Make /root world-traversable so mise shims and ruby remain accessible via PATH.
+RUN chmod 755 /root \
+    && chmod -R a+rX /root/.local \
+    && useradd -m -u 1001 -s /bin/bash agent \
+    && cp /root/.gitconfig /home/agent/.gitconfig \
+    && chown agent:agent /home/agent/.gitconfig
+
+USER agent
+ENV HOME=/home/agent
 WORKDIR /workspace
 
 CMD ["python", "-m", "symphony_agent_shim"]
