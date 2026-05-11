@@ -370,6 +370,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
+  @spec parse_github_pr_url_for_test(term()) ::
+          {:ok, String.t(), String.t(), pos_integer()} | :error
+  def parse_github_pr_url_for_test(url), do: parse_github_pr_url(url)
+
+  @doc false
   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
@@ -521,6 +526,7 @@ defmodule SymphonyElixir.Orchestrator do
 
         issue = Map.get(running_entry, :issue)
         if issue, do: apply_state_transition(issue, Config.settings!().tracker.on_complete_state)
+        if issue, do: Task.start(fn -> apply_github_pr_label(issue) end)
 
         state
     end
@@ -540,6 +546,64 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp apply_state_transition(_issue, _state_name), do: :ok
+
+  defp parse_github_pr_url(url) when is_binary(url) do
+    case Regex.run(~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}, url) do
+      [_, owner, repo, number] -> {:ok, owner, repo, String.to_integer(number)}
+      _ -> :error
+    end
+  end
+
+  defp parse_github_pr_url(_), do: :error
+
+  defp apply_github_pr_label(%Issue{repos: repos}) do
+    repos
+    |> Enum.flat_map(fn
+      %{pr: %{url: url}} when is_binary(url) -> [url]
+      _ -> []
+    end)
+    |> Enum.each(&label_github_pr/1)
+  end
+
+  defp apply_github_pr_label(_), do: :ok
+
+  defp label_github_pr(pr_url) do
+    case parse_github_pr_url(pr_url) do
+      {:ok, owner, repo, number} ->
+        full_repo = "#{owner}/#{repo}"
+
+        case System.cmd(
+               "gh",
+               ["label", "create", "symphony", "--color", "7C3AED", "--repo", full_repo],
+               stderr_to_stdout: true
+             ) do
+          {_, 0} ->
+            :ok
+
+          {out, _code} when is_binary(out) ->
+            if String.contains?(out, "already exists") do
+              :ok
+            else
+              Logger.warning("gh label create failed for #{full_repo}: #{String.trim(out)}")
+            end
+        end
+
+        case System.cmd(
+               "gh",
+               ["pr", "edit", "#{number}", "--add-label", "symphony", "--repo", full_repo],
+               stderr_to_stdout: true
+             ) do
+          {_, 0} ->
+            Logger.info("Applied symphony label: #{pr_url}")
+
+          {out, code} ->
+            Logger.warning("Failed to apply symphony label to #{pr_url}: exit=#{code} #{String.trim(out)}")
+        end
+
+      :error ->
+        Logger.warning("Cannot parse GitHub PR URL for labeling: #{inspect(pr_url)}")
+    end
+  end
 
   defp maybe_put_workpad_comment_id(entry, nil), do: entry
 
