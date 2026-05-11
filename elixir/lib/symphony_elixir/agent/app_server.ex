@@ -269,6 +269,14 @@ defmodule SymphonyElixir.Agent.AppServer do
     end)
   end
 
+  defp shim_cwd(host_path) do
+    case Config.settings!().agent_runtime.docker_image do
+      nil -> host_path
+      # Workspace is mounted at /workspace inside the container.
+      _image -> "/workspace"
+    end
+  end
+
   defp port_metadata(port, worker_host) when is_port(port) do
     base_metadata =
       case :erlang.port_info(port, :os_pid) do
@@ -333,7 +341,7 @@ defmodule SymphonyElixir.Agent.AppServer do
     base_params = %{
       "approvalPolicy" => approval_policy,
       "sandbox" => thread_sandbox,
-      "cwd" => workspace,
+      "cwd" => shim_cwd(workspace),
       "dynamicTools" => DynamicTool.tool_specs()
     }
 
@@ -373,7 +381,7 @@ defmodule SymphonyElixir.Agent.AppServer do
             "text" => prompt
           }
         ],
-        "cwd" => workspace,
+        "cwd" => shim_cwd(workspace),
         "title" => "#{issue.identifier}: #{issue.title}",
         "approvalPolicy" => approval_policy,
         "sandboxPolicy" => turn_sandbox_policy
