@@ -56,6 +56,11 @@ RUN pip install --break-system-packages --no-cache-dir \
 # Default bundler
 RUN gem install bundler --no-document
 
+# Wire gh as the git credential helper so GH_TOKEN (passed at runtime)
+# authenticates HTTPS git operations (clone, push) inside the container.
+RUN git config --global credential.https://github.com.helper '!/usr/bin/gh auth git-credential' \
+    && git config --global credential.https://gist.github.com.helper '!/usr/bin/gh auth git-credential'
+
 WORKDIR /workspace
 
 CMD ["python", "-m", "symphony_agent_shim"]
