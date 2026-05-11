@@ -1,11 +1,9 @@
 """Anthropic auth resolution.
 
 Precedence:
-1. ``ANTHROPIC_OAUTH_TOKEN`` — Claude Code subscription token (local only)
-2. ``ANTHROPIC_API_KEY`` — standard API key
-
-The SDK reads these from the subprocess environment. We forward whichever
-is set so the SDK's internal CLI subprocess inherits it.
+1. ``CLAUDE_CODE_OAUTH_TOKEN`` — long-lived token from `claude setup-token` (1 year)
+2. ``ANTHROPIC_OAUTH_TOKEN`` — short-lived Claude Code session token
+3. ``ANTHROPIC_API_KEY`` — standard API key
 """
 
 import os
@@ -16,10 +14,12 @@ class AuthError(RuntimeError):
 
 
 def resolve_auth_env() -> dict[str, str]:
-    oauth = os.environ.get("ANTHROPIC_OAUTH_TOKEN")
-    if oauth:
+    if token := os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return {"CLAUDE_CODE_OAUTH_TOKEN": token}
+    if oauth := os.environ.get("ANTHROPIC_OAUTH_TOKEN"):
         return {"ANTHROPIC_OAUTH_TOKEN": oauth}
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if api_key:
+    if api_key := os.environ.get("ANTHROPIC_API_KEY"):
         return {"ANTHROPIC_API_KEY": api_key}
-    raise AuthError("no Anthropic credentials: set ANTHROPIC_OAUTH_TOKEN or ANTHROPIC_API_KEY")
+    raise AuthError(
+        "no Anthropic credentials: set CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_OAUTH_TOKEN, or ANTHROPIC_API_KEY"
+    )
