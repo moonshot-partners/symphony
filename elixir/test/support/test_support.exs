@@ -112,6 +112,7 @@ defmodule SymphonyElixir.TestSupport do
           max_retry_backoff_ms: 300_000,
           max_concurrent_agents_by_state: %{},
           agent_runtime_command: "python -m symphony_agent_shim",
+          agent_runtime_docker_image: nil,
           agent_runtime_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
           agent_runtime_thread_sandbox: "workspace-write",
           agent_runtime_turn_sandbox_policy: nil,
@@ -152,6 +153,7 @@ defmodule SymphonyElixir.TestSupport do
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
     max_concurrent_agents_by_state = Keyword.get(config, :max_concurrent_agents_by_state)
     agent_runtime_command = Keyword.get(config, :agent_runtime_command)
+    agent_runtime_docker_image = Keyword.get(config, :agent_runtime_docker_image)
     agent_runtime_approval_policy = Keyword.get(config, :agent_runtime_approval_policy)
     agent_runtime_thread_sandbox = Keyword.get(config, :agent_runtime_thread_sandbox)
     agent_runtime_turn_sandbox_policy = Keyword.get(config, :agent_runtime_turn_sandbox_policy)
@@ -196,6 +198,7 @@ defmodule SymphonyElixir.TestSupport do
         "  max_concurrent_agents_by_state: #{yaml_value(max_concurrent_agents_by_state)}",
         "agent_runtime:",
         "  command: #{yaml_value(agent_runtime_command)}",
+        "  docker_image: #{yaml_value(agent_runtime_docker_image)}",
         "  approval_policy: #{yaml_value(agent_runtime_approval_policy)}",
         "  thread_sandbox: #{yaml_value(agent_runtime_thread_sandbox)}",
         "  turn_sandbox_policy: #{yaml_value(agent_runtime_turn_sandbox_policy)}",

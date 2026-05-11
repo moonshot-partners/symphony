@@ -189,6 +189,7 @@ defmodule SymphonyElixir.Config.Schema do
         }
       )
 
+      field(:docker_image, :string)
       field(:thread_sandbox, :string, default: "workspace-write")
       field(:turn_sandbox_policy, :map)
       field(:turn_timeout_ms, :integer, default: 3_600_000)
@@ -203,6 +204,7 @@ defmodule SymphonyElixir.Config.Schema do
         attrs,
         [
           :command,
+          :docker_image,
           :approval_policy,
           :thread_sandbox,
           :turn_sandbox_policy,

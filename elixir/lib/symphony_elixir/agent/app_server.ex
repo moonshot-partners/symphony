@@ -191,6 +191,13 @@ defmodule SymphonyElixir.Agent.AppServer do
   end
 
   defp start_port(workspace, nil) do
+    case Config.settings!().agent_runtime.docker_image do
+      nil -> start_port_bash(workspace)
+      image -> start_port_docker(workspace, image)
+    end
+  end
+
+  defp start_port_bash(workspace) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -211,6 +218,53 @@ defmodule SymphonyElixir.Agent.AppServer do
 
       {:ok, port}
     end
+  end
+
+  @docker_passthrough_env ~w[
+    ANTHROPIC_API_KEY
+    ANTHROPIC_OAUTH_TOKEN
+    ANTHROPIC_BASE_URL
+    LINEAR_API_KEY
+    GITHUB_TOKEN
+    SYMPHONY_DEVFLOW_ROOT
+    SYMPHONY_WORKFLOW_FILE
+  ]
+
+  defp start_port_docker(workspace, image) do
+    case System.find_executable("docker") do
+      nil ->
+        {:error, :docker_not_found}
+
+      executable ->
+        # CMD is baked into the image — no override needed here.
+        args =
+          ["run", "--rm", "-i"] ++
+            docker_env_args() ++
+            ["-v", "#{workspace}:/workspace", "-w", "/workspace", image]
+
+        port =
+          Port.open(
+            {:spawn_executable, String.to_charlist(executable)},
+            [
+              :binary,
+              :exit_status,
+              :stderr_to_stdout,
+              args: Enum.map(args, &String.to_charlist/1),
+              line: @port_line_bytes
+            ]
+          )
+
+        {:ok, port}
+    end
+  end
+
+  defp docker_env_args do
+    Enum.flat_map(@docker_passthrough_env, fn var ->
+      case System.get_env(var) do
+        nil -> []
+        val -> ["-e", "#{var}=#{val}"]
+      end
+    end)
   end
 
   defp port_metadata(port, worker_host) when is_port(port) do

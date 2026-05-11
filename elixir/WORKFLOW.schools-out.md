@@ -44,6 +44,7 @@ agent:
   max_turns: 25
 agent_runtime:
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
+  docker_image: schoolsout-base:latest
   approval_policy: never
   thread_sandbox: workspace-write
   read_timeout_ms: 60000
