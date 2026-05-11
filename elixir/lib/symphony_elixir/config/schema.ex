@@ -53,6 +53,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:project_slug, :string)
       field(:team_key, :string)
       field(:assignee, :string)
+      field(:routing_label, :string)
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
       field(:on_pickup_state, :string)
@@ -72,6 +73,7 @@ defmodule SymphonyElixir.Config.Schema do
           :project_slug,
           :team_key,
           :assignee,
+          :routing_label,
           :active_states,
           :terminal_states,
           :on_pickup_state,

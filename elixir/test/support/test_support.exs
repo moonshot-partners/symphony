@@ -97,6 +97,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_project_slug: "project",
           tracker_team_key: nil,
           tracker_assignee: nil,
+          tracker_routing_label: nil,
           tracker_active_states: ["Todo", "In Progress"],
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
           tracker_on_pickup_state: nil,
@@ -136,6 +137,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_project_slug = Keyword.get(config, :tracker_project_slug)
     tracker_team_key = Keyword.get(config, :tracker_team_key)
     tracker_assignee = Keyword.get(config, :tracker_assignee)
+    tracker_routing_label = Keyword.get(config, :tracker_routing_label)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
     tracker_on_pickup_state = Keyword.get(config, :tracker_on_pickup_state)
@@ -176,6 +178,7 @@ defmodule SymphonyElixir.TestSupport do
         "  project_slug: #{yaml_value(tracker_project_slug)}",
         "  team_key: #{yaml_value(tracker_team_key)}",
         "  assignee: #{yaml_value(tracker_assignee)}",
+        "  routing_label: #{yaml_value(tracker_routing_label)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
         "  on_pickup_state: #{yaml_value(tracker_on_pickup_state)}",

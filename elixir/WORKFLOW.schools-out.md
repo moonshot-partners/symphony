@@ -1,12 +1,8 @@
 ---
 tracker:
   kind: linear
-  # Linear project: "Symphony E2E Sandbox" (id 3792a5e9-efa6-4677-83f1-c47cbeacc249)
-  # Isolated project for testing Symphony agent runtime end-to-end. Safe to wipe.
-  # Do NOT widen the slug to a real delivery project until the agent has landed
-  # at least one human-reviewed PR.
-  project_slug: "symphony-e2e-sandbox-c2bd55c135ce"
-  assignee: vinicius.freitas@moonshot.partners
+  team_key: SODEV
+  routing_label: agent
   active_states:
     - Scheduled
     - In Development
