@@ -259,6 +259,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
+    state = reconcile_pr_merged_issues(state)
 
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
@@ -333,6 +334,62 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  defp reconcile_pr_merged_issues(%State{} = state) do
+    on_complete = Config.settings!().tracker.on_complete_state
+    on_merge = Config.settings!().tracker.on_pr_merge_state
+
+    if is_binary(on_complete) and is_binary(on_merge) do
+      do_reconcile_pr_merged_issues(on_complete, on_merge)
+    end
+
+    state
+  end
+
+  defp do_reconcile_pr_merged_issues(on_complete, on_merge) do
+    case Tracker.fetch_issues_by_states([on_complete]) do
+      {:ok, issues} ->
+        pr_check = &pr_merged?/1
+
+        issues
+        |> Enum.filter(& &1.has_pr_attachment)
+        |> Enum.each(&maybe_transition_merged_pr(&1, on_merge, pr_check))
+
+      {:error, reason} ->
+        Logger.debug("reconcile_pr_merged_issues: fetch failed #{inspect(reason)}")
+    end
+  end
+
+  defp maybe_transition_merged_pr(%Issue{} = issue, on_merge_state, pr_check_fn) do
+    pr_urls =
+      issue.repos
+      |> Enum.map(fn repo -> get_in(repo, [:pr, :url]) end)
+      |> Enum.filter(&is_binary/1)
+
+    if Enum.any?(pr_urls, pr_check_fn) do
+      Logger.info("PR merged for #{issue.identifier}; transitioning to #{on_merge_state}")
+      Task.start(fn -> apply_state_transition(issue, on_merge_state) end)
+    end
+  end
+
+  defp pr_merged?(pr_url) when is_binary(pr_url) do
+    case parse_github_pr_url(pr_url) do
+      {:ok, owner, repo, number} ->
+        case System.cmd(
+               "gh",
+               ["pr", "view", "#{number}", "--repo", "#{owner}/#{repo}", "--json", "merged", "--jq", ".merged"],
+               stderr_to_stdout: true
+             ) do
+          {"true\n", 0} -> true
+          _ -> false
+        end
+
+      :error ->
+        false
+    end
+  end
+
+  defp pr_merged?(_), do: false
+
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
   def reconcile_issue_states_for_test(issues, %State{} = state) when is_list(issues) do
@@ -383,6 +440,11 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   def extract_token_delta_for_test(running_entry, update) do
     extract_token_delta(running_entry, update)
+  end
+
+  @doc false
+  def maybe_transition_merged_pr_for_test(%Issue{} = issue, on_merge_state, pr_check_fn) do
+    maybe_transition_merged_pr(issue, on_merge_state, pr_check_fn)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state

@@ -101,6 +101,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
           tracker_on_pickup_state: nil,
           tracker_on_complete_state: nil,
+          tracker_on_pr_merge_state: nil,
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           worker_ssh_hosts: [],
@@ -139,6 +140,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
     tracker_on_pickup_state = Keyword.get(config, :tracker_on_pickup_state)
     tracker_on_complete_state = Keyword.get(config, :tracker_on_complete_state)
+    tracker_on_pr_merge_state = Keyword.get(config, :tracker_on_pr_merge_state)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
@@ -178,6 +180,7 @@ defmodule SymphonyElixir.TestSupport do
         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
         "  on_pickup_state: #{yaml_value(tracker_on_pickup_state)}",
         "  on_complete_state: #{yaml_value(tracker_on_complete_state)}",
+        "  on_pr_merge_state: #{yaml_value(tracker_on_pr_merge_state)}",
         "polling:",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
