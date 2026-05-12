@@ -114,9 +114,7 @@ defmodule SymphonyElixir.Orchestrator do
         maybe_dispatch(state)
       rescue
         e ->
-          Logger.error(
-            "Poll cycle exception: #{inspect(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
-          )
+          Logger.error("Poll cycle exception: #{inspect(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
 
           state
       end
