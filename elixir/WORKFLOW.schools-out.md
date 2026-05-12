@@ -31,8 +31,16 @@ hooks:
     # burning turns on the wrong one. Whitelist mirrored in the prompt
     # body's "Allowed repositories" section.
     git clone --depth 1 https://github.com/schoolsoutapp/fe-next-app fe-next-app
+    # fe-next-app's integration branch is `dev`. The shallow clone only brings
+    # `main`, so fetch `dev` explicitly into a real remote-tracking ref BEFORE
+    # pointing origin/HEAD at it.
+    git -C fe-next-app fetch --depth=1 origin dev:refs/remotes/origin/dev
     git -C fe-next-app remote set-head origin dev
-    git -C fe-next-app fetch --depth=1 origin dev
+    # fe-next-app is an npm project (versions package-lock.json). Install deps
+    # here with `npm ci` — if `pnpm install` runs later it builds a strict
+    # node_modules that fails undeclared transitive imports (e.g.
+    # @amplitude/analytics-core), which 500s `next dev` and blocks rule-5 QA.
+    (cd fe-next-app && npm ci --no-audit --no-fund) || true
     if [ -f Gemfile ]; then
       # Install gems into vendor/bundle so Docker can find them at /workspace/vendor/bundle.
       bundle config set --local path vendor/bundle
@@ -40,7 +48,9 @@ hooks:
     fi
   before_remove: |
     : # no-op (do not modify branches on workspace teardown)
-  timeout_ms: 300000
+  # Two clones + `npm ci` (fe-next-app) + `bundle install` (Rails) — give it
+  # room so a slow install doesn't leave a half-provisioned workspace.
+  timeout_ms: 600000
 agent:
   max_concurrent_agents: 11
   max_turns: 25
@@ -171,7 +181,11 @@ Skipping this artifact is a hard stop, not a style preference.
 2. Branch off the target repo's PR base branch (see "PR base branch per
    repo" table above). Run `git fetch origin <base>` then
    `git checkout -B <branch-name> origin/<base>`. Never branch off
-   `main` when the table lists a different base. Branch name:
+   `main` when the table lists a different base — if `git rev-parse
+   --verify origin/<base>` fails after the fetch, the workspace clone is
+   broken: STOP and report. Do NOT fall back to `main` (fe-next-app's
+   base is `dev`, and it does exist — don't conclude otherwise from a
+   shallow clone's local branch list). Branch name:
    `agents/sodev-{{ issue.identifier | split: "-" | last }}-<short-slug>`
    (lowercase, dashes).
 3. One atomic commit per logical change. Concise descriptive messages.
@@ -179,12 +193,14 @@ Skipping this artifact is a hard stop, not a style preference.
    - **Rails repos** (`Gemfile` present): `bundle exec rubocop --autocorrect-all`; if
      rubocop changes files, stage them and amend the commit; then verify `bundle exec
      rubocop` exits 0.
-   - **Next.js / TS repos** (`package.json` present): run `pnpm format` (Prettier
-     write-in-place) first — if it changes any files, stage them and amend the last
-     commit before continuing. Then run `pnpm lint`; if lint reports errors, run
-     `pnpm lint:fix`, re-run `pnpm format` again (ESLint fixes can introduce
-     Prettier violations), re-stage, amend, and verify both `pnpm format:check`
-     and `pnpm lint` exit 0. Do NOT push with outstanding lint or format violations.
+   - **fe-next-app (Next.js)** — it is an **npm** project (tracks
+     `package-lock.json`; use `npm`, never `pnpm` — `pnpm install` builds a
+     strict node_modules that 500s `next dev` and blocks rule 5). From the
+     `fe-next-app/` directory run `npm run code:fix` (Prettier write-in-place
+     + `eslint --fix`); if it changes any files, stage them and amend the last
+     commit before continuing. Then verify `npm run code:check`
+     (`prettier --check` + `eslint`) exits 0. Do NOT push with outstanding
+     lint or format violations.
    - **Tests — before and after (mandatory):**
      - **Rails (`Gemfile` present):** For each file you will edit, run
        `bundle exec rubocop <path/to/file.rb>` before any edit and record the
@@ -193,9 +209,9 @@ Skipping this artifact is a hard stop, not a style preference.
        changed file (`spec/**/*_spec.rb`), run
        `bundle exec rspec <spec_file> --format progress` before and after;
        both runs must pass (skip if Postgres is unavailable — document it).
-     - **Next.js (`fe-next-app/package.json` present):** For each file you
-       will edit, run
-       `pnpm --filter fe-next-app test --passWithNoTests --testPathPattern="<filename>"`
+     - **fe-next-app (Next.js):** For each file you will edit, from the
+       `fe-next-app/` directory run
+       `npm test -- --passWithNoTests --testPathPattern="<filename>"`
        before any edit and record the result. After implementing, run the same
        command again — both runs must exit 0. If the before-run already fails,
        document it in `state/<session>/understanding.md` and do not regress it
@@ -236,15 +252,31 @@ Skipping this artifact is a hard stop, not a style preference.
       generic role/name guesses miss (the SODEV-556 toggle is a `<button>`
       named "Read more" / "Show less", not `name="more"`).
 
-   b. Run `python fe-next-app/qa_check.py`. On **FAIL**: the bug is in the
-      code you just wrote — fix it from the existing diff (do not start
-      over), re-run the quality gates, re-run `qa_check.py`. Cap: 2 fix
-      attempts. If still failing after 2, STOP and report what the QA check
-      caught — do not open the PR.
-   c. On **PASS**: commit `fe-next-app/qa-evidence/` (screenshots +
-      `session.webm` + `qa-report.md` + `verdict.json`) and `qa_check.py`
-      in their own commit. Paste the `qa-report.md` table into the PR body
-      under a `## QA self-review` heading.
+   b. Run `python fe-next-app/qa_check.py`. Three outcomes:
+      - **FAIL** — the check ran and an AC assertion came back false. The bug
+        is in the code you just wrote: fix it from the existing diff (do not
+        start over), re-run the quality gates, re-run `qa_check.py`. Cap: 2
+        fix attempts. If still failing after 2, STOP and report what the QA
+        check caught — do not open the PR.
+      - **BLOCKED** — the dev server won't start, or 500s on a route you did
+        NOT touch. Confirm it's pre-existing with `git stash`: if the same
+        error happens with your changes removed, it's an environment issue,
+        not your bug — do NOT spend fix attempts on it. Still run your unit
+        tests (`npm test -- --testPathPattern="<filename>"` from
+        `fe-next-app/`); record them plus the blocking error in
+        `qa-report.md` / `verdict.json` (`"browser_qa": "BLOCKED"`); note it
+        in the PR body; then proceed to open the PR.
+      - **PASS** — proceed.
+   c. After PASS or BLOCKED: do **NOT** commit `qa-evidence/`. The report is
+      `.md`/`.json` and fe-next-app's lint runs
+      `prettier --check "**/*.{...,md,json}" --ignore-path .gitignore`, so a
+      committed `qa-evidence/` turns CI red. Instead append the line
+      `qa-evidence/` to `fe-next-app/.gitignore`, and commit only that
+      `.gitignore` change plus `qa_check.py` in their own commit. Symphony
+      reads `qa-evidence/` straight from the workspace and uploads the
+      screenshots, `session.webm` and `qa-report.md` to the Linear ticket
+      automatically. Paste the `qa-report.md` table into the PR body under a
+      `## QA self-review` heading.
 6. Push the branch and open a PR with `gh pr create`:
    - **Pre-PR base branch check (mandatory before any `gh pr create` call)**:
      Run `git log --oneline origin/dev..HEAD` (or the repo's base per the
@@ -285,9 +317,11 @@ Skipping this artifact is a hard stop, not a style preference.
 - Do not run `Edit` / `Write` before `state/<session>/understanding.md`
   exists with all four sections populated (visual_wiring required when
   any AC uses render/display/show/visible language).
-- Do not open the PR for a `fe-next-app/` UI change while
-  `qa_check.py` is still failing (rule 5). Two fix attempts, then stop
-  and report — never ship a UI change the browser check rejects.
+- Do not open the PR for a `fe-next-app/` UI change while `qa_check.py`
+  reports **FAIL** (rule 5b) — an AC assertion is false. Two fix attempts,
+  then stop and report; never ship a UI change the browser check rejects.
+  A **BLOCKED** verdict (dev server / env issue, confirmed pre-existing via
+  `git stash`) is not a FAIL — open the PR with the block documented.
 - If auth/permissions/tooling feels off (token errors, repo not found),
   stop. Do not retry blindly. The orchestrator captures your last message
   on the Linear workpad — say what is wrong and exit.
