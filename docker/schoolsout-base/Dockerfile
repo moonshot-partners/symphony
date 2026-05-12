@@ -61,18 +61,17 @@ RUN gem install bundler --no-document
 RUN git config --global credential.https://github.com.helper '!/usr/bin/gh auth git-credential' \
     && git config --global credential.https://gist.github.com.helper '!/usr/bin/gh auth git-credential'
 
-# Create non-root agent user. Claude Code refuses --dangerously-skip-permissions
-# when running as root, so all agent sessions must run as a non-root user.
-# UID 1000 matches the VPS ubuntu user so workspace bind-mounts are writable.
+# Use the pre-existing ubuntu user (UID 1000) — matches the VPS host ubuntu user
+# so workspace bind-mounts are writable without re-chown.
+# Claude Code refuses --dangerously-skip-permissions as root; ubuntu (UID 1000) passes.
 # Make /root world-traversable so mise shims and ruby remain accessible via PATH.
 RUN chmod 755 /root \
     && chmod -R a+rX /root/.local \
-    && useradd -m -u 1000 -s /bin/bash agent \
-    && cp /root/.gitconfig /home/agent/.gitconfig \
-    && chown agent:agent /home/agent/.gitconfig
+    && cp /root/.gitconfig /home/ubuntu/.gitconfig \
+    && chown ubuntu:ubuntu /home/ubuntu/.gitconfig
 
-USER agent
-ENV HOME=/home/agent
+USER ubuntu
+ENV HOME=/home/ubuntu
 # mise global config lives under the root home where it was installed;
 # point all users at it so `ruby`, `gem`, etc. resolve via the same shims.
 ENV MISE_GLOBAL_CONFIG_FILE=/root/.config/mise/config.toml
