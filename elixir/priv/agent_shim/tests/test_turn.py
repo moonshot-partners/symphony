@@ -171,6 +171,71 @@ async def test_emits_synthetic_approval_for_bash_tool_use():
 
 
 @pytest.mark.asyncio
+async def test_turn_completed_accumulates_usage_from_assistant_messages():
+    """When ResultMessage.usage is None, token totals must come from AssistantMessage.usage."""
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+
+        # Two assistant turns, each with per-API-call usage
+        yield AssistantMessage(
+            content=[TextBlock(text="thinking")],
+            model="claude-sonnet-4-6",
+            usage={"input_tokens": 300, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+        )
+        yield AssistantMessage(
+            content=[TextBlock(text="done")],
+            model="claude-sonnet-4-6",
+            usage={"input_tokens": 200, "output_tokens": 30, "cache_read_input_tokens": 10, "cache_creation_input_tokens": 0},
+        )
+        # ResultMessage with no usage (as Claude CLI emits in practice)
+        yield ResultMessage(
+            subtype="end_turn",
+            duration_ms=5000,
+            duration_api_ms=4000,
+            is_error=False,
+            num_turns=2,
+            session_id="s2",
+            total_cost_usd=0.002,
+            usage=None,
+            result="done",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="t4", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {"threadId": "t4", "input": [{"type": "text", "text": "go"}], "cwd": "/tmp"},
+        },
+        writer=writer,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    completed = [m for m in sent if m.get("method") == "turn/completed"]
+    assert len(completed) == 1
+    usage = completed[0]["params"]["usage"]
+    assert usage["input_tokens"] == 500   # 300 + 200
+    assert usage["output_tokens"] == 80   # 50 + 30
+    assert usage["cache_read_input_tokens"] == 10
+
+
+@pytest.mark.asyncio
 async def test_cancel_emits_turn_cancelled():
     from symphony_agent_shim.turn import TurnTracker
 
