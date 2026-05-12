@@ -21,11 +21,13 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Config,
           SymphonyElixir.Linear.Adapter,
           SymphonyElixir.Linear.Client,
+          SymphonyElixir.Linear.FileUpload,
           SymphonyElixir.LogFile,
           SymphonyElixir.Orchestrator,
           SymphonyElixir.Orchestrator.CodexTelemetry,
           SymphonyElixir.Orchestrator.IssueFilter,
           SymphonyElixir.Orchestrator.State,
+          SymphonyElixir.QaEvidence,
           SymphonyElixir.Workflow,
           SymphonyElixir.Workpad,
           SymphonyElixir.Workspace
