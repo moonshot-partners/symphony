@@ -58,6 +58,20 @@ RUN pip install --break-system-packages --no-cache-dir \
       /opt/devflow-agent \
       /opt/agent_shim
 
+# Playwright + headless Chromium for the agent's UI QA self-review step.
+# Browsers live in a world-readable shared dir (default ~/.cache is per-user
+# and the agent runs as `ubuntu`, not root). PLAYWRIGHT_BROWSERS_PATH must be
+# exported at runtime too — see the ENV near the bottom of this file.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN pip install --break-system-packages --no-cache-dir playwright \
+    && playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/ms-playwright
+
+# QA self-review helper library (stdlib-only). On PYTHONPATH so the agent's
+# `qa_check.py` can `from qa_helpers import ...` — see WORKFLOW.schools-out.md.
+COPY docker/schoolsout-base/qa /opt/qa
+ENV PYTHONPATH=/opt/qa
+
 # Default bundler
 RUN gem install bundler --no-document
 

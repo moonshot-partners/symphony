@@ -601,17 +601,23 @@ defmodule SymphonyElixir.Orchestrator do
         _ = Workpad.maybe_sync(entry, update, self())
 
         issue = Map.get(running_entry, :issue)
-        run_pr_attached_side_effects(issue)
+        run_pr_attached_side_effects(issue, running_entry)
 
         state
     end
   end
 
-  defp run_pr_attached_side_effects(nil), do: :ok
+  defp run_pr_attached_side_effects(nil, _running_entry), do: :ok
 
-  defp run_pr_attached_side_effects(issue) do
+  defp run_pr_attached_side_effects(issue, running_entry) do
     apply_state_transition(issue, Config.settings!().tracker.on_complete_state)
     Task.start(fn -> apply_github_pr_label(issue) end)
+
+    SymphonyElixir.QaEvidence.maybe_publish(
+      Map.get(issue, :id),
+      Map.get(running_entry, :workspace_path)
+    )
+
     :ok
   end
 

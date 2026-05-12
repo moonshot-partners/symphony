@@ -200,7 +200,52 @@ Skipping this artifact is a hard stop, not a style preference.
        command again — both runs must exit 0. If the before-run already fails,
        document it in `state/<session>/understanding.md` and do not regress it
        further.
-5. Push the branch and open a PR with `gh pr create`:
+5. **UI QA self-review (mandatory when the diff touches `fe-next-app/`
+   anything that renders).** Skip ONLY for pure non-visual changes
+   (config, types with no runtime effect, test-only). Do this AFTER the
+   quality gates in rule 4 and BEFORE opening the PR — Symphony moves the
+   ticket to "In QA / Review" off your final message, so the browser proof
+   has to exist by then.
+
+   a. Start the dev server (the helper does this for you, on port 3001 —
+      the staging API's CORS allowlist only accepts that port):
+
+      ```python
+      # fe-next-app/qa_check.py — write this file, then run it with `python`
+      import sys; sys.path.insert(0, "/opt/qa")
+      from qa_helpers import provision_account, inject_session, dev_server, evidence_context, find_activity, write_report
+
+      with dev_server("fe-next-app", build_sha="vqa") as base:
+          email, access, refresh, user = provision_account()   # fresh staging account
+          with evidence_context("fe-next-app/qa-evidence") as (page, shot):
+              assert inject_session(page, base, access, refresh, user), "auth failed"
+              page.goto(f"{base}/parents/<the-page-your-AC-touches>")
+              page.wait_for_timeout(8000)
+              shot("before")
+              # ... exercise each AC: click the control, assert the new text/element ...
+              checks = [{"name": "AC#1 ...", "pass": <bool>, "detail": "..."}]
+              shot("after")
+          ok = write_report("fe-next-app/qa-evidence", "{{ issue.identifier }}", checks)
+          sys.exit(0 if ok else 1)
+      ```
+
+      `find_activity(lambda a: len(a.get("description") or "") > 200, access)`
+      gets a real staging row when an AC needs specific data (e.g. a
+      long-description activity). `qa_helpers` is stdlib-only; chromium is
+      pre-installed in the image. Inspect the real DOM to pick selectors —
+      generic role/name guesses miss (the SODEV-556 toggle is a `<button>`
+      named "Read more" / "Show less", not `name="more"`).
+
+   b. Run `python fe-next-app/qa_check.py`. On **FAIL**: the bug is in the
+      code you just wrote — fix it from the existing diff (do not start
+      over), re-run the quality gates, re-run `qa_check.py`. Cap: 2 fix
+      attempts. If still failing after 2, STOP and report what the QA check
+      caught — do not open the PR.
+   c. On **PASS**: commit `fe-next-app/qa-evidence/` (screenshots +
+      `session.webm` + `qa-report.md` + `verdict.json`) and `qa_check.py`
+      in their own commit. Paste the `qa-report.md` table into the PR body
+      under a `## QA self-review` heading.
+6. Push the branch and open a PR with `gh pr create`:
    - **Pre-PR base branch check (mandatory before any `gh pr create` call)**:
      Run `git log --oneline origin/dev..HEAD` (or the repo's base per the
      table). The output must show only your commits. If it is empty or shows
@@ -211,13 +256,14 @@ Skipping this artifact is a hard stop, not a style preference.
      the table says so. A PR with the wrong base must be closed and reopened —
      do not retarget after the fact.
    - Title: `[{{ issue.identifier }}] <one-line>`
-   - Body: 2–4 sentence summary + `Linear: {{ issue.url }}`
+   - Body: 2–4 sentence summary + `Linear: {{ issue.url }}` + the
+     `## QA self-review` table from rule 5c when that step ran.
    - Apply label `symphony` (create with color `#7C3AED` if missing).
    - Do **not** add reviewers via `--reviewer`; the agent's git identity
      is the operator (`viniciuscffreitas`) and GitHub rejects self-review
      with HTTP 422. The operator monitors PRs via the Linear workpad.
    - **Never** call `gh pr merge`. Humans merge.
-6. **Visual-AC mount check** — before writing any code, if an AC uses
+7. **Visual-AC mount check** — before writing any code, if an AC uses
    "renders", "displays", "shows", "visible", or a UI location noun:
    run `grep -r "ComponentName" src/ --include="*.tsx" -l` to verify
    the component is imported by at least one layout or page file (not
@@ -239,11 +285,15 @@ Skipping this artifact is a hard stop, not a style preference.
 - Do not run `Edit` / `Write` before `state/<session>/understanding.md`
   exists with all four sections populated (visual_wiring required when
   any AC uses render/display/show/visible language).
+- Do not open the PR for a `fe-next-app/` UI change while
+  `qa_check.py` is still failing (rule 5). Two fix attempts, then stop
+  and report — never ship a UI change the browser check rejects.
 - If auth/permissions/tooling feels off (token errors, repo not found),
   stop. Do not retry blindly. The orchestrator captures your last message
   on the Linear workpad — say what is wrong and exit.
 
 When you finish a clean PR, end your turn with a short summary that
-includes the PR URL and `git diff --stat origin/main..HEAD`. Do not call
-any Linear API yourself; Symphony moves the issue state and posts the
-workpad based on your final message.
+includes the PR URL, `git diff --stat origin/dev..HEAD`, and — when rule 5
+ran — the QA self-review verdict (pass + the check table, or why it was
+skipped). Do not call any Linear API yourself; Symphony moves the issue
+state and posts the workpad based on your final message.
