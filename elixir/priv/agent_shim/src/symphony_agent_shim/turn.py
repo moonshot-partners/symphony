@@ -88,11 +88,16 @@ async def _drive_turn(
     client: Any, prompt: str, turn_id: str, writer: Writer, tracker: TurnTracker
 ) -> None:
     tracker.register(turn_id)
+    accumulated: dict[str, int] = {}
     try:
         try:
             await client.query(prompt)
             async for message in client.receive_response():
-                await _emit_message(message, turn_id, writer)
+                if isinstance(message, AssistantMessage) and isinstance(message.usage, dict):
+                    for key, val in message.usage.items():
+                        if isinstance(val, int):
+                            accumulated[key] = accumulated.get(key, 0) + val
+                await _emit_message(message, turn_id, writer, accumulated)
         except Exception as exc:  # noqa: BLE001 — surface SDK error as JSON-RPC failure
             await writer(
                 protocol.notification(
@@ -104,7 +109,9 @@ async def _drive_turn(
         tracker.unregister(turn_id)
 
 
-async def _emit_message(message: Any, turn_id: str, writer: Writer) -> None:
+async def _emit_message(
+    message: Any, turn_id: str, writer: Writer, accumulated: dict[str, int]
+) -> None:
     if isinstance(message, AssistantMessage):
         for block in message.content:
             if isinstance(block, ToolUseBlock):
@@ -119,12 +126,16 @@ async def _emit_message(message: Any, turn_id: str, writer: Writer) -> None:
             )
         return
     if isinstance(message, ResultMessage):
+        # ResultMessage.usage is None in practice (Claude CLI doesn't emit cumulative
+        # usage in the result JSON). Fall back to tokens accumulated from each
+        # AssistantMessage.usage (per-API-call Anthropic usage dict).
+        usage = dict(message.usage) if message.usage else accumulated
         await writer(
             protocol.notification(
                 protocol.METHOD_TURN_COMPLETED,
                 {
                     "turn_id": turn_id,
-                    "usage": dict(message.usage or {}),
+                    "usage": usage,
                     "total_cost_usd": message.total_cost_usd,
                     "stop_reason": message.subtype,
                 },
