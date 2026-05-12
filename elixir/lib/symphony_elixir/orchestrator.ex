@@ -108,8 +108,17 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_info(:run_poll_cycle, state) do
-    state = refresh_runtime_config(state)
-    state = maybe_dispatch(state)
+    state =
+      try do
+        state = refresh_runtime_config(state)
+        maybe_dispatch(state)
+      rescue
+        e ->
+          Logger.error("Poll cycle exception: #{inspect(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
+
+          state
+      end
+
     state = schedule_tick(state, state.poll_interval_ms)
     state = %{state | poll_check_in_progress: false}
 
@@ -841,7 +850,6 @@ defmodule SymphonyElixir.Orchestrator do
        )
        when is_binary(id) and is_binary(identifier) and is_binary(title) and is_binary(state_name) do
     issue_routable_to_worker?(issue) and
-      not has_pr_attachment?(issue) and
       active_issue_state?(state_name, active_states) and
       !terminal_issue_state?(state_name, terminal_states)
   end

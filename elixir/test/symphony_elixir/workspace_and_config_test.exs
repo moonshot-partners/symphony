@@ -734,7 +734,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Orchestrator.should_dispatch_issue_for_test(issue, state)
   end
 
-  test "issue with an attached pull request is not dispatch-eligible" do
+  test "issue with an attached pull request is still dispatch-eligible" do
     state = %Orchestrator.State{
       max_concurrent_agents: 3,
       running: %{},
@@ -751,7 +751,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       has_pr_attachment: true
     }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+    # PR attachment alone no longer blocks dispatch — the state machine (active_states)
+    # is the authoritative guard. When a ticket is requeued to an active state after
+    # a merged PR, it must be dispatchable again (fixes the SODEV-851 class of bug).
+    assert Orchestrator.should_dispatch_issue_for_test(issue, state)
   end
 
   test "todo issue with terminal blockers remains dispatch-eligible" do
