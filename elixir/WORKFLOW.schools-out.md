@@ -34,6 +34,8 @@ hooks:
     git -C fe-next-app remote set-head origin dev
     git -C fe-next-app fetch --depth=1 origin dev
     if [ -f Gemfile ]; then
+      # Install gems into vendor/bundle so Docker can find them at /workspace/vendor/bundle.
+      bundle config set --local path vendor/bundle
       bundle install --quiet || true
     fi
   before_remove: |

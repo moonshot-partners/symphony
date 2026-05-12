@@ -63,10 +63,11 @@ RUN git config --global credential.https://github.com.helper '!/usr/bin/gh auth 
 
 # Create non-root agent user. Claude Code refuses --dangerously-skip-permissions
 # when running as root, so all agent sessions must run as a non-root user.
+# UID 1000 matches the VPS ubuntu user so workspace bind-mounts are writable.
 # Make /root world-traversable so mise shims and ruby remain accessible via PATH.
 RUN chmod 755 /root \
     && chmod -R a+rX /root/.local \
-    && useradd -m -u 1001 -s /bin/bash agent \
+    && useradd -m -u 1000 -s /bin/bash agent \
     && cp /root/.gitconfig /home/agent/.gitconfig \
     && chown agent:agent /home/agent/.gitconfig
 
