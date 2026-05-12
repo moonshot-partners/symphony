@@ -129,7 +129,7 @@ updated in the same diff. Do not guess the base branch.
 ## Mandatory turn-1 deliverable: understanding.md
 
 Before any `Edit` / `Write` / mutating `Bash` call, write
-`state/<session>/understanding.md` with three sections:
+`state/<session>/understanding.md` with four sections:
 
 1. **target_repos** — which whitelisted repo(s) the fix touches. Cite a
    code reference (`path/to/file.ext:line`) or a verified `curl`/`grep`
@@ -139,6 +139,15 @@ Before any `Edit` / `Write` / mutating `Bash` call, write
    "might" — STOP, verify, rewrite without hedging.
 3. **expected_behavior_diff** — smallest possible change. List each
    numbered AC item (`AC#1`, `AC#2`, …) → file(s) you will change.
+4. **visual_wiring** — required only when any AC contains words like
+   "renders", "displays", "shows", "visible", "appears", or a UI location
+   ("in the footer", "in the header", "in the page", "in the sidebar").
+   For each such AC: (a) name the component being created or modified with
+   its file:line, AND (b) name the layout or page file that imports and
+   mounts it, verified by `grep`. If no layout currently imports the
+   component, your diff MUST include that import — a component that exists
+   but is never mounted fails any "renders" AC by definition. If this
+   section is required and missing, the artifact is incomplete.
 
 Each section must contain at least one verified `path/to/file.ext:line`
 citation backed by a prior `Read`/`grep`/`curl` call. A section with
@@ -211,6 +220,16 @@ Skipping this artifact is a hard stop, not a style preference.
      is the operator (`viniciuscffreitas`) and GitHub rejects self-review
      with HTTP 422. The operator monitors PRs via the Linear workpad.
    - **Never** call `gh pr merge`. Humans merge.
+6. **Visual-AC mount check** — before writing any code, if an AC uses
+   "renders", "displays", "shows", "visible", or a UI location noun:
+   run `grep -r "ComponentName" src/ --include="*.tsx" -l` to verify
+   the component is imported by at least one layout or page file (not
+   just its own file and tests). If the grep returns only the component's
+   own file, the import into the layout IS part of the AC scope — add it.
+   Document the verified mount point in `visual_wiring` (section 4 of
+   `understanding.md`). This check caught SODEV-851 post-hoc: SiteFooter
+   was built + tested but never mounted, so the badge was invisible on
+   staging. Do not repeat this class of bug.
 
 ## Hard stops
 
@@ -221,7 +240,8 @@ Skipping this artifact is a hard stop, not a style preference.
 - Do not bypass branch protections, CI, or `--no-verify` git hooks.
 - Do not clone any repo not listed in "Allowed repositories" above.
 - Do not run `Edit` / `Write` before `state/<session>/understanding.md`
-  exists with all three sections populated.
+  exists with all four sections populated (visual_wiring required when
+  any AC uses render/display/show/visible language).
 - If auth/permissions/tooling feels off (token errors, repo not found),
   stop. Do not retry blindly. The orchestrator captures your last message
   on the Linear workpad — say what is wrong and exit.
