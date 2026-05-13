@@ -262,6 +262,47 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "zombie workspace is reset before after_create runs" do
+    # SODEV-765 follow-up: an after_create hook that crashes mid-run leaves
+    # the dir populated but without the marker. On re-dispatch the same hook
+    # then fails again because the operative command (git clone, cargo
+    # checkout, etc.) refuses to act on a non-empty target. Auto-reset wipes
+    # the partial state so the hook starts from a clean slate.
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-zombie-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      probe = Path.join(test_root, "hook-ran.txt")
+
+      zombie_workspace = Path.join(workspace_root, "MT-ZOMBIE")
+      File.mkdir_p!(zombie_workspace)
+      File.write!(Path.join(zombie_workspace, "stale-file.txt"), "partial clone")
+      File.write!(Path.join(zombie_workspace, "another-stale.txt"), "more partial state")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "test ! -e stale-file.txt && echo clean > #{probe}"
+      )
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-ZOMBIE")
+
+      refute File.exists?(Path.join(workspace, "stale-file.txt")),
+             "zombie reset must wipe pre-existing files before running the hook"
+
+      assert File.read!(probe) == "clean\n",
+             "after_create hook must run in a clean workspace, not in zombie residue"
+
+      assert File.exists?(Path.join(workspace, ".symphony/after_create_ok")),
+             "marker file must be written after the clean hook run"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "after_create is skipped on second create when hook command is unchanged" do
     test_root =
       Path.join(
