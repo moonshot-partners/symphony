@@ -3,25 +3,45 @@
 Available inside the schoolsout-base Docker image at `/opt/qa/qa_helpers.py`
 (on PYTHONPATH). An agent that touches fe-next-app UI code uses this to drive a
 headless Chromium against a locally-running `next dev`, talking to the real
-staging API, and capture screenshots + a session video as proof.
+staging API, and capture proof.
+
+The agent does **not** write Playwright. It declares assertions; the harness
+owns every imperative browser step (navigation waits, scroll-into-view, the
+screenshots). A screenshot is a *byproduct of an assertion* — never a manual
+camera the agent aims by hand — so it always frames the element under test.
 
 Usage sketch (the agent writes a `qa_check.py` like this):
 
-    from qa_helpers import provision_account, inject_session, dev_server, evidence_context
+    import sys; sys.path.insert(0, "/opt/qa")
+    from qa_helpers import qa_run
 
-    with dev_server("fe-next-app") as base:                 # starts `next dev` on :3001
-        email, access, refresh, user = provision_account()  # mail.tm + staging API
-        with evidence_context("fe-next-app/qa-evidence") as (page, shot):
-            inject_session(page, base, access, refresh, user)
-            page.goto(f"{base}/parents/...")
-            shot("01-before")
-            # ...interact, assert ACs...
-            shot("02-after")
+    # build_sha=None → footer shows `vdev`; pass a 7-hex to assert `v<sha>`.
+    with qa_run("fe-next-app", "SODEV-851", build_sha="abc1234") as qa:
+        qa.login()                                  # fresh staging account + session
+        qa.goto("/parents")
+        qa.expect_visible('[data-testid="build-badge"]', "AC#1 - build SHA badge in footer")
+        qa.expect_text('[data-testid="build-badge"]', r"^vabc1234$", "AC#1b - badge text is v<sha>")
+        qa.note("AC#2 - unit tests both SHA paths", True, "npx jest site-footer: 12/12")
+    sys.exit(0 if qa.passed else 1)
+
+Each `expect_*` call:
+  1. waits for the selector to be visible, then `scroll_into_view_if_needed()` —
+     Playwright walks the real scroll-parent chain, so it reaches a footer that
+     lives inside a nested `overflow-y-auto` div (`window.scrollTo` on the body
+     does not — this app's content overflow is in an inner container, not the
+     document);
+  2. outlines the element and takes a viewport screenshot, plus an element-only
+     screenshot, both named `NN-<pass|FAIL>-<assertion-slug>.png`;
+  3. records `{name, pass, detail, screenshots}`. A FAILED assertion still
+     captures — the screenshot shows *why* it failed.
+At the end `qa-report.md` + `verdict.json` are written from the recorded
+assertions. Sanity gate: a run with zero assertions, or zero screenshots, is
+forced to FAIL — "PASS" with no probative evidence is not allowed.
 
 Hard-won gotchas this module encodes (do not "simplify" them away):
 
   * Port 3001. The staging API CORS allowlist accepts `localhost:3001`, not
-    arbitrary ports. Any other port → every browser /api/v1 call fails silently
+    arbitrary ports. Any other port -> every browser /api/v1 call fails silently
     and the session never authenticates.
   * `NEXT_PUBLIC_API_URL` must be the staging URL. `.env.local` points it at a
     non-existent `localhost:3000/api/v1`; a shell env var overrides it.
@@ -29,6 +49,8 @@ Hard-won gotchas this module encodes (do not "simplify" them away):
     `mvp.schoolsoutapp.com` directly, which is why the CORS port matters.
   * The Zustand persist store key is `"session-storage"`; after writing it you
     must `page.reload()` so `onRehydrateStorage` re-validates the token.
+  * Assert on a stable `data-testid`, never a regex over whole-page text — a
+    bare `v[a-z]+` happily matches "vorites" inside "favorites".
 """
 
 from __future__ import annotations
@@ -107,7 +129,7 @@ def _new_mailtm_inbox():
 
 def _wait_for_pin(token, *, tries=30, delay=2):
     headers = {"Authorization": f"Bearer {token}"}
-    for i in range(tries):
+    for _ in range(tries):
         _, listing = _http("GET", f"{MAILTM}/messages", headers=headers)
         msgs = _members(listing)
         if msgs:
@@ -258,58 +280,241 @@ def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_AP
 
 
 # --------------------------------------------------------------------------- #
-# evidence capture
+# the QA harness — assertions that capture their own evidence
 # --------------------------------------------------------------------------- #
-@contextlib.contextmanager
-def evidence_context(evidence_dir: str, *, viewport=(1366, 900), headless: bool = True):
-    """Yield (page, shot) where `shot(name)` saves a full-page PNG into
-    `evidence_dir` and a session `.webm` is recorded for the whole block.
-    Requires `playwright` + a chromium install (both baked into schoolsout-base)."""
-    from playwright.sync_api import sync_playwright
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60]
 
-    evidence_dir = os.path.abspath(evidence_dir)
-    os.makedirs(evidence_dir, exist_ok=True)
-    w, h = viewport
-    counter = {"n": 0}
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        ctx = browser.new_context(
-            viewport={"width": w, "height": h},
-            record_video_dir=evidence_dir,
-            record_video_size={"width": w, "height": h},
+class QaRun:
+    """Yielded by `qa_run`. Drives the browser and records assertions.
+
+    Use the `expect_*` methods for browser-observable ACs (each captures a
+    screenshot bound to the assertion) and `note()` for results that aren't
+    browser-observable (unit tests, grep checks). After the `with` block,
+    `qa.passed` is the verdict.
+    """
+
+    def __init__(self, app_dir: str, evidence_dir: str, ticket: str, *, api_base: str = STAGING_API):
+        self.app_dir = app_dir
+        self.evidence_dir = os.path.abspath(evidence_dir)
+        os.makedirs(self.evidence_dir, exist_ok=True)
+        self.ticket = ticket
+        self.api_base = api_base
+        self.checks: list[dict] = []
+        self.passed = False
+        self._n = 0
+        self.page = None
+        self.base: str | None = None
+        self._console: list[str] = []
+        self.email = self.access = self.refresh = self.user = None
+
+    # -- wired up by qa_run() once the browser context exists --
+    def _bind(self, page, base: str, console_log: list[str]):
+        self.page, self.base, self._console = page, base, console_log
+
+    # ---- account / navigation -------------------------------------------- #
+    def login(self):
+        """Provision a fresh staging parents account and rehydrate the app as
+        that user. Stores tokens on `self` for `find_activity`."""
+        self.email, self.access, self.refresh, self.user = provision_account(self.api_base)
+        if not inject_session(self.page, self.base, self.access, self.refresh, self.user):
+            raise RuntimeError("inject_session failed — staging auth did not stick (CORS port? token expiry?)")
+        return self
+
+    def goto(self, path: str, *, wait_ms: int = 8000):
+        url = path if path.startswith("http") else f"{self.base}{path}"
+        self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        self.page.wait_for_timeout(wait_ms)
+        return self
+
+    def find_activity(self, predicate, **kw):
+        return find_activity(predicate, self.access, api_base=self.api_base, **kw)
+
+    # ---- assertions ------------------------------------------------------ #
+    def expect_visible(self, selector: str, label: str, *, timeout: int = 8000) -> bool:
+        """Pass iff `selector` resolves to a visible element. Scrolls it into
+        view (nested scroll containers included) and screenshots it."""
+        loc = self.page.locator(selector).first
+        ok, detail = self._await_visible(loc, timeout)
+        self._record(label, ok, detail or "element visible", loc if ok else None)
+        return ok
+
+    def expect_text(self, selector: str, pattern: str, label: str, *, timeout: int = 8000) -> bool:
+        """Pass iff `selector` is visible and its inner text matches the regex
+        `pattern` (use anchors — `^v[0-9a-f]{7}$`, not `v.+`)."""
+        loc = self.page.locator(selector).first
+        vis_ok, vis_detail = self._await_visible(loc, timeout)
+        if not vis_ok:
+            self._record(label, False, f"selector not visible: {vis_detail}", None)
+            return False
+        txt = (loc.inner_text() or "").strip()
+        m = re.search(pattern, txt)
+        ok = m is not None
+        detail = (
+            f"matched {m.group()!r} against {pattern!r}"
+            if ok
+            else f"text {txt[:120]!r} did not match {pattern!r}"
         )
-        page = ctx.new_page()
-        console_log = []
-        page.on("console", lambda m: console_log.append(f"{m.type}: {m.text[:300]}"))
+        self._record(label, ok, detail, loc)
+        return ok
 
-        def shot(name: str):
-            counter["n"] += 1
-            path = os.path.join(evidence_dir, f"{counter['n']:02d}-{name}.png")
-            page.screenshot(path=path, full_page=True)
-            return path
-
+    def expect_not_visible(self, selector: str, label: str, *, timeout: int = 4000) -> bool:
+        """Pass iff `selector` is absent or hidden."""
+        loc = self.page.locator(selector)
         try:
-            yield page, shot
-        finally:
-            ctx.close()  # flushes the .webm
-            browser.close()
-            for f in os.listdir(evidence_dir):
-                if f.endswith(".webm"):
-                    os.replace(os.path.join(evidence_dir, f), os.path.join(evidence_dir, "session.webm"))
-                    break
-            with open(os.path.join(evidence_dir, "console.log"), "w") as fh:
-                fh.write("\n".join(console_log))
+            cnt = loc.count()
+        except Exception:
+            cnt = 0
+        ok = cnt == 0 or not loc.first.is_visible()
+        self._record(label, ok, "absent/hidden" if ok else f"{cnt} matching element(s) still visible", None)
+        return ok
+
+    def note(self, label: str, ok: bool, detail: str = "") -> bool:
+        """Record a non-browser check (unit test result, grep check, ...) into
+        the same report. Has no screenshot — at least one `expect_*` must also
+        run, or the run is failed by the evidence sanity gate."""
+        self._record(label, bool(ok), detail, None, screenshot=False)
+        return bool(ok)
+
+    # ---- internals ------------------------------------------------------- #
+    def _await_visible(self, loc, timeout: int):
+        try:
+            loc.wait_for(state="visible", timeout=timeout)
+        except Exception as e:
+            return False, f"not visible within {timeout}ms ({type(e).__name__})"
+        with contextlib.suppress(Exception):
+            loc.scroll_into_view_if_needed(timeout=5000)
+        return True, ""
+
+    def _record(self, label: str, ok: bool, detail: str, loc, *, screenshot: bool = True):
+        self._n += 1
+        stem = f"{self._n:02d}-{'pass' if ok else 'FAIL'}-{_slug(label) or f'check{self._n}'}"
+        shots: list[str] = []
+        if screenshot and self.page is not None:
+            highlighted = False
+            if loc is not None:
+                with contextlib.suppress(Exception):
+                    loc.evaluate(
+                        "el => { el.dataset.__qaHl = el.style.outline || ''; "
+                        "el.style.outline = '4px solid #ff00aa'; el.style.outlineOffset = '2px'; }"
+                    )
+                    highlighted = True
+            with contextlib.suppress(Exception):
+                vp = os.path.join(self.evidence_dir, f"{stem}.png")
+                self.page.screenshot(path=vp, full_page=False)
+                shots.append(os.path.basename(vp))
+            if loc is not None:
+                with contextlib.suppress(Exception):
+                    el = os.path.join(self.evidence_dir, f"{stem}-element.png")
+                    loc.screenshot(path=el)
+                    shots.append(os.path.basename(el))
+            if highlighted:
+                with contextlib.suppress(Exception):
+                    loc.evaluate("el => { el.style.outline = el.dataset.__qaHl || ''; delete el.dataset.__qaHl; }")
+        self.checks.append({"name": label, "pass": bool(ok), "detail": detail, "screenshots": shots})
+
+    def report(self, *, notes: str = "") -> bool:
+        """Write `qa-report.md` + `verdict.json`. Returns the verdict.
+
+        Evidence sanity gate: a run with no assertions, or one where no
+        assertion produced a screenshot, is forced to FAIL — a green table with
+        nothing to look at is not proof.
+        """
+        if not self.checks:
+            self.checks.append(
+                {"name": "evidence sanity", "pass": False,
+                 "detail": "no assertions were recorded — qa_check.py exercised nothing", "screenshots": []}
+            )
+        elif not any(c.get("screenshots") for c in self.checks):
+            self.checks.append(
+                {"name": "evidence sanity", "pass": False,
+                 "detail": "no screenshots captured — every browser AC must use expect_* on a real selector",
+                 "screenshots": []}
+            )
+        self.passed = all(c["pass"] for c in self.checks)
+
+        png = sorted(f for f in os.listdir(self.evidence_dir) if f.lower().endswith(".png"))
+        lines = [
+            f"# QA self-review — {self.ticket}",
+            "",
+            f"- Run: {datetime.now(timezone.utc).isoformat()}",
+            f"- Result: {'PASS — all checks green' if self.passed else 'FAIL — see below'}",
+            "",
+            "| Check | Result | Detail | Evidence |",
+            "| --- | --- | --- | --- |",
+        ]
+        for c in self.checks:
+            ev = ", ".join(f"`{s}`" for s in c.get("screenshots") or []) or "—"
+            lines.append(f"| {c['name']} | {'PASS' if c['pass'] else 'FAIL'} | {c.get('detail', '')} | {ev} |")
+        lines += ["", "## Evidence", ""]
+        lines += [f"- `{s}`" for s in png] or ["- (none captured)"]
+        if os.path.exists(os.path.join(self.evidence_dir, "session.webm")):
+            lines.append("- `session.webm` — full session recording")
+        if notes:
+            lines += ["", "## Notes", "", notes]
+        with open(os.path.join(self.evidence_dir, "qa-report.md"), "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        with open(os.path.join(self.evidence_dir, "verdict.json"), "w") as fh:
+            json.dump({"ticket": self.ticket, "pass": self.passed, "checks": self.checks}, fh, indent=2)
+        return self.passed
+
+
+@contextlib.contextmanager
+def qa_run(app_dir: str, ticket: str, *, build_sha: str | None = None, port: int = DEV_PORT,
+           api_base: str = STAGING_API, viewport=(1366, 900), headless: bool = True, notes: str = ""):
+    """One-stop QA harness for a fe-next-app UI change.
+
+    Starts `next dev` for `app_dir` on `port` (pointed at the staging API),
+    launches headless Chromium recording a session `.webm`, and yields a
+    `QaRun`. On exit it always writes `app_dir/qa-evidence/qa-report.md` +
+    `verdict.json` (even if an assertion raised) and tears everything down.
+
+    If `next dev` won't start, this raises `RuntimeError` before yielding — that
+    is the WORKFLOW "BLOCKED" case (confirm pre-existing with `git stash`, then
+    write a manual `write_report(..., notes=...)` and open the PR).
+    """
+    evidence_dir = os.path.join(app_dir, "qa-evidence")
+    qa = QaRun(app_dir, evidence_dir, ticket, api_base=api_base)
+    w, h = viewport
+    with dev_server(app_dir, port=port, api_base=api_base, build_sha=build_sha) as base:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            ctx = browser.new_context(
+                viewport={"width": w, "height": h},
+                record_video_dir=evidence_dir,
+                record_video_size={"width": w, "height": h},
+            )
+            page = ctx.new_page()
+            console_log: list[str] = []
+            page.on("console", lambda m: console_log.append(f"{m.type}: {m.text[:300]}"))
+            qa._bind(page, base, console_log)
+            try:
+                yield qa
+            finally:
+                with contextlib.suppress(Exception):
+                    ctx.close()  # flushes the .webm
+                with contextlib.suppress(Exception):
+                    browser.close()
+                for f in os.listdir(evidence_dir):
+                    if f.endswith(".webm"):
+                        os.replace(os.path.join(evidence_dir, f), os.path.join(evidence_dir, "session.webm"))
+                        break
+                with open(os.path.join(evidence_dir, "console.log"), "w") as fh:
+                    fh.write("\n".join(console_log))
+                qa.report(notes=notes)
 
 
 def write_report(evidence_dir: str, ticket: str, checks: list[dict], notes: str = ""):
-    """Write `qa-evidence/qa-report.md` — a human/PR-friendly summary. Each
-    check is {"name": str, "pass": bool, "detail": str}. Returns True iff all
-    checks passed."""
+    """Standalone report writer for the BLOCKED path (when `qa_run` couldn't
+    start the dev server). Each check is {"name": str, "pass": bool,
+    "detail": str}. Returns True iff all checks passed."""
     evidence_dir = os.path.abspath(evidence_dir)
     os.makedirs(evidence_dir, exist_ok=True)
     all_pass = all(c["pass"] for c in checks) if checks else False
-    shots = sorted(f for f in os.listdir(evidence_dir) if f.endswith(".png"))
+    shots = sorted(f for f in os.listdir(evidence_dir) if f.lower().endswith(".png"))
     lines = [
         f"# QA self-review — {ticket}",
         "",
@@ -322,7 +527,7 @@ def write_report(evidence_dir: str, ticket: str, checks: list[dict], notes: str 
     for c in checks:
         lines.append(f"| {c['name']} | {'PASS' if c['pass'] else 'FAIL'} | {c.get('detail', '')} |")
     lines += ["", "## Evidence", ""]
-    lines += [f"- `{s}`" for s in shots]
+    lines += [f"- `{s}`" for s in shots] or ["- (none captured)"]
     if os.path.exists(os.path.join(evidence_dir, "session.webm")):
         lines.append("- `session.webm` — full session recording")
     if notes:
