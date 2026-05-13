@@ -13,7 +13,7 @@ tracker:
     - Duplicate
   on_pickup_state: "In Development"
   on_complete_state: "In QA / Review"
-  on_pr_merge_state: null
+  on_pr_merge_state: "Released / Live"
 polling:
   interval_ms: 5000
 workspace:
