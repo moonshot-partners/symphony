@@ -4,3 +4,5 @@
 docs/
 mvp-claude-sodev/
 .qa-spike/
+__pycache__/
+*.pyc
