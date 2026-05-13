@@ -172,6 +172,12 @@ def provision_account(api_base: str = STAGING_API):
     return email, access, refresh, user
 
 
+# Vendor-account provisioning lives in a sibling module to keep this file
+# under the project length limit; the import here keeps the agent-facing
+# `from qa_helpers import ...` surface single-stop.
+from qa_vendor import provision_vendor_account  # noqa: E402,F401
+
+
 def api_get(path: str, access_token: str, api_base: str = STAGING_API):
     """GET an authenticated staging API endpoint. `path` may be relative
     (`/activities?...`) or absolute. Returns the parsed JSON body."""
