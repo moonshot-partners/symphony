@@ -20,6 +20,14 @@ workspace:
   root: ~/code/schoolsout-workspaces
 hooks:
   after_create: |
+    # Gate A — install integrity: fail loudly on any non-zero exit. The hook
+    # used to mask install failures with `|| true`, which let a half-populated
+    # node_modules through and turned every downstream `npm test`/QA run into
+    # a silent BLOCKED. `NPM_CONFIG_IGNORE_SCRIPTS=1` is already injected by
+    # Symphony's hook runner (Workspace.hook_env/0) so postinstall scripts
+    # like @sentry/cli don't run here and corrupt the install when their
+    # secrets aren't present.
+    set -euo pipefail
     # Primary repo at workspace root.
     git clone --depth 1 https://github.com/schoolsoutapp/schools-out .
     # Point origin/HEAD → dev so `gh pr create` defaults to dev (not main).
@@ -40,11 +48,19 @@ hooks:
     # here with `npm ci` — if `pnpm install` runs later it builds a strict
     # node_modules that fails undeclared transitive imports (e.g.
     # @amplitude/analytics-core), which 500s `next dev` and blocks rule-5 QA.
-    (cd fe-next-app && npm ci --no-audit --no-fund) || true
+    (cd fe-next-app && npm ci --no-audit --no-fund)
+    # Gate A — verify the install actually produced a working test toolchain.
+    # If jest can't enumerate its tests, node_modules is half-provisioned and
+    # the agent would crash later in `npm test`/`qa_check.py` with no signal
+    # back to Symphony. Fail the workspace creation instead, loud.
+    (cd fe-next-app && npx --no-install jest --listTests > /dev/null)
     if [ -f Gemfile ]; then
       # Install gems into vendor/bundle so Docker can find them at /workspace/vendor/bundle.
       bundle config set --local path vendor/bundle
-      bundle install --quiet || true
+      # --no-color (not --quiet) so the error message survives in the hook
+      # output buffer when bundle exits non-zero. --quiet swallows the one
+      # diagnostic line we need to debug auth/native-extension failures.
+      bundle install --no-color
     fi
   before_remove: |
     : # no-op (do not modify branches on workspace teardown)
