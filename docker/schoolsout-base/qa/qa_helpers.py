@@ -244,6 +244,28 @@ def _port_open(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+
+
+def _http_ready(port: int, *, timeout: int = 60) -> bool:
+    """Poll http://localhost:{port}/ until HTTP 200 or timeout expires.
+
+    TCP-open (_port_open) only means the socket is accepting connections —
+    Next.js is still compiling routes. HTTP 200 on / means at least one
+    page rendered, i.e. the dev server is actually ready for assertions.
+    Without this, session.webm starts recording a blank spinner for ~30s.
+    """
+    url = f"http://localhost:{port}/"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
+
 def _resolve_app_dir(app_dir: str) -> str:
     """Find the Next app regardless of where the agent ran `qa_check.py` from.
 
@@ -278,6 +300,8 @@ def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_AP
     yield the base URL, and tear the process down on exit. If something is
     already listening on `port` (an earlier `next dev`), reuse it."""
     if _port_open(port):
+        # TCP open but Next.js may still be compiling routes; wait for HTTP 200
+        _http_ready(port)
         yield f"http://localhost:{port}"
         return
 
@@ -295,8 +319,8 @@ def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_AP
         deadline = time.time() + ready_timeout
         while time.time() < deadline:
             if _port_open(port):
-                # give the first compile a moment so the first navigation isn't a cold miss
-                time.sleep(3)
+                # TCP open != Next.js ready; poll HTTP 200 before yielding
+                _http_ready(port)
                 break
             if proc.poll() is not None:
                 raise RuntimeError(
