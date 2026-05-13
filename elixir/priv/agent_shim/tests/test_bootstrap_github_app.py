@@ -14,11 +14,11 @@ from symphony_agent_shim import bootstrap_github_app as boot
 def test_build_manifest_uses_least_privilege_permissions() -> None:
     manifest = boot.build_manifest(
         name="symphony-orchestrator",
-        homepage_url="https://github.com/viniciuscffreitas/symphony",
+        homepage_url="https://github.com/moonshot-partners/symphony",
         callback_port=8765,
     )
     assert manifest["name"] == "symphony-orchestrator"
-    assert manifest["url"] == "https://github.com/viniciuscffreitas/symphony"
+    assert manifest["url"] == "https://github.com/moonshot-partners/symphony"
     assert manifest["redirect_url"] == "http://127.0.0.1:8765/callback"
     assert manifest["public"] is False
     perms = manifest["default_permissions"]
@@ -64,7 +64,7 @@ def test_exchange_manifest_code_persists_pem_and_env_file(tmp_path: Path) -> Non
                 {
                     "id": 12345,
                     "slug": "symphony-orchestrator",
-                    "owner": {"login": "viniciuscffreitas"},
+                    "owner": {"login": "moonshot-partners"},
                     "html_url": "https://github.com/apps/symphony-orchestrator",
                     "pem": (
                         "-----BEGIN RSA PRIVATE KEY-----\nFAKEKEY\n-----END RSA PRIVATE KEY-----\n"
