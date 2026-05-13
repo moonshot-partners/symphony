@@ -238,6 +238,33 @@ def _port_open(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _resolve_app_dir(app_dir: str) -> str:
+    """Find the Next app regardless of where the agent ran `qa_check.py` from.
+
+    The agent edits/tests/builds fe-next-app with the workspace's `fe-next-app/`
+    as its cwd; the WORKFLOW sketch passes `qa_run("fe-next-app", ...)`. Accept
+    both: a `<app_dir>/package.json` (cwd = workspace root), a `./package.json`
+    (cwd = inside the app, the common case), or `../<app_dir>/package.json`.
+    Returns an absolute path. Raises if none has a `package.json` — a clear
+    error beats silently `mkdir`-ing a phantom dir and failing `npm run dev`.
+    """
+    for cand in (app_dir, ".", os.path.join("..", os.path.basename(app_dir.rstrip("/")))):
+        if os.path.isfile(os.path.join(cand, "package.json")):
+            return os.path.abspath(cand)
+    raise RuntimeError(
+        f"no Next app found: {app_dir!r}, '.' and '../{os.path.basename(app_dir.rstrip('/'))}' "
+        f"all lack package.json (cwd={os.getcwd()}). Run qa_check.py from the workspace "
+        f"or from inside the app dir."
+    )
+
+
+def _tail(path: str, n: int = 30) -> str:
+    with contextlib.suppress(Exception):
+        with open(path) as fh:
+            return "".join(fh.readlines()[-n:]).rstrip()
+    return "(log unavailable)"
+
+
 @contextlib.contextmanager
 def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_API,
                build_sha: str | None = None, ready_timeout: int = 240):
@@ -248,6 +275,7 @@ def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_AP
         yield f"http://localhost:{port}"
         return
 
+    app_dir = _resolve_app_dir(app_dir)
     env = {**os.environ, "PORT": str(port), "NEXT_PUBLIC_API_URL": api_base}
     if build_sha is not None:
         env["NEXT_PUBLIC_BUILD_SHA"] = build_sha
@@ -265,10 +293,16 @@ def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_AP
                 time.sleep(3)
                 break
             if proc.poll() is not None:
-                raise RuntimeError(f"`next dev` exited early (code {proc.returncode}); see {log_path}")
+                raise RuntimeError(
+                    f"`npm run dev` (cwd={app_dir}) exited early (code {proc.returncode}). "
+                    f"Last lines of {log_path}:\n{_tail(log_path)}"
+                )
             time.sleep(2)
         else:
-            raise RuntimeError(f"`next dev` not ready on :{port} after {ready_timeout}s; see {log_path}")
+            raise RuntimeError(
+                f"`next dev` not ready on :{port} after {ready_timeout}s (cwd={app_dir}). "
+                f"Last lines of {log_path}:\n{_tail(log_path)}"
+            )
         yield f"http://localhost:{port}"
     finally:
         proc.terminate()
@@ -474,6 +508,7 @@ def qa_run(app_dir: str, ticket: str, *, build_sha: str | None = None, port: int
     is the WORKFLOW "BLOCKED" case (confirm pre-existing with `git stash`, then
     write a manual `write_report(..., notes=...)` and open the PR).
     """
+    app_dir = _resolve_app_dir(app_dir)
     evidence_dir = os.path.join(app_dir, "qa-evidence")
     qa = QaRun(app_dir, evidence_dir, ticket, api_base=api_base)
     w, h = viewport
@@ -510,16 +545,28 @@ def qa_run(app_dir: str, ticket: str, *, build_sha: str | None = None, port: int
 def write_report(evidence_dir: str, ticket: str, checks: list[dict], notes: str = ""):
     """Standalone report writer for the BLOCKED path (when `qa_run` couldn't
     start the dev server). Each check is {"name": str, "pass": bool,
-    "detail": str}. Returns True iff all checks passed."""
+    "detail": str}. A `notes` string starting with "BLOCKED" marks the run as
+    blocked — the verdict is then `pass: false` regardless of the (code-only)
+    checks, because a run with no browser evidence has not *proven* anything.
+    The PR still opens (the agent documents the blocker); the report just
+    doesn't claim a green QA pass it can't back up. Returns the verdict's
+    `pass` boolean."""
     evidence_dir = os.path.abspath(evidence_dir)
     os.makedirs(evidence_dir, exist_ok=True)
-    all_pass = all(c["pass"] for c in checks) if checks else False
+    blocked = notes.strip().upper().startswith("BLOCKED")
+    all_pass = bool(checks) and all(c["pass"] for c in checks) and not blocked
     shots = sorted(f for f in os.listdir(evidence_dir) if f.lower().endswith(".png"))
+    if blocked:
+        result = "BLOCKED — browser QA could not run; see notes (code checks below are not proof)"
+    elif all_pass:
+        result = "PASS — all checks green"
+    else:
+        result = "FAIL — see below"
     lines = [
         f"# QA self-review — {ticket}",
         "",
         f"- Run: {datetime.now(timezone.utc).isoformat()}",
-        f"- Result: {'PASS — all checks green' if all_pass else 'FAIL — see below'}",
+        f"- Result: {result}",
         "",
         "| Check | Result | Detail |",
         "| --- | --- | --- |",
@@ -535,5 +582,6 @@ def write_report(evidence_dir: str, ticket: str, checks: list[dict], notes: str 
     with open(os.path.join(evidence_dir, "qa-report.md"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
     with open(os.path.join(evidence_dir, "verdict.json"), "w") as fh:
-        json.dump({"ticket": ticket, "pass": all_pass, "checks": checks}, fh, indent=2)
+        json.dump({"ticket": ticket, "pass": all_pass, "blocked": blocked, "checks": checks}, fh, indent=2)
+    return all_pass
     return all_pass
