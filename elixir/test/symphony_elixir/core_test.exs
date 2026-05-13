@@ -273,7 +273,7 @@ defmodule SymphonyElixir.CoreTest do
     assert {:ok, []} = Client.fetch_issue_states_by_ids([])
   end
 
-  test "reconcile stops running agent and skips retry when issue has a PR attachment" do
+  test "reconcile stops running agent and skips retry when issue has an active PR attachment" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -283,6 +283,8 @@ defmodule SymphonyElixir.CoreTest do
     issue_id = "issue-pr-attached"
     issue_identifier = "MT-PR-1"
     workspace = Path.join(test_root, issue_identifier)
+
+    Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
 
     try do
       write_workflow_file!(Workflow.workflow_file_path(),
@@ -324,7 +326,8 @@ defmodule SymphonyElixir.CoreTest do
         title: "Already shipped",
         description: "PR attached",
         labels: [],
-        has_pr_attachment: true
+        has_pr_attachment: true,
+        repos: [%{name: "schools-out", pr: %{url: "https://github.com/owner/repo/pull/1"}}]
       }
 
       updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
@@ -337,6 +340,7 @@ defmodule SymphonyElixir.CoreTest do
       assert Map.get(updated_state.workpads, issue_id) == "wp-comment-1"
     after
       File.rm_rf(test_root)
+      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
     end
   end
 
@@ -344,6 +348,7 @@ defmodule SymphonyElixir.CoreTest do
     previous_enabled = Application.get_env(:symphony_elixir, :workpad_enabled)
     Application.put_env(:symphony_elixir, :workpad_enabled, true)
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
 
     test_root =
       Path.join(
@@ -397,7 +402,8 @@ defmodule SymphonyElixir.CoreTest do
         title: "Already shipped",
         description: "PR attached",
         labels: [],
-        has_pr_attachment: true
+        has_pr_attachment: true,
+        repos: [%{name: "schools-out", pr: %{url: "https://github.com/owner/repo/pull/1"}}]
       }
 
       updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
@@ -411,6 +417,7 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
 
       case previous_enabled do
         nil -> Application.delete_env(:symphony_elixir, :workpad_enabled)
@@ -1494,33 +1501,39 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "continuation_decision marks issue done when a GitHub PR attachment is present" do
+  test "continuation_decision marks issue done when a GitHub PR attachment is present and active" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: ["In Progress"])
+    Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
 
-    issue_with_pr = %Issue{
-      id: "issue-pr",
-      identifier: "MT-901",
-      state: "In Progress",
-      has_pr_attachment: true
-    }
+    try do
+      issue_with_pr = %Issue{
+        id: "issue-pr",
+        identifier: "MT-901",
+        state: "In Progress",
+        has_pr_attachment: true,
+        repos: [%{name: "schools-out", pr: %{url: "https://github.com/owner/repo/pull/1"}}]
+      }
 
-    issue_without_pr = %Issue{
-      id: "issue-no-pr",
-      identifier: "MT-902",
-      state: "In Progress",
-      has_pr_attachment: false
-    }
+      issue_without_pr = %Issue{
+        id: "issue-no-pr",
+        identifier: "MT-902",
+        state: "In Progress",
+        has_pr_attachment: false
+      }
 
-    issue_terminal = %Issue{
-      id: "issue-terminal",
-      identifier: "MT-903",
-      state: "Done",
-      has_pr_attachment: false
-    }
+      issue_terminal = %Issue{
+        id: "issue-terminal",
+        identifier: "MT-903",
+        state: "Done",
+        has_pr_attachment: false
+      }
 
-    assert AgentRunner.continuation_decision_for_test(issue_with_pr) == :done
-    assert AgentRunner.continuation_decision_for_test(issue_without_pr) == :continue
-    assert AgentRunner.continuation_decision_for_test(issue_terminal) == :done
+      assert AgentRunner.continuation_decision_for_test(issue_with_pr) == :done
+      assert AgentRunner.continuation_decision_for_test(issue_without_pr) == :continue
+      assert AgentRunner.continuation_decision_for_test(issue_terminal) == :done
+    after
+      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
+    end
   end
 
   test "agent runner stops continuing once agent.max_turns is reached" do

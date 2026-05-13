@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, Tracker, Workpad, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -474,12 +474,22 @@ defmodule SymphonyElixir.Orchestrator do
 
         terminate_running_issue(state, issue.id, true)
 
-      has_pr_attachment?(issue) ->
-        Logger.info("Issue has a PR attachment: #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
+      has_pr_attachment?(issue) and GitHubPr.any_active?(issue) ->
+        Logger.info("Issue has an active PR attachment: #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
         state
         |> sync_workpad_pr_attached(issue.id)
         |> terminate_running_issue(issue.id, false)
+
+      has_pr_attachment?(issue) ->
+        Logger.debug("Issue has only stale closed PR attachment(s): #{issue_context(issue)} state=#{issue.state}; keeping agent running")
+
+        if active_issue_state?(issue.state, active_states) do
+          refresh_running_issue_state(state, issue)
+        else
+          Logger.info("Issue moved to non-active state with stale PR: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
+          terminate_running_issue(state, issue.id, false)
+        end
 
       !issue_routable_to_worker?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
