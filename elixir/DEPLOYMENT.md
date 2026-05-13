@@ -36,7 +36,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## 2. Clone Symphony and install toolchains
 
 ```bash
-git clone https://github.com/openai/symphony /opt/symphony
+git clone https://github.com/moonshot-partners/symphony /opt/symphony
 cd /opt/symphony/elixir
 mise trust
 mise install                # installs Erlang 28 + Elixir 1.19 per .mise.toml
