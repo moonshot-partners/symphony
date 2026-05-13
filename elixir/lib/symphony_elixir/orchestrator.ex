@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -201,6 +201,7 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry ->
         {updated_running_entry, token_delta} = integrate_agent_update(running_entry, update)
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
+        updated_running_entry = maybe_run_gate_c(updated_running_entry, update)
 
         state =
           state
@@ -265,6 +266,29 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.debug("Orchestrator ignored message: #{inspect(msg)}")
     {:noreply, state}
   end
+
+  defp maybe_run_gate_c(running_entry, %{event: :turn_completed}) do
+    cond do
+      Map.get(running_entry, :gate_c_checked) == true ->
+        running_entry
+
+      Map.get(running_entry, :turn_count) != 1 ->
+        running_entry
+
+      true ->
+        case GateC.validate_first_turn(Map.get(running_entry, :last_agent_text)) do
+          :ok ->
+            :ok
+
+          {:violation, _} = violation ->
+            GateC.log_violation(violation, running_entry)
+        end
+
+        Map.put(running_entry, :gate_c_checked, true)
+    end
+  end
+
+  defp maybe_run_gate_c(running_entry, _update), do: running_entry
 
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
