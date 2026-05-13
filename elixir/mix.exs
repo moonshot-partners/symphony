@@ -19,6 +19,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Application,
           SymphonyElixir.CLI,
           SymphonyElixir.Config,
+          SymphonyElixir.GitHubPr,
           SymphonyElixir.Linear.Adapter,
           SymphonyElixir.Linear.Client,
           SymphonyElixir.Linear.FileUpload,
