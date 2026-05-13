@@ -340,6 +340,32 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "workspace hook failure log preserves output up to 16k" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-large-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "i=0; while [ $i -lt 8000 ]; do printf 'x'; i=$((i+1)); done; printf '\\nMARKER_END\\n'; exit 17"
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:workspace_hook_failed, "after_create", 17, _output}} =
+                   Workspace.create_for_issue("MT-FAIL-LARGE")
+        end)
+
+      assert log =~ "MARKER_END",
+             "hook failure log should preserve enough output to include the tail marker (current truncate is too aggressive)"
+    after
+      File.rm_rf(workspace_root)
+    end
+  end
+
   test "workspace surfaces after_create hook timeouts" do
     workspace_root =
       Path.join(
