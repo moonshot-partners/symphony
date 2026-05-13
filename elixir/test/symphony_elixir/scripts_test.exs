@@ -42,6 +42,7 @@ defmodule SymphonyElixir.ScriptsTest do
 
       refute contents =~ ~r/CLAUDE_CODE_OAUTH_TOKEN=sk-/,
              "provision script must not bake real tokens"
+
       refute contents =~ ~r/LINEAR_API_KEY=lin_/,
              "provision script must not bake real Linear keys"
     end
