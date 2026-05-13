@@ -86,5 +86,17 @@ defmodule SymphonyElixir.GateCTest do
       assert log =~ "reason=empty_message"
       assert log =~ "issue_identifier=(unknown)"
     end
+
+    test "labels an empty last_agent_text sample as (empty)" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          GateC.log_violation(
+            {:violation, :missing_header},
+            %{identifier: "MT-GATE-C", last_agent_text: ""}
+          )
+        end)
+
+      assert log =~ "sample=\"(empty)\""
+    end
   end
 end
