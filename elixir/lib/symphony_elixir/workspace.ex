@@ -31,6 +31,11 @@ defmodule SymphonyElixir.Workspace do
 
   defp ensure_workspace(workspace) do
     cond do
+      File.dir?(workspace) and zombie?(workspace) ->
+        Logger.warning("Workspace zombie detected, resetting workspace=#{workspace}")
+        File.rm_rf!(workspace)
+        create_workspace(workspace)
+
       File.dir?(workspace) ->
         {:ok, workspace}
 
@@ -40,6 +45,17 @@ defmodule SymphonyElixir.Workspace do
 
       true ->
         create_workspace(workspace)
+    end
+  end
+
+  defp zombie?(workspace) do
+    not File.exists?(marker_path(workspace)) and not empty_workspace?(workspace)
+  end
+
+  defp empty_workspace?(workspace) do
+    case File.ls(workspace) do
+      {:ok, entries} -> Enum.all?(entries, &(&1 == ".symphony"))
+      _ -> true
     end
   end
 
