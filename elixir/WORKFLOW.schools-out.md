@@ -30,10 +30,13 @@ hooks:
     set -euo pipefail
     # Primary repo at workspace root.
     git clone --depth 1 https://github.com/schoolsoutapp/schools-out .
-    # Point origin/HEAD → dev so `gh pr create` defaults to dev (not main).
-    # Pre-fetch dev so `git checkout -B ... origin/dev` works without extra fetch.
+    # schools-out's integration branch is `dev`. The shallow clone only brings
+    # `main`, so fetch `dev` explicitly into a real remote-tracking ref BEFORE
+    # pointing origin/HEAD at it (set-head fails if the ref doesn't exist yet).
+    # This makes `gh pr create` default to dev and lets `git checkout -B ...
+    # origin/dev` work without an extra fetch.
+    git fetch --depth=1 origin dev:refs/remotes/origin/dev
     git remote set-head origin dev
-    git fetch --depth=1 origin dev
     # Frontend repo at ./fe-next-app — eliminates the SODEV-827 class of
     # bugs where the agent had to clone the right repo mid-run after
     # burning turns on the wrong one. Whitelist mirrored in the prompt
