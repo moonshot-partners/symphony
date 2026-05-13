@@ -240,12 +240,12 @@ defmodule SymphonyElixir.Workspace do
   defp handle_hook_command_result({output, status}, workspace, issue_context, hook_name) do
     sanitized_output = sanitize_hook_output_for_log(output)
 
-    Logger.warning("Workspace hook failed hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} status=#{status} output=#{inspect(sanitized_output)}")
+    Logger.warning("Workspace hook failed hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} status=#{status}\noutput:\n#{sanitized_output}")
 
     {:error, {:workspace_hook_failed, hook_name, status, output}}
   end
 
-  defp sanitize_hook_output_for_log(output, max_bytes \\ 2_048) do
+  defp sanitize_hook_output_for_log(output, max_bytes \\ 16_384) do
     binary_output = IO.iodata_to_binary(output)
 
     case byte_size(binary_output) <= max_bytes do
