@@ -225,6 +225,101 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "after_create runs on pre-existing workspace that has no marker file" do
+    # SODEV-765 regression: workspaces persist on the VPS across dispatches.
+    # Before the marker file, ensure_workspace returned created?=false for an
+    # existing directory, and maybe_run_after_create_hook silently skipped
+    # the hook — so Gate A (bundle install + jest --listTests) never ran on
+    # re-dispatches of any ticket whose workspace had survived a prior run.
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-existing-no-marker-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      probe = Path.join(test_root, "hook-ran.txt")
+
+      existing_workspace = Path.join(workspace_root, "MT-EXISTING")
+      File.mkdir_p!(existing_workspace)
+      File.write!(Path.join(existing_workspace, "stale-file.txt"), "left over from prior run")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo ran > #{probe}"
+      )
+
+      assert {:ok, canonical_existing} = SymphonyElixir.PathSafety.canonicalize(existing_workspace)
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-EXISTING")
+      assert workspace == canonical_existing
+      assert File.read!(probe) == "ran\n", "after_create hook must run on existing workspace without marker"
+
+      assert File.exists?(Path.join(workspace, ".symphony/after_create_ok")),
+             "marker file must be written after a successful hook run"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "after_create is skipped on second create when hook command is unchanged" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-marker-cache-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      counter = Path.join(test_root, "hook-runs.txt")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo call >> #{counter}"
+      )
+
+      assert {:ok, _workspace} = Workspace.create_for_issue("MT-CACHE")
+      assert {:ok, _workspace} = Workspace.create_for_issue("MT-CACHE")
+
+      lines = File.read!(counter) |> String.trim() |> String.split("\n")
+      assert length(lines) == 1, "expected hook to run exactly once when command is unchanged"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "after_create runs again when hook command changes between dispatches" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-marker-hash-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      counter = Path.join(test_root, "hook-runs.txt")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo v1 >> #{counter}"
+      )
+
+      assert {:ok, _workspace} = Workspace.create_for_issue("MT-UPGRADE")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo v2 >> #{counter}"
+      )
+
+      assert {:ok, _workspace} = Workspace.create_for_issue("MT-UPGRADE")
+
+      lines = File.read!(counter) |> String.trim() |> String.split("\n")
+      assert lines == ["v1", "v2"], "expected hook to re-run when command hash changes"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace surfaces after_create hook failures" do
     workspace_root =
       Path.join(

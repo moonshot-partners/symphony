@@ -6,6 +6,8 @@ defmodule SymphonyElixir.Workspace do
   require Logger
   alias SymphonyElixir.{Config, PathSafety}
 
+  @marker_relpath ".symphony/after_create_ok"
+
   @spec create_for_issue(map() | String.t() | nil, term()) ::
           {:ok, Path.t()} | {:error, term()}
   def create_for_issue(issue_or_identifier, _worker_host \\ nil) do
@@ -16,8 +18,8 @@ defmodule SymphonyElixir.Workspace do
 
       with {:ok, workspace} <- workspace_path_for_issue(safe_id),
            :ok <- validate_workspace_path(workspace),
-           {:ok, workspace, created?} <- ensure_workspace(workspace),
-           :ok <- maybe_run_after_create_hook(workspace, issue_context, created?) do
+           {:ok, workspace} <- ensure_workspace(workspace),
+           :ok <- maybe_run_after_create_hook(workspace, issue_context) do
         {:ok, workspace}
       end
     rescue
@@ -30,7 +32,7 @@ defmodule SymphonyElixir.Workspace do
   defp ensure_workspace(workspace) do
     cond do
       File.dir?(workspace) ->
-        {:ok, workspace, false}
+        {:ok, workspace}
 
       File.exists?(workspace) ->
         File.rm_rf!(workspace)
@@ -44,7 +46,7 @@ defmodule SymphonyElixir.Workspace do
   defp create_workspace(workspace) do
     File.rm_rf!(workspace)
     File.mkdir_p!(workspace)
-    {:ok, workspace, true}
+    {:ok, workspace}
   end
 
   @spec remove(Path.t(), term()) :: {:ok, [String.t()]} | {:error, term(), String.t()}
@@ -118,19 +120,41 @@ defmodule SymphonyElixir.Workspace do
     String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
   end
 
-  defp maybe_run_after_create_hook(workspace, issue_context, created?) do
-    hooks = Config.settings!().hooks
-
-    case created? do
-      true ->
-        case hooks.after_create do
-          nil -> :ok
-          command -> run_hook(command, workspace, issue_context, "after_create")
-        end
-
-      false ->
-        :ok
+  defp maybe_run_after_create_hook(workspace, issue_context) do
+    case Config.settings!().hooks.after_create do
+      nil -> :ok
+      command -> run_after_create_hook(workspace, issue_context, command)
     end
+  end
+
+  defp run_after_create_hook(workspace, issue_context, command) do
+    if marker_matches?(workspace, command) do
+      :ok
+    else
+      with :ok <- run_hook(command, workspace, issue_context, "after_create") do
+        write_marker(workspace, command)
+        :ok
+      end
+    end
+  end
+
+  defp marker_path(workspace), do: Path.join(workspace, @marker_relpath)
+
+  defp marker_matches?(workspace, command) do
+    case File.read(marker_path(workspace)) do
+      {:ok, contents} -> String.trim(contents) == hook_hash(command)
+      _ -> false
+    end
+  end
+
+  defp write_marker(workspace, command) do
+    marker = marker_path(workspace)
+    File.mkdir_p!(Path.dirname(marker))
+    File.write!(marker, hook_hash(command) <> "\n")
+  end
+
+  defp hook_hash(command) do
+    :crypto.hash(:sha256, command) |> Base.encode16(case: :lower)
   end
 
   defp maybe_run_before_remove_hook(workspace) do
