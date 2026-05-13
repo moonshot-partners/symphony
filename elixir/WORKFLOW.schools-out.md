@@ -257,6 +257,15 @@ Skipping this artifact is a hard stop, not a style preference.
    shallow clone's local branch list). Branch name:
    `agents/sodev-{{ issue.identifier | split: "-" | last }}-<short-slug>`
    (lowercase, dashes).
+   If the issue description references a specific feature branch that should
+   already exist (e.g. "branch off `feat/sodev-NNN-slug`") and that branch
+   does NOT exist on remote after `git fetch origin`: do **not** silently
+   fall back. Instead, record the discrepancy in
+   `state/{{ issue.identifier | downcase }}/understanding.md` under a
+   **"Branch deviation"** heading — note the referenced branch, confirm it is
+   absent from `git branch -r`, and state that you branched off
+   `origin/<base>` as the WORKFLOW default. Continue — the missing branch is
+   a spec gap, not an agent error.
 3. One atomic commit per logical change. Concise descriptive messages.
 4. Run quality gates before pushing:
    - **Rails repos** (`Gemfile` present): `bundle exec rubocop --autocorrect-all`; if
