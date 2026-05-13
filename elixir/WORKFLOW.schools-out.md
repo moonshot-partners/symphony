@@ -223,60 +223,78 @@ Skipping this artifact is a hard stop, not a style preference.
    ticket to "In QA / Review" off your final message, so the browser proof
    has to exist by then.
 
-   a. Start the dev server (the helper does this for you, on port 3001 —
-      the staging API's CORS allowlist only accepts that port):
+   a. **Pick a stable selector for every visual AC.** For each AC that says
+      "renders / displays / shows / visible", find the element in your diff.
+      If it has no stable `data-testid`, add one in this PR (e.g.
+      `data-testid="build-badge"` on the span you changed) — that is part of
+      the AC scope. You only ever assert on selectors you own; never assert
+      against a regex over whole-page text (a bare `v[a-z]+` happily matches
+      "vorites" inside "favorites").
+
+   b. Write `fe-next-app/qa_check.py` using the declarative harness. You do
+      NOT write Playwright — you declare assertions and the harness owns the
+      browser (it starts `next dev` on port 3001, which the staging API's
+      CORS allowlist requires; it handles navigation waits,
+      `scroll_into_view_if_needed` through nested `overflow-y-auto`
+      containers, and the screenshots). Each `expect_*` captures a screenshot
+      bound to that assertion, so the evidence always frames the element
+      under test — a FAILED assertion captures too:
 
       ```python
       # fe-next-app/qa_check.py — write this file, then run it with `python`
       import sys; sys.path.insert(0, "/opt/qa")
-      from qa_helpers import provision_account, inject_session, dev_server, evidence_context, find_activity, write_report
+      from qa_helpers import qa_run   # also available: find_activity, write_report (BLOCKED path)
 
-      with dev_server("fe-next-app", build_sha="vqa") as base:
-          email, access, refresh, user = provision_account()   # fresh staging account
-          with evidence_context("fe-next-app/qa-evidence") as (page, shot):
-              assert inject_session(page, base, access, refresh, user), "auth failed"
-              page.goto(f"{base}/parents/<the-page-your-AC-touches>")
-              page.wait_for_timeout(8000)
-              shot("before")
-              # ... exercise each AC: click the control, assert the new text/element ...
-              checks = [{"name": "AC#1 ...", "pass": <bool>, "detail": "..."}]
-              shot("after")
-          ok = write_report("fe-next-app/qa-evidence", "{{ issue.identifier }}", checks)
-          sys.exit(0 if ok else 1)
+      # build_sha=None → footer shows `vdev`; pass a 7-hex to assert `v<sha>`.
+      with qa_run("fe-next-app", "{{ issue.identifier }}", build_sha="abc1234") as qa:
+          qa.login()                                  # fresh staging account + session
+          qa.goto("/parents/<the-page-your-AC-touches>")
+          qa.expect_visible('[data-testid="build-badge"]', "AC#1 - build SHA badge in footer")
+          qa.expect_text('[data-testid="build-badge"]', r"^vabc1234$", "AC#1b - badge text v<sha>")
+          # interact between assertions via the raw page, e.g.:
+          # qa.page.get_by_role("button", name="Read more").click(); qa.page.wait_for_timeout(500)
+          # qa.expect_visible('text=Show less', "AC#2 - expands on click")
+          qa.note("AC#3 - unit tests both code paths pass", True, "npx jest site-footer: 12/12")
+      sys.exit(0 if qa.passed else 1)
       ```
 
-      `find_activity(lambda a: len(a.get("description") or "") > 200, access)`
-      gets a real staging row when an AC needs specific data (e.g. a
-      long-description activity). `qa_helpers` is stdlib-only; chromium is
-      pre-installed in the image. Inspect the real DOM to pick selectors —
-      generic role/name guesses miss (the SODEV-556 toggle is a `<button>`
-      named "Read more" / "Show less", not `name="more"`).
+      `qa.page` is the raw Playwright page for clicks/typing between
+      assertions; `qa.find_activity(lambda a: len(a.get("description") or "") > 200)`
+      returns a real staging row when an AC needs specific data. **At least
+      one `expect_*` must run** — a run with only `note()` calls (no
+      screenshots), or no assertions at all, is failed by the harness's
+      evidence sanity gate. Inspect the real DOM to pick selectors — generic
+      role/name guesses miss.
 
-   b. Run `python fe-next-app/qa_check.py`. Three outcomes:
-      - **FAIL** — the check ran and an AC assertion came back false. The bug
-        is in the code you just wrote: fix it from the existing diff (do not
-        start over), re-run the quality gates, re-run `qa_check.py`. Cap: 2
-        fix attempts. If still failing after 2, STOP and report what the QA
-        check caught — do not open the PR.
-      - **BLOCKED** — the dev server won't start, or 500s on a route you did
-        NOT touch. Confirm it's pre-existing with `git stash`: if the same
-        error happens with your changes removed, it's an environment issue,
-        not your bug — do NOT spend fix attempts on it. Still run your unit
-        tests (`npm test -- --testPathPattern="<filename>"` from
-        `fe-next-app/`); record them plus the blocking error in
-        `qa-report.md` / `verdict.json` (`"browser_qa": "BLOCKED"`); note it
-        in the PR body; then proceed to open the PR.
+   c. Run `python fe-next-app/qa_check.py`. Three outcomes:
+      - **FAIL** — `qa.passed` is false: an assertion came back false, or no
+        probative evidence was captured. The bug is in the code you just
+        wrote: fix it from the existing diff (do not start over), re-run the
+        quality gates, re-run `qa_check.py`. Cap: 2 fix attempts. If still
+        failing after 2, STOP and report what the QA check caught — do not
+        open the PR.
+      - **BLOCKED** — `qa_run(...)` raised before yielding (the dev server
+        won't start, or 500s on a route you did NOT touch). Confirm it's
+        pre-existing with `git stash`: if the same error happens with your
+        changes removed, it's an environment issue, not your bug — do NOT
+        spend fix attempts on it. Still run your unit tests
+        (`npx jest <filename>` from `fe-next-app/`) and record them plus the
+        blocking error: `write_report("fe-next-app/qa-evidence",
+        "{{ issue.identifier }}", checks, notes="BLOCKED: <reason>")`; note
+        it in the PR body; then proceed to open the PR.
       - **PASS** — proceed.
-   c. After PASS or BLOCKED: do **NOT** commit `qa-evidence/`. The report is
-      `.md`/`.json` and fe-next-app's lint runs
-      `prettier --check "**/*.{...,md,json}" --ignore-path .gitignore`, so a
-      committed `qa-evidence/` turns CI red. Instead append the line
+
+   d. After PASS or BLOCKED: do **NOT** commit `qa-evidence/`. The harness
+      writes `.png` / `.webm` / `.md` / `.json` there and fe-next-app's lint
+      runs `prettier --check "**/*.{...,md,json}" --ignore-path .gitignore`,
+      so a committed `qa-evidence/` turns CI red. Instead append the line
       `qa-evidence/` to `fe-next-app/.gitignore`, and commit only that
-      `.gitignore` change plus `qa_check.py` in their own commit. Symphony
-      reads `qa-evidence/` straight from the workspace and uploads the
-      screenshots, `session.webm` and `qa-report.md` to the Linear ticket
-      automatically. Paste the `qa-report.md` table into the PR body under a
-      `## QA self-review` heading.
+      `.gitignore` change plus `qa_check.py` (and any `data-testid` you
+      added) in their own commit. Symphony reads `qa-evidence/` straight
+      from the workspace and uploads the screenshots, `session.webm` and
+      `qa-report.md` to the Linear ticket automatically. Paste the
+      `qa-report.md` table into the PR body under a `## QA self-review`
+      heading.
 6. Push the branch and open a PR with `gh pr create`:
    - **Pre-PR base branch check (mandatory before any `gh pr create` call)**:
      Run `git log --oneline origin/dev..HEAD` (or the repo's base per the
@@ -289,7 +307,7 @@ Skipping this artifact is a hard stop, not a style preference.
      do not retarget after the fact.
    - Title: `[{{ issue.identifier }}] <one-line>`
    - Body: 2–4 sentence summary + `Linear: {{ issue.url }}` + the
-     `## QA self-review` table from rule 5c when that step ran.
+     `## QA self-review` table from rule 5d when that step ran.
    - Apply label `symphony` (create with color `#7C3AED` if missing).
    - Do **not** add reviewers via `--reviewer`; the agent's git identity
      is the operator (`viniciuscffreitas`) and GitHub rejects self-review
@@ -318,10 +336,11 @@ Skipping this artifact is a hard stop, not a style preference.
   exists with all four sections populated (visual_wiring required when
   any AC uses render/display/show/visible language).
 - Do not open the PR for a `fe-next-app/` UI change while `qa_check.py`
-  reports **FAIL** (rule 5b) — an AC assertion is false. Two fix attempts,
-  then stop and report; never ship a UI change the browser check rejects.
-  A **BLOCKED** verdict (dev server / env issue, confirmed pre-existing via
-  `git stash`) is not a FAIL — open the PR with the block documented.
+  reports **FAIL** (rule 5c) — an assertion is false, or no evidence was
+  captured. Two fix attempts, then stop and report; never ship a UI change
+  the browser check rejects. A **BLOCKED** verdict (dev server / env issue,
+  confirmed pre-existing via `git stash`) is not a FAIL — open the PR with
+  the block documented.
 - If auth/permissions/tooling feels off (token errors, repo not found),
   stop. Do not retry blindly. The orchestrator captures your last message
   on the Linear workpad — say what is wrong and exit.
