@@ -40,6 +40,40 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "Gate A — after_create hook receives NPM_CONFIG_IGNORE_SCRIPTS=1 in env" do
+    # Regression guard: postinstall scripts that depend on workspace-absent
+    # secrets (e.g. @sentry/cli) used to silently corrupt node_modules during
+    # `npm ci`, leaving the agent unable to run jest/Playwright downstream.
+    # Symphony now injects NPM_CONFIG_IGNORE_SCRIPTS=1 by default so the hook
+    # cannot trip that class of failure.
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-env-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      File.mkdir_p!(workspace_root)
+
+      probe = Path.join(test_root, "env-probe.txt")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "printf '%s' \"$NPM_CONFIG_IGNORE_SCRIPTS\" > #{probe}"
+      )
+
+      assert {:ok, _workspace} = Workspace.create_for_issue("MT-ENV")
+      assert File.read!(probe) == "1"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "Workspace.hook_env/0 returns the default env overrides" do
+    assert {"NPM_CONFIG_IGNORE_SCRIPTS", "1"} in Workspace.hook_env()
+  end
+
   test "workspace path is deterministic per issue identifier" do
     workspace_root =
       Path.join(

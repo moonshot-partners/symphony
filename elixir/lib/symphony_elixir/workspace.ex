@@ -167,7 +167,11 @@ defmodule SymphonyElixir.Workspace do
 
     task =
       Task.async(fn ->
-        System.cmd("sh", ["-lc", command], cd: workspace, stderr_to_stdout: true)
+        System.cmd("bash", ["-lc", command],
+          cd: workspace,
+          stderr_to_stdout: true,
+          env: hook_env()
+        )
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -181,6 +185,28 @@ defmodule SymphonyElixir.Workspace do
 
         {:error, {:workspace_hook_timeout, hook_name, timeout_ms}}
     end
+  end
+
+  @doc """
+  Default environment overrides for every workspace hook.
+
+  `NPM_CONFIG_IGNORE_SCRIPTS=1` disables npm lifecycle scripts (pre/post
+  install, prepare, etc.) by default. Lifecycle scripts that depend on
+  secrets the workspace does not carry — `@sentry/cli` is the canonical
+  offender — can silently corrupt `node_modules` when they fail at the
+  postinstall stage. Skipping them keeps the install reproducible across
+  agent runs.
+
+  A workflow that genuinely needs a lifecycle script can override per-call
+  with `npm ci --foreground-scripts` or by unsetting the var in the hook
+  body. The recommended path is to add the script step explicitly in the
+  hook so it cannot fail silently.
+  """
+  @spec hook_env() :: [{binary(), binary()}]
+  def hook_env do
+    [
+      {"NPM_CONFIG_IGNORE_SCRIPTS", "1"}
+    ]
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do

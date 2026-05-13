@@ -20,6 +20,14 @@ workspace:
   root: ~/code/schoolsout-workspaces
 hooks:
   after_create: |
+    # Gate A — install integrity: fail loudly on any non-zero exit. The hook
+    # used to mask install failures with `|| true`, which let a half-populated
+    # node_modules through and turned every downstream `npm test`/QA run into
+    # a silent BLOCKED. `NPM_CONFIG_IGNORE_SCRIPTS=1` is already injected by
+    # Symphony's hook runner (Workspace.hook_env/0) so postinstall scripts
+    # like @sentry/cli don't run here and corrupt the install when their
+    # secrets aren't present.
+    set -euo pipefail
     # Primary repo at workspace root.
     git clone --depth 1 https://github.com/schoolsoutapp/schools-out .
     # Point origin/HEAD → dev so `gh pr create` defaults to dev (not main).
@@ -40,11 +48,19 @@ hooks:
     # here with `npm ci` — if `pnpm install` runs later it builds a strict
     # node_modules that fails undeclared transitive imports (e.g.
     # @amplitude/analytics-core), which 500s `next dev` and blocks rule-5 QA.
-    (cd fe-next-app && npm ci --no-audit --no-fund) || true
+    (cd fe-next-app && npm ci --no-audit --no-fund)
+    # Gate A — verify the install actually produced a working test toolchain.
+    # If jest can't enumerate its tests, node_modules is half-provisioned and
+    # the agent would crash later in `npm test`/`qa_check.py` with no signal
+    # back to Symphony. Fail the workspace creation instead, loud.
+    (cd fe-next-app && npx --no-install jest --listTests > /dev/null)
     if [ -f Gemfile ]; then
       # Install gems into vendor/bundle so Docker can find them at /workspace/vendor/bundle.
       bundle config set --local path vendor/bundle
-      bundle install --quiet || true
+      # --no-color (not --quiet) so the error message survives in the hook
+      # output buffer when bundle exits non-zero. --quiet swallows the one
+      # diagnostic line we need to debug auth/native-extension failures.
+      bundle install --no-color
     fi
   before_remove: |
     : # no-op (do not modify branches on workspace teardown)
@@ -132,6 +148,56 @@ integration branch.
 
 If a repo not listed above ever enters the whitelist, the table must be
 updated in the same diff. Do not guess the base branch.
+
+## Mandatory turn-1 workpad post: AC Extracted
+
+Your very first turn-end message — the one Symphony posts to the Linear
+workpad — must be a numbered breakdown of the acceptance criteria you
+intend to satisfy, in this exact format:
+
+```
+## AC Extracted
+
+1. <binary pass/fail statement, e.g. "/vendor/dashboard h1 contains
+   vendor.business_name when vendor.approved=true">
+2. ...
+```
+
+Every item must be **testable without subjective interpretation** — a
+human reading the rendered page should be able to mark it pass or fail in
+under five seconds. If the issue description contains a soft requirement
+that cannot be reduced to a binary statement ("improve UX", "make it
+better", "more polished"), your first turn-end message is instead:
+
+```
+## BLOCKED: AC not testable
+
+The following items cannot be expressed as binary pass/fail:
+- "<verbatim quote from the issue>"
+- ...
+
+Suggested rewrites:
+- "improve dashboard" → "/vendor/dashboard renders h1 with business_name"
+- "make it faster" → "FCP < 2.5s on Lighthouse mobile preset"
+
+Needs PM rewrite before this ticket is workable.
+```
+
+After a BLOCKED post, stop calling tools for the rest of the turn. Do
+NOT write any files, do NOT clone any repo, do NOT branch. Wait for the
+PM to rewrite the description. Symphony will re-dispatch on the next
+poll; if AC is still subjective, post BLOCKED again — that is the
+correct behavior and costs essentially nothing.
+
+The numbered AC list is the **source of truth** for every downstream
+artifact:
+- `understanding.md` references AC#N in `expected_behavior_diff`.
+- PR body references AC#N in the file-mapping table.
+- `qa_check.py` uses the same AC#N labels in `expect_*` annotations and
+  the `## QA self-review` table.
+
+Re-numbering or silently dropping an AC item between turn-1 and the PR
+is a process violation.
 
 ## Mandatory turn-1 deliverable: understanding.md
 
