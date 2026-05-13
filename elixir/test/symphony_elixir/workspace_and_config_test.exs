@@ -3,7 +3,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   alias Ecto.Changeset
   alias SymphonyElixir.Config.Schema
   alias SymphonyElixir.Config.Schema.{AgentRuntime, StringOrMap}
-  alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.Linear.{Client, Telemetry}
 
   test "workspace bootstrap can be implemented in after_create hook" do
     test_root =
@@ -807,6 +807,36 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert log =~ "Linear GraphQL request failed status=400"
     assert log =~ ~s(body=%{"errors" => [%{"extensions" => %{"code" => "BAD_USER_INPUT"})
     assert log =~ "Variable \\\"$ids\\\" got invalid value"
+  end
+
+  test "linear client increments timeout telemetry counter on Req timeout" do
+    Telemetry.reset()
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:error, {:linear_api_request, :timeout}} =
+               Client.graphql(
+                 "query Viewer { viewer { id } }",
+                 %{},
+                 request_fun: fn _payload, _headers -> {:error, :timeout} end
+               )
+    end)
+
+    assert Telemetry.count() == 1
+  end
+
+  test "linear client does not increment timeout telemetry on non-timeout errors" do
+    Telemetry.reset()
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:error, {:linear_api_request, :econnrefused}} =
+               Client.graphql(
+                 "query Viewer { viewer { id } }",
+                 %{},
+                 request_fun: fn _payload, _headers -> {:error, :econnrefused} end
+               )
+    end)
+
+    assert Telemetry.count() == 0
   end
 
   test "orchestrator sorts dispatch by priority then oldest created_at" do

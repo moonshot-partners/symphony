@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   require Logger
-  alias SymphonyElixir.{Config, Linear.Issue, Linear.Normalizer}
+  alias SymphonyElixir.{Config, Linear.Issue, Linear.Normalizer, Linear.Telemetry}
 
   @issue_page_size 50
   @max_error_body_log_bytes 1_000
@@ -193,6 +193,7 @@ defmodule SymphonyElixir.Linear.Client do
         {:error, {:linear_api_status, response.status}}
 
       {:error, reason} ->
+        Telemetry.maybe_record_timeout({:error, reason})
         Logger.error("Linear GraphQL request failed: #{inspect(reason)}")
         {:error, {:linear_api_request, reason}}
     end
