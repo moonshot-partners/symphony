@@ -309,7 +309,7 @@ Skipping this artifact is a hard stop, not a style preference.
       against a regex over whole-page text (a bare `v[a-z]+` happily matches
       "vorites" inside "favorites").
 
-   b. Write `fe-next-app/qa_check.py` using the declarative harness. You do
+   b. Write `state/{{ issue.identifier | downcase }}/qa_check.py` using the declarative harness. You do
       NOT write Playwright — you declare assertions and the harness owns the
       browser (it starts `next dev` on port 3001, which the staging API's
       CORS allowlist requires; it handles navigation waits,
@@ -319,9 +319,9 @@ Skipping this artifact is a hard stop, not a style preference.
       under test — a FAILED assertion captures too:
 
       ```python
-      # fe-next-app/qa_check.py — write this file; run it from inside fe-next-app/
-      # with `python qa_check.py` (the harness finds the app whether cwd is the
-      # workspace root or fe-next-app/, but run it where you ran the unit tests).
+      # state/<issue-identifier>/qa_check.py — write this in state/, NOT in fe-next-app/.
+      # Run from workspace root: `python state/<issue-identifier>/qa_check.py`
+      # (the harness finds fe-next-app/ via _resolve_app_dir — cwd = workspace root is correct).
       import sys; sys.path.insert(0, "/opt/qa")
       from qa_helpers import qa_run   # also available: find_activity, write_report (BLOCKED path)
 
@@ -337,6 +337,18 @@ Skipping this artifact is a hard stop, not a style preference.
           qa.note("AC#3 - unit tests both code paths pass", True, "npx jest site-footer: 12/12")
       sys.exit(0 if qa.passed else 1)
       ```
+
+      For ACs under `/business/*` (vendor-side pages — anything the business
+      app routes serve), use `qa.login_as_vendor(business_name="QA Co")`
+      INSTEAD of `qa.login()`. The protected layout reads
+      `user.vendor.onboarding_status` from the Zustand session; without a
+      completed vendor it redirects every `/business/*` route to
+      `/business/signup/about-you`, so a plain `qa.login()` would land your
+      assertions on the signup wizard, not the page under test. `goto()`
+      now detects this redirect and short-circuits subsequent `expect_*`
+      calls — the report will show ONE navigation FAIL with the redirect
+      destination instead of N identical wizard screenshots — but the right
+      move is to use the vendor login from the start.
 
       **AC coverage rules (every AC must be accounted for):**
       - **Link/href ACs** (`"renders a link to X"`, `"links to /path"`):
@@ -366,8 +378,11 @@ Skipping this artifact is a hard stop, not a style preference.
       evidence sanity gate. Inspect the real DOM to pick selectors — generic
       role/name guesses miss.
 
-   c. Run it: `cd fe-next-app && python qa_check.py` (same cwd as the unit
-      tests). Three outcomes:
+   c. Run it from the **workspace root**:
+      `python state/{{ issue.identifier | downcase }}/qa_check.py`.
+      Do NOT cd into fe-next-app first — the harness resolves
+      `fe-next-app/` from `workspace_root/fe-next-app/package.json`.
+      Three outcomes:
       - **FAIL** — `qa.passed` is false: an assertion came back false, or no
         probative evidence was captured. The bug is in the code you just
         wrote: fix it from the existing diff (do not start over), re-run the
@@ -389,19 +404,23 @@ Skipping this artifact is a hard stop, not a style preference.
         and why, and open the PR.
       - **PASS** — proceed.
 
-   d. After PASS or BLOCKED: do **NOT** commit `qa-evidence/`. The harness
-      writes `.png` / `.webm` / `.md` / `.json` there and fe-next-app's lint
-      runs `prettier --check "**/*.{...,md,json}" --ignore-path .gitignore`,
-      so a committed `qa-evidence/` turns CI red. Instead append a
-      `qa-evidence/` line to `fe-next-app/.gitignore` — newline-safe, e.g.
+   d. After PASS or BLOCKED: do **NOT** commit `qa-evidence/` or
+      `state/{{ issue.identifier | downcase }}/qa_check.py` — both are
+      workspace-local only and must never appear in the PR diff. The harness
+      writes `.png` / `.webm` / `.md` / `.json` under `fe-next-app/qa-evidence/`
+      and fe-next-app's lint runs
+      `prettier --check "**/*.{...,md,json}" --ignore-path .gitignore`,
+      so a committed `qa-evidence/` turns CI red. Append a `qa-evidence/`
+      line to `fe-next-app/.gitignore` — newline-safe:
       `printf '\nqa-evidence/\n' >> fe-next-app/.gitignore` (a bare `echo >>`
       can glue it onto the file's last line if that line has no trailing
-      newline). Then commit only that `.gitignore` change plus `qa_check.py`
-      (and any `data-testid` you added) in their own commit. Symphony reads `qa-evidence/` straight
-      from the workspace and uploads the screenshots, `session.webm` and
-      `qa-report.md` to the Linear ticket automatically. Paste the
-      `qa-report.md` table into the PR body under a `## QA self-review`
-      heading.
+      newline). Commit only that `.gitignore` change (and any `data-testid`
+      you added) in its own commit. Do **not** include `qa_check.py` in the
+      PR diff — it lives in `state/` and is not relevant to reviewers of the
+      UI change. Symphony reads `qa-evidence/` straight from the workspace
+      and uploads the screenshots, `session.webm` and `qa-report.md` to the
+      Linear ticket automatically. Paste the `qa-report.md` table into the
+      PR body under a `## QA self-review` heading.
 6. Push the branch and open a PR with `gh pr create`:
    - **Pre-PR base branch check (mandatory before any `gh pr create` call)**:
      Run `git log --oneline origin/dev..HEAD` (or the repo's base per the
