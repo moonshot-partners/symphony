@@ -10,7 +10,7 @@ so an agent's `qa_check.py` keeps importing from one place.
 
 from __future__ import annotations
 
-from qa_helpers import STAGING_API, _http
+from qa_helpers import STAGING_API, _http  # noqa: E402 — sibling-module helpers
 
 
 def provision_vendor_account(
@@ -58,3 +58,29 @@ def provision_vendor_account(
     if status >= 300:
         raise RuntimeError(f"auth/me refresh after vendor create failed: {status} {me}")
     return me.get("data", me)
+
+
+def qarun_login_as_vendor(qa, *, business_name: str = "QA Bot Co"):
+    """`QaRun.login_as_vendor` delegates here so the parent module stays under
+    its length limit.
+
+    Same flow as `QaRun.login` for parents, plus the vendor promotion in
+    between: provision a fresh parents account, POST `/vendor` with
+    `onboarding_status="completed"`, re-inject the Zustand session with the
+    new `user.vendor` so `BusinessProtectedLayout` lets the browser into
+    `/business/*` without bouncing to the signup wizard.
+    """
+    from qa_helpers import inject_session, provision_account
+
+    qa.email, qa.access, qa.refresh, _parents = provision_account(qa.api_base)
+    qa.user = provision_vendor_account(
+        access_token=qa.access,
+        business_name=business_name,
+        email=qa.email,
+        api_base=qa.api_base,
+    )
+    if not inject_session(qa.page, qa.base, qa.access, qa.refresh, qa.user):
+        raise RuntimeError(
+            "inject_session failed after vendor promotion — staging auth did not stick"
+        )
+    return qa
