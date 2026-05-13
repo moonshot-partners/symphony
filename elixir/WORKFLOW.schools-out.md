@@ -338,6 +338,26 @@ Skipping this artifact is a hard stop, not a style preference.
       sys.exit(0 if qa.passed else 1)
       ```
 
+      **AC coverage rules (every AC must be accounted for):**
+      - **Link/href ACs** (`"renders a link to X"`, `"links to /path"`):
+        `expect_visible` alone is insufficient — the element may render but
+        point to the wrong destination. Also assert the href:
+        `qa.expect_text('[data-testid="signup-link"]', r"^/sign-up$", "AC#2b - href")`.
+        `expect_text` matches against the element's `href` attribute when the
+        element is an `<a>` tag (the harness checks `getAttribute("href")` if
+        `innerText` doesn't match the pattern).
+      - **Opacity/CSS-state ACs** (`"active slide visible"`, `"inactive slide hidden"`):
+        two absolutely-positioned elements can both be "visible" to Playwright
+        when visibility is controlled by `opacity` or `z-index` only. Use
+        `qa.page.evaluate` to check computed style:
+        `assert qa.page.evaluate('window.getComputedStyle(document.querySelector(\'[data-testid="slide-0"]\'')).opacity') == "1"`.
+        Follow with `qa.note("AC#N - slide 0 opacity:1 confirmed", True, "computed opacity == 1")`.
+      - **Every AC must appear**: go through the ticket's acceptance criteria
+        one by one. Each AC must map to either an `expect_*` call or a
+        `note()` with a boolean outcome. Silently skipping an AC is not
+        acceptable — the evidence sanity gate does not catch gaps, but the
+        reviewer will.
+
       `qa.page` is the raw Playwright page for clicks/typing between
       assertions; `qa.find_activity(lambda a: len(a.get("description") or "") > 200)`
       returns a real staging row when an AC needs specific data. **At least
