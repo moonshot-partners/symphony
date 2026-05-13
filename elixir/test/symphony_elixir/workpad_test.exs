@@ -186,6 +186,81 @@ defmodule SymphonyElixir.WorkpadTest do
     refute_received {:memory_tracker_comment, _, _}
   end
 
+  test "heartbeat: non-sync event triggers update when last sync is older than threshold" do
+    stale_ts = DateTime.add(DateTime.utc_now(), -60, :second)
+
+    entry =
+      running_entry(%{
+        workpad_comment_id: "memory-comment-issue-wp",
+        last_workpad_sync_at: stale_ts
+      })
+
+    update = %{
+      event: :notification,
+      payload: %{
+        "method" => "item/agent_message",
+        "params" => %{"text" => "still working"}
+      },
+      timestamp: DateTime.utc_now()
+    }
+
+    updated = Workpad.maybe_sync(entry, update, self())
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
+    assert body =~ "still working"
+    assert %DateTime{} = updated.last_workpad_sync_at
+    assert DateTime.compare(updated.last_workpad_sync_at, stale_ts) == :gt
+  end
+
+  test "heartbeat: non-sync event does not trigger update when last sync is recent" do
+    fresh_ts = DateTime.add(DateTime.utc_now(), -2, :second)
+
+    entry =
+      running_entry(%{
+        workpad_comment_id: "memory-comment-issue-wp",
+        last_workpad_sync_at: fresh_ts
+      })
+
+    update = %{
+      event: :notification,
+      payload: %{
+        "method" => "item/agent_message",
+        "params" => %{"text" => "noise"}
+      },
+      timestamp: DateTime.utc_now()
+    }
+
+    Workpad.maybe_sync(entry, update, self())
+
+    refute_receive {:memory_tracker_comment_update, _, _}, 200
+    refute_receive {:memory_tracker_comment, _, _}, 200
+  end
+
+  test "heartbeat is skipped while workpad_comment_id is still nil" do
+    stale_ts = DateTime.add(DateTime.utc_now(), -60, :second)
+
+    entry =
+      running_entry(%{
+        workpad_comment_id: nil,
+        workpad_creating: true,
+        last_workpad_sync_at: stale_ts
+      })
+
+    update = %{
+      event: :notification,
+      payload: %{
+        "method" => "item/agent_message",
+        "params" => %{"text" => "while creating"}
+      },
+      timestamp: DateTime.utc_now()
+    }
+
+    Workpad.maybe_sync(entry, update, self())
+
+    refute_receive {:memory_tracker_comment, _, _}, 200
+    refute_receive {:memory_tracker_comment_update, _, _}, 200
+  end
+
   test "extracts text from content blocks list" do
     update = %{
       event: :notification,

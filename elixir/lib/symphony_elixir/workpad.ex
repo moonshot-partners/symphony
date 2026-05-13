@@ -24,6 +24,7 @@ defmodule SymphonyElixir.Workpad do
                ])
 
   @max_agent_text_chars 4_000
+  @heartbeat_threshold_seconds 15
 
   @doc """
   Updates the running entry's `last_agent_text` from the latest update and,
@@ -38,22 +39,48 @@ defmodule SymphonyElixir.Workpad do
     running_entry = update_last_agent_text(running_entry, update)
 
     cond do
-      not (enabled?() and should_sync?(update)) ->
+      not enabled?() ->
         running_entry
 
       not is_binary(issue_id(running_entry)) ->
         running_entry
 
+      should_sync?(update) ->
+        sync_now(running_entry, reply_to)
+
+      heartbeat_due?(running_entry) ->
+        sync_now(running_entry, reply_to)
+
+      true ->
+        running_entry
+    end
+  end
+
+  defp sync_now(running_entry, reply_to) do
+    cond do
       is_binary(Map.get(running_entry, :workpad_comment_id)) ->
         schedule_update(running_entry, reply_to)
-        running_entry
+        Map.put(running_entry, :last_workpad_sync_at, DateTime.utc_now())
 
       Map.get(running_entry, :workpad_creating) == true ->
         running_entry
 
       true ->
         schedule_create(running_entry, reply_to)
-        Map.put(running_entry, :workpad_creating, true)
+
+        running_entry
+        |> Map.put(:workpad_creating, true)
+        |> Map.put(:last_workpad_sync_at, DateTime.utc_now())
+    end
+  end
+
+  defp heartbeat_due?(running_entry) do
+    case {Map.get(running_entry, :workpad_comment_id), Map.get(running_entry, :last_workpad_sync_at)} do
+      {comment_id, %DateTime{} = last_sync_at} when is_binary(comment_id) ->
+        DateTime.diff(DateTime.utc_now(), last_sync_at, :second) >= @heartbeat_threshold_seconds
+
+      _ ->
+        false
     end
   end
 
