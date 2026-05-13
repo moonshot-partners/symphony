@@ -241,7 +241,9 @@ Skipping this artifact is a hard stop, not a style preference.
       under test — a FAILED assertion captures too:
 
       ```python
-      # fe-next-app/qa_check.py — write this file, then run it with `python`
+      # fe-next-app/qa_check.py — write this file; run it from inside fe-next-app/
+      # with `python qa_check.py` (the harness finds the app whether cwd is the
+      # workspace root or fe-next-app/, but run it where you ran the unit tests).
       import sys; sys.path.insert(0, "/opt/qa")
       from qa_helpers import qa_run   # also available: find_activity, write_report (BLOCKED path)
 
@@ -266,7 +268,8 @@ Skipping this artifact is a hard stop, not a style preference.
       evidence sanity gate. Inspect the real DOM to pick selectors — generic
       role/name guesses miss.
 
-   c. Run `python fe-next-app/qa_check.py`. Three outcomes:
+   c. Run it: `cd fe-next-app && python qa_check.py` (same cwd as the unit
+      tests). Three outcomes:
       - **FAIL** — `qa.passed` is false: an assertion came back false, or no
         probative evidence was captured. The bug is in the code you just
         wrote: fix it from the existing diff (do not start over), re-run the
@@ -279,18 +282,24 @@ Skipping this artifact is a hard stop, not a style preference.
         changes removed, it's an environment issue, not your bug — do NOT
         spend fix attempts on it. Still run your unit tests
         (`npx jest <filename>` from `fe-next-app/`) and record them plus the
-        blocking error: `write_report("fe-next-app/qa-evidence",
-        "{{ issue.identifier }}", checks, notes="BLOCKED: <reason>")`; note
-        it in the PR body; then proceed to open the PR.
+        blocking error: `write_report("qa-evidence", "{{ issue.identifier }}",
+        checks, notes="BLOCKED: <reason>")` (run from `fe-next-app/`). A
+        BLOCKED report writes `verdict.pass = false` on purpose — a run with
+        no browser evidence proves nothing, so don't dress it up as a green QA
+        pass. That is expected and does not stop you: paste the report's
+        message into the PR body, state plainly that browser QA was blocked
+        and why, and open the PR.
       - **PASS** — proceed.
 
    d. After PASS or BLOCKED: do **NOT** commit `qa-evidence/`. The harness
       writes `.png` / `.webm` / `.md` / `.json` there and fe-next-app's lint
       runs `prettier --check "**/*.{...,md,json}" --ignore-path .gitignore`,
-      so a committed `qa-evidence/` turns CI red. Instead append the line
-      `qa-evidence/` to `fe-next-app/.gitignore`, and commit only that
-      `.gitignore` change plus `qa_check.py` (and any `data-testid` you
-      added) in their own commit. Symphony reads `qa-evidence/` straight
+      so a committed `qa-evidence/` turns CI red. Instead append a
+      `qa-evidence/` line to `fe-next-app/.gitignore` — newline-safe, e.g.
+      `printf '\nqa-evidence/\n' >> fe-next-app/.gitignore` (a bare `echo >>`
+      can glue it onto the file's last line if that line has no trailing
+      newline). Then commit only that `.gitignore` change plus `qa_check.py`
+      (and any `data-testid` you added) in their own commit. Symphony reads `qa-evidence/` straight
       from the workspace and uploads the screenshots, `session.webm` and
       `qa-report.md` to the Linear ticket automatically. Paste the
       `qa-report.md` table into the PR body under a `## QA self-review`
