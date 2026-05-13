@@ -149,6 +149,56 @@ integration branch.
 If a repo not listed above ever enters the whitelist, the table must be
 updated in the same diff. Do not guess the base branch.
 
+## Mandatory turn-1 workpad post: AC Extracted
+
+Your very first turn-end message — the one Symphony posts to the Linear
+workpad — must be a numbered breakdown of the acceptance criteria you
+intend to satisfy, in this exact format:
+
+```
+## AC Extracted
+
+1. <binary pass/fail statement, e.g. "/vendor/dashboard h1 contains
+   vendor.business_name when vendor.approved=true">
+2. ...
+```
+
+Every item must be **testable without subjective interpretation** — a
+human reading the rendered page should be able to mark it pass or fail in
+under five seconds. If the issue description contains a soft requirement
+that cannot be reduced to a binary statement ("improve UX", "make it
+better", "more polished"), your first turn-end message is instead:
+
+```
+## BLOCKED: AC not testable
+
+The following items cannot be expressed as binary pass/fail:
+- "<verbatim quote from the issue>"
+- ...
+
+Suggested rewrites:
+- "improve dashboard" → "/vendor/dashboard renders h1 with business_name"
+- "make it faster" → "FCP < 2.5s on Lighthouse mobile preset"
+
+Needs PM rewrite before this ticket is workable.
+```
+
+After a BLOCKED post, stop calling tools for the rest of the turn. Do
+NOT write any files, do NOT clone any repo, do NOT branch. Wait for the
+PM to rewrite the description. Symphony will re-dispatch on the next
+poll; if AC is still subjective, post BLOCKED again — that is the
+correct behavior and costs essentially nothing.
+
+The numbered AC list is the **source of truth** for every downstream
+artifact:
+- `understanding.md` references AC#N in `expected_behavior_diff`.
+- PR body references AC#N in the file-mapping table.
+- `qa_check.py` uses the same AC#N labels in `expect_*` annotations and
+  the `## QA self-review` table.
+
+Re-numbering or silently dropping an AC item between turn-1 and the PR
+is a process violation.
+
 ## Mandatory turn-1 deliverable: understanding.md
 
 Before any `Edit` / `Write` / mutating `Bash` call, write
