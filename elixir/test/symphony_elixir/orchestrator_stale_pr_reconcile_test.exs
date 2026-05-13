@@ -1,8 +1,16 @@
 defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
   @moduledoc """
-  Regression coverage for SODEV-765: reconcile must NOT treat a stale
-  closed-not-merged GitHub PR attachment as a completion signal. Only OPEN
-  or MERGED PRs count as real work product.
+  Regression coverage for the PR-ready completion gate:
+
+    - SODEV-765 (PR #40): a stale closed-not-merged attachment must not
+      trigger completion.
+    - SODEV-765 follow-up (Gate B): an OPEN PR whose CI checks are failing
+      or pending must not trigger completion either — the agent has more
+      work to do until CI is green.
+
+  Both scenarios funnel through the same injection point (`:pr_ready_fn`
+  returns false), so the existing tests cover both shapes. The new "OPEN +
+  CI failing" describe makes the new scenario explicit at test-name level.
   """
 
   use SymphonyElixir.TestSupport
@@ -62,7 +70,7 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
 
     on_exit(fn ->
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
-      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
+      Application.delete_env(:symphony_elixir, :pr_ready_fn)
     end)
   end
 
@@ -80,7 +88,7 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
     test "preserves running agent and skips on_complete transition" do
       configure_active_states()
       setup_memory_tracker()
-      Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> false end)
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
 
       issue = make_issue()
       {state, fake_pid} = build_running_state(issue)
@@ -95,11 +103,11 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
     end
   end
 
-  describe "reconcile_issue_states_for_test/2 — active (OPEN or MERGED) PR attachment" do
+  describe "reconcile_issue_states_for_test/2 — ready PR attachment (MERGED, or OPEN + CI green)" do
     test "terminates running agent and transitions to on_complete_state" do
       configure_active_states()
       setup_memory_tracker()
-      Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
       issue = make_issue()
       {state, _fake_pid} = build_running_state(issue)
@@ -107,9 +115,31 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
       new_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
 
       refute Map.has_key?(new_state.running, issue.id),
-             "Expected #{issue.id} to be removed from running map after reconcile with active PR"
+             "Expected #{issue.id} to be removed from running map after reconcile with ready PR"
 
       assert_receive {:memory_tracker_state_update, "issue-765", "In QA / Review"}, 500
+    end
+  end
+
+  describe "reconcile_issue_states_for_test/2 — OPEN PR with CI failing/pending" do
+    test "preserves running agent so it can fix the failing checks" do
+      configure_active_states()
+      setup_memory_tracker()
+      # Same injection point, but the scenario this models is OPEN+CI-red
+      # rather than CLOSED-not-merged. ready? returning false keeps the
+      # agent alive until checks go green.
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
+
+      issue = make_issue()
+      {state, fake_pid} = build_running_state(issue)
+
+      new_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
+
+      assert Map.has_key?(new_state.running, issue.id),
+             "Expected #{issue.id} to remain in running map while CI is red; got: #{inspect(new_state.running)}"
+
+      refute_receive {:memory_tracker_state_update, _, _}, 200
+      Process.exit(fake_pid, :kill)
     end
   end
 
@@ -117,7 +147,7 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
     test "terminates running agent without firing on_complete transition" do
       configure_active_states()
       setup_memory_tracker()
-      Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> false end)
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
 
       issue = make_issue(state: "In QA / Review")
       {state, _fake_pid} = build_running_state(issue)
@@ -135,7 +165,7 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
     test "leaves issue in running map when active state and no PR attached" do
       configure_active_states()
       setup_memory_tracker()
-      Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> raise "should not be called when has_pr_attachment=false" end)
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> raise "should not be called when has_pr_attachment=false" end)
 
       issue = make_issue(has_pr_attachment: false, repos: [])
       {state, fake_pid} = build_running_state(issue)

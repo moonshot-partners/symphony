@@ -183,7 +183,7 @@ defmodule SymphonyElixir.AgentRunner do
   def continuation_decision_for_test(%Issue{} = issue), do: continuation_decision(issue)
 
   defp continuation_decision(%Issue{has_pr_attachment: true} = issue) do
-    if SymphonyElixir.GitHubPr.any_active?(issue) do
+    if SymphonyElixir.GitHubPr.ready?(issue) do
       :done
     else
       if active_issue_state?(issue.state), do: :continue, else: :done

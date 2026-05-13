@@ -284,7 +284,7 @@ defmodule SymphonyElixir.CoreTest do
     issue_identifier = "MT-PR-1"
     workspace = Path.join(test_root, issue_identifier)
 
-    Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
+    Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
     try do
       write_workflow_file!(Workflow.workflow_file_path(),
@@ -340,7 +340,7 @@ defmodule SymphonyElixir.CoreTest do
       assert Map.get(updated_state.workpads, issue_id) == "wp-comment-1"
     after
       File.rm_rf(test_root)
-      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
+      Application.delete_env(:symphony_elixir, :pr_ready_fn)
     end
   end
 
@@ -348,7 +348,7 @@ defmodule SymphonyElixir.CoreTest do
     previous_enabled = Application.get_env(:symphony_elixir, :workpad_enabled)
     Application.put_env(:symphony_elixir, :workpad_enabled, true)
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-    Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
+    Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
     test_root =
       Path.join(
@@ -417,7 +417,7 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
-      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
+      Application.delete_env(:symphony_elixir, :pr_ready_fn)
 
       case previous_enabled do
         nil -> Application.delete_env(:symphony_elixir, :workpad_enabled)
@@ -1503,7 +1503,7 @@ defmodule SymphonyElixir.CoreTest do
 
   test "continuation_decision marks issue done when a GitHub PR attachment is present and active" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: ["In Progress"])
-    Application.put_env(:symphony_elixir, :pr_active_check_fn, fn _url -> true end)
+    Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
     try do
       issue_with_pr = %Issue{
@@ -1532,7 +1532,7 @@ defmodule SymphonyElixir.CoreTest do
       assert AgentRunner.continuation_decision_for_test(issue_without_pr) == :continue
       assert AgentRunner.continuation_decision_for_test(issue_terminal) == :done
     after
-      Application.delete_env(:symphony_elixir, :pr_active_check_fn)
+      Application.delete_env(:symphony_elixir, :pr_ready_fn)
     end
   end
 

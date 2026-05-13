@@ -474,15 +474,15 @@ defmodule SymphonyElixir.Orchestrator do
 
         terminate_running_issue(state, issue.id, true)
 
-      has_pr_attachment?(issue) and GitHubPr.any_active?(issue) ->
-        Logger.info("Issue has an active PR attachment: #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
+      has_pr_attachment?(issue) and GitHubPr.ready?(issue) ->
+        Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
         state
         |> sync_workpad_pr_attached(issue.id)
         |> terminate_running_issue(issue.id, false)
 
       has_pr_attachment?(issue) ->
-        Logger.debug("Issue has only stale closed PR attachment(s): #{issue_context(issue)} state=#{issue.state}; keeping agent running")
+        Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{issue_context(issue)} state=#{issue.state}; keeping agent running")
 
         if active_issue_state?(issue.state, active_states) do
           refresh_running_issue_state(state, issue)
