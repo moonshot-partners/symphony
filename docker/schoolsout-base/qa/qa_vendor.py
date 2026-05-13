@@ -17,6 +17,7 @@ def provision_vendor_account(
     *,
     access_token: str,
     business_name: str,
+    email: str,
     api_base: str = STAGING_API,
     legal_first_name: str = "QA",
     legal_last_name: str = "Bot",
@@ -31,6 +32,11 @@ def provision_vendor_account(
     POST a vendor with `onboarding_status: "completed"`, then GET `/auth/me`
     so the harness can reload the session with the new `user.vendor` baked in.
 
+    `email` is required: the `Vendor` model validates
+    `uniqueness: true, email_format: true`, and the user-facing endpoint
+    doesn't auto-derive it from the account — pass the freshly-minted parents
+    email from `provision_account` so it's both unique and valid.
+
     `access_token` must be a fresh JWT from `provision_account`. Each account
     can hold only one vendor — call this once per fresh account.
     """
@@ -38,6 +44,7 @@ def provision_vendor_account(
     body = {
         "vendor": {
             "business_name": business_name,
+            "email": email,
             "legal_first_name": legal_first_name,
             "legal_last_name": legal_last_name,
             "onboarding_status": "completed",

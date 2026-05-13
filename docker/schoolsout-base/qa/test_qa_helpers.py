@@ -54,6 +54,7 @@ class ProvisionVendorAccountTest(unittest.TestCase):
             user = qa_vendor.provision_vendor_account(
                 access_token="fake-jwt",
                 business_name="QA Test Co",
+                email="qa-fixture@example.com",
                 api_base="https://staging.example.com/api/v1",
             )
 
@@ -69,6 +70,11 @@ class ProvisionVendorAccountTest(unittest.TestCase):
             vendor_body["onboarding_status"],
             "completed",
             "must skip /business/onboarding/step-1 redirect",
+        )
+        self.assertEqual(
+            vendor_body["email"],
+            "qa-fixture@example.com",
+            "Vendor model validates email_format — must be sent",
         )
         self.assertTrue(vendor_body.get("legal_first_name"))
         self.assertTrue(vendor_body.get("legal_last_name"))
@@ -90,6 +96,7 @@ class ProvisionVendorAccountTest(unittest.TestCase):
                 qa_vendor.provision_vendor_account(
                     access_token="fake-jwt",
                     business_name="x",
+                    email="qa@example.com",
                 )
         self.assertIn("create-vendor", str(ctx.exception).lower())
 
@@ -104,6 +111,7 @@ class ProvisionVendorAccountTest(unittest.TestCase):
                 qa_vendor.provision_vendor_account(
                     access_token="fake-jwt",
                     business_name="QA Co",
+                    email="qa@example.com",
                 )
         self.assertIn("auth/me", str(ctx.exception).lower())
 
