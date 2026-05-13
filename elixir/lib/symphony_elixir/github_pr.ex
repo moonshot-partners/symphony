@@ -59,9 +59,9 @@ defmodule SymphonyElixir.GitHubPr do
                  "--repo",
                  "#{owner}/#{repo}",
                  "--json",
-                 "state,merged",
+                 "state",
                  "--jq",
-                 "[.state, (.merged|tostring)] | @tsv"
+                 ".state"
                ],
                stderr_to_stdout: true
              ) do
@@ -87,15 +87,18 @@ defmodule SymphonyElixir.GitHubPr do
   @doc false
   @spec classify(String.t()) :: boolean()
   def classify(output) do
-    case output |> String.trim() |> String.split("\t") do
-      ["OPEN" | _] ->
+    case String.trim(output) do
+      "OPEN" ->
         true
 
-      [_, "true"] ->
+      "MERGED" ->
         true
+
+      "CLOSED" ->
+        false
 
       other ->
-        Logger.warning("gh pr view returned unexpected shape parts=#{inspect(other)} raw=#{inspect(output)}; treating as NOT active")
+        Logger.warning("gh pr view returned unexpected state=#{inspect(other)} raw=#{inspect(output)}; treating as NOT active")
         false
     end
   end

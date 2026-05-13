@@ -13,32 +13,20 @@ defmodule SymphonyElixir.GitHubPrTest do
   alias SymphonyElixir.GitHubPr
 
   describe "classify/1" do
-    test "OPEN with merged=false is active" do
-      assert GitHubPr.classify("OPEN\tfalse") == true
-    end
-
-    test "OPEN with merged=true is active" do
-      assert GitHubPr.classify("OPEN\ttrue") == true
-    end
-
-    test "MERGED (closed + merged=true) is active" do
-      assert GitHubPr.classify("MERGED\ttrue") == true
-    end
-
-    test "CLOSED + merged=true is active (defensive: gh sometimes reports state=CLOSED on merged PRs)" do
-      assert GitHubPr.classify("CLOSED\ttrue") == true
-    end
-
-    test "CLOSED + merged=false is NOT active — the stale PR shape that motivated SODEV-765" do
-      assert GitHubPr.classify("CLOSED\tfalse") == false
-    end
-
-    test "single-field OPEN (no tab) is still active — state alone is enough" do
+    test "OPEN is active" do
       assert GitHubPr.classify("OPEN") == true
     end
 
-    test "single-field MERGED (no tab) is NOT active — needs merged=true second column to be trusted" do
-      assert GitHubPr.classify("MERGED") == false
+    test "MERGED is active" do
+      assert GitHubPr.classify("MERGED") == true
+    end
+
+    test "CLOSED is NOT active — the stale PR shape that motivated SODEV-765" do
+      assert GitHubPr.classify("CLOSED") == false
+    end
+
+    test "OPEN with surrounding whitespace is still active" do
+      assert GitHubPr.classify("  OPEN  \n") == true
     end
 
     test "empty output is NOT active" do
@@ -46,7 +34,7 @@ defmodule SymphonyElixir.GitHubPrTest do
     end
 
     test "garbage output is NOT active" do
-      assert GitHubPr.classify("not\tjson\textra") == false
+      assert GitHubPr.classify("not-a-state") == false
     end
   end
 
