@@ -60,12 +60,11 @@ import json
 import os
 import re
 import secrets
-import socket
-import subprocess
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 STAGING_API = os.environ.get("QA_API_BASE", "https://mvp.schoolsoutapp.com/api/v1")
 DEV_PORT = int(os.environ.get("QA_DEV_PORT", "3001"))  # CORS allowlist — do not change
@@ -172,10 +171,10 @@ def provision_account(api_base: str = STAGING_API):
     return email, access, refresh, user
 
 
-# Vendor-account provisioning lives in a sibling module to keep this file
-# under the project length limit; the import here keeps the agent-facing
-# `from qa_helpers import ...` surface single-stop.
-from qa_vendor import provision_vendor_account  # noqa: E402,F401
+# Vendor + dev-server helpers live in sibling modules so this file stays under
+# the project length limit; re-export keeps `from qa_helpers import ...` single-stop.
+from qa_vendor import provision_vendor_account, qarun_login_as_vendor as _qarun_login_as_vendor  # noqa: E402,F401
+from qa_devserver import dev_server, _resolve_app_dir  # noqa: E402,F401
 
 
 def api_get(path: str, access_token: str, api_base: str = STAGING_API):
@@ -237,113 +236,6 @@ def inject_session(page, base_url: str, access_token: str, refresh_token: str, u
 
 
 # --------------------------------------------------------------------------- #
-# `next dev` lifecycle
-# --------------------------------------------------------------------------- #
-def _port_open(port: int) -> bool:
-    with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        return s.connect_ex(("127.0.0.1", port)) == 0
-
-
-
-
-def _http_ready(port: int, *, timeout: int = 60) -> bool:
-    """Poll http://localhost:{port}/ until HTTP 200 or timeout expires.
-
-    TCP-open (_port_open) only means the socket is accepting connections —
-    Next.js is still compiling routes. HTTP 200 on / means at least one
-    page rendered, i.e. the dev server is actually ready for assertions.
-    Without this, session.webm starts recording a blank spinner for ~30s.
-    """
-    url = f"http://localhost:{port}/"
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=5) as r:
-                if r.status == 200:
-                    return True
-        except Exception:
-            pass
-        time.sleep(2)
-    return False
-
-def _resolve_app_dir(app_dir: str) -> str:
-    """Find the Next app regardless of where the agent ran `qa_check.py` from.
-
-    The agent edits/tests/builds fe-next-app with the workspace's `fe-next-app/`
-    as its cwd; the WORKFLOW sketch passes `qa_run("fe-next-app", ...)`. Accept
-    both: a `<app_dir>/package.json` (cwd = workspace root), a `./package.json`
-    (cwd = inside the app, the common case), or `../<app_dir>/package.json`.
-    Returns an absolute path. Raises if none has a `package.json` — a clear
-    error beats silently `mkdir`-ing a phantom dir and failing `npm run dev`.
-    """
-    for cand in (app_dir, ".", os.path.join("..", os.path.basename(app_dir.rstrip("/")))):
-        if os.path.isfile(os.path.join(cand, "package.json")):
-            return os.path.abspath(cand)
-    raise RuntimeError(
-        f"no Next app found: {app_dir!r}, '.' and '../{os.path.basename(app_dir.rstrip('/'))}' "
-        f"all lack package.json (cwd={os.getcwd()}). Run qa_check.py from the workspace "
-        f"or from inside the app dir."
-    )
-
-
-def _tail(path: str, n: int = 30) -> str:
-    with contextlib.suppress(Exception):
-        with open(path) as fh:
-            return "".join(fh.readlines()[-n:]).rstrip()
-    return "(log unavailable)"
-
-
-@contextlib.contextmanager
-def dev_server(app_dir: str, *, port: int = DEV_PORT, api_base: str = STAGING_API,
-               build_sha: str | None = None, ready_timeout: int = 240):
-    """Start `npm run dev` for `app_dir` on `port`, pointed at the staging API,
-    yield the base URL, and tear the process down on exit. If something is
-    already listening on `port` (an earlier `next dev`), reuse it."""
-    if _port_open(port):
-        # TCP open but Next.js may still be compiling routes; wait for HTTP 200
-        _http_ready(port)
-        yield f"http://localhost:{port}"
-        return
-
-    app_dir = _resolve_app_dir(app_dir)
-    env = {**os.environ, "PORT": str(port), "NEXT_PUBLIC_API_URL": api_base}
-    if build_sha is not None:
-        env["NEXT_PUBLIC_BUILD_SHA"] = build_sha
-    log_path = os.path.join(app_dir, "qa-evidence", "next-dev.log")
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    log_fh = open(log_path, "w")
-    proc = subprocess.Popen(
-        ["npm", "run", "dev"], cwd=app_dir, env=env, stdout=log_fh, stderr=subprocess.STDOUT
-    )
-    try:
-        deadline = time.time() + ready_timeout
-        while time.time() < deadline:
-            if _port_open(port):
-                # TCP open != Next.js ready; poll HTTP 200 before yielding
-                _http_ready(port)
-                break
-            if proc.poll() is not None:
-                raise RuntimeError(
-                    f"`npm run dev` (cwd={app_dir}) exited early (code {proc.returncode}). "
-                    f"Last lines of {log_path}:\n{_tail(log_path)}"
-                )
-            time.sleep(2)
-        else:
-            raise RuntimeError(
-                f"`next dev` not ready on :{port} after {ready_timeout}s (cwd={app_dir}). "
-                f"Last lines of {log_path}:\n{_tail(log_path)}"
-            )
-        yield f"http://localhost:{port}"
-    finally:
-        proc.terminate()
-        with contextlib.suppress(Exception):
-            proc.wait(timeout=10)
-        if proc.poll() is None:
-            proc.kill()
-        log_fh.close()
-
-
-# --------------------------------------------------------------------------- #
 # the QA harness — assertions that capture their own evidence
 # --------------------------------------------------------------------------- #
 def _slug(text: str) -> str:
@@ -372,6 +264,7 @@ class QaRun:
         self.base: str | None = None
         self._console: list[str] = []
         self.email = self.access = self.refresh = self.user = None
+        self._nav_blocked = False
 
     # -- wired up by qa_run() once the browser context exists --
     def _bind(self, page, base: str, console_log: list[str]):
@@ -386,10 +279,47 @@ class QaRun:
             raise RuntimeError("inject_session failed — staging auth did not stick (CORS port? token expiry?)")
         return self
 
+    def login_as_vendor(self, *, business_name: str = "QA Bot Co"):
+        """Vendor-side counterpart to `login()` for ACs under `/business/*`.
+
+        `BusinessProtectedLayout` redirects to `/business/signup/about-you`
+        unless `user.vendor.onboarding_status` is `"completed"`/`1`. Without
+        this, an agent doing `qa.login(); qa.goto("/business/dashboard")`
+        records every assertion against the signup wizard. Delegates to
+        `qa_vendor.qarun_login_as_vendor` so this module stays under length.
+        """
+        return _qarun_login_as_vendor(self, business_name=business_name)
+
     def goto(self, path: str, *, wait_ms: int = 8000):
+        """Navigate to `path` and detect silent middleware redirects.
+
+        `BusinessProtectedLayout` (and other guards) can bounce the browser
+        to a wizard while still resolving the navigation, so every downstream
+        `expect_*` ends up framing the wrong page. Compare requested vs
+        landed paths: if they diverge (with `/foo/` as the sentinel so
+        `/parents` doesn't false-match `/parents-promo`), record ONE
+        nav-FAIL with ONE screenshot of the redirect destination and flip
+        `_nav_blocked` so subsequent asserts short-circuit with
+        `[blocked: nav redirected]` instead of N identical wizard shots.
+        """
         url = path if path.startswith("http") else f"{self.base}{path}"
         self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
         self.page.wait_for_timeout(wait_ms)
+        target = path if path.startswith("/") else urlparse(url).path
+        landed = urlparse(self.page.url).path
+        if landed != target and not (landed + "/").startswith(target + "/"):
+            self._nav_blocked = True
+            stem = f"{self._n + 1:02d}-FAIL-navigation-{_slug(path) or 'goto'}"
+            shot = os.path.join(self.evidence_dir, f"{stem}.png")
+            with contextlib.suppress(Exception):
+                self.page.screenshot(path=shot, full_page=False)
+            self._n += 1
+            self.checks.append({
+                "name": f"navigation {path}",
+                "pass": False,
+                "detail": f"requested {target}, landed on {landed} — middleware redirected",
+                "screenshots": [os.path.basename(shot)] if os.path.exists(shot) else [],
+            })
         return self
 
     def find_activity(self, predicate, **kw):
@@ -452,6 +382,10 @@ class QaRun:
         return True, ""
 
     def _record(self, label: str, ok: bool, detail: str, loc, *, screenshot: bool = True):
+        if self._nav_blocked:
+            self.checks.append({"name": label, "pass": False,
+                                "detail": f"{detail} [blocked: nav redirected]", "screenshots": []})
+            return
         self._n += 1
         stem = f"{self._n:02d}-{'pass' if ok else 'FAIL'}-{_slug(label) or f'check{self._n}'}"
         shots: list[str] = []
@@ -613,5 +547,4 @@ def write_report(evidence_dir: str, ticket: str, checks: list[dict], notes: str 
         fh.write("\n".join(lines) + "\n")
     with open(os.path.join(evidence_dir, "verdict.json"), "w") as fh:
         json.dump({"ticket": ticket, "pass": all_pass, "blocked": blocked, "checks": checks}, fh, indent=2)
-    return all_pass
     return all_pass
