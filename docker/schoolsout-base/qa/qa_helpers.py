@@ -171,10 +171,12 @@ def provision_account(api_base: str = STAGING_API):
     return email, access, refresh, user
 
 
-# Vendor + dev-server helpers live in sibling modules so this file stays under
-# the project length limit; re-export keeps `from qa_helpers import ...` single-stop.
+# Vendor + dev-server + session helpers live in sibling modules so this file
+# stays under the project length limit; re-export keeps
+# `from qa_helpers import ...` single-stop.
 from qa_vendor import provision_vendor_account, qarun_login_as_vendor as _qarun_login_as_vendor  # noqa: E402,F401
 from qa_devserver import dev_server, _resolve_app_dir  # noqa: E402,F401
+from qa_session import inject_session  # noqa: E402,F401
 
 
 def api_get(path: str, access_token: str, api_base: str = STAGING_API):
@@ -200,39 +202,6 @@ def find_activity(predicate, access_token: str, *, api_base: str = STAGING_API, 
         if predicate(a):
             return a
     return None
-
-
-# --------------------------------------------------------------------------- #
-# browser session injection
-# --------------------------------------------------------------------------- #
-def inject_session(page, base_url: str, access_token: str, refresh_token: str, user: dict):
-    """Write the Zustand persist blob into localStorage and reload so the app
-    rehydrates as an authenticated parent. `page` is a Playwright sync Page."""
-    session = json.dumps(
-        {
-            "state": {
-                "user": user,
-                "accessToken": access_token,
-                "refreshToken": refresh_token,
-                "isAuthenticated": True,
-                "isPromoDismissed": False,
-                "pendingClaimVendorId": None,
-                "pendingClaimRequestId": None,
-            },
-            "version": 0,
-        }
-    )
-    page.goto(f"{base_url}/parents", wait_until="domcontentloaded", timeout=45000)
-    page.wait_for_timeout(1500)
-    page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["session-storage", session])
-    page.reload(wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
-    return bool(
-        page.evaluate(
-            "() => { try { return JSON.parse(localStorage.getItem('session-storage')||'{}')"
-            ".state?.isAuthenticated || false } catch (e) { return false } }"
-        )
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -275,8 +244,12 @@ class QaRun:
         """Provision a fresh staging parents account and rehydrate the app as
         that user. Stores tokens on `self` for `find_activity`."""
         self.email, self.access, self.refresh, self.user = provision_account(self.api_base)
-        if not inject_session(self.page, self.base, self.access, self.refresh, self.user):
-            raise RuntimeError("inject_session failed — staging auth did not stick (CORS port? token expiry?)")
+        ok, debug = inject_session(self.page, self.base, self.access, self.refresh, self.user)
+        if not ok:
+            raise RuntimeError(
+                "inject_session failed — staging auth did not stick "
+                f"(CORS port? token expiry?) debug={debug}"
+            )
         return self
 
     def login_as_vendor(self, *, business_name: str = "QA Bot Co"):
@@ -289,6 +262,26 @@ class QaRun:
         `qa_vendor.qarun_login_as_vendor` so this module stays under length.
         """
         return _qarun_login_as_vendor(self, business_name=business_name)
+
+    def try_login_as_vendor(self, *, business_name: str = "QA Bot Co"):
+        """Non-raising sibling of `login_as_vendor`. Returns `(ok, err)`.
+
+        The SODEV-765 run showed the failure mode without this: when vendor
+        promotion failed, the agent wrote a hand-typed BLOCKED note that
+        `verdict.json` never saw. `try_*` lets `qa_check.py` do
+            ok, err = qa.try_login_as_vendor()
+            if not ok: qa.note("setup blocked", False, err); return
+        so the BLOCKED state is recorded as a real (failed) check and the
+        verdict reflects it. KeyboardInterrupt/SystemExit propagate so an
+        operator can still ^C the harness.
+        """
+        try:
+            self.login_as_vendor(business_name=business_name)
+            return True, None
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            return False, str(e)
 
     def goto(self, path: str, *, wait_ms: int = 8000):
         """Navigate to `path` and detect silent middleware redirects.
@@ -308,6 +301,17 @@ class QaRun:
         target = path if path.startswith("/") else urlparse(url).path
         landed = urlparse(self.page.url).path
         if landed != target and not (landed + "/").startswith(target + "/"):
+            if self._nav_blocked:
+                self.checks.append({
+                    "name": f"navigation {path}",
+                    "pass": False,
+                    "detail": (
+                        f"requested {target}, landed on {landed} "
+                        f"[blocked: nav already redirected — first nav-FAIL screenshot is the proof]"
+                    ),
+                    "screenshots": [],
+                })
+                return self
             self._nav_blocked = True
             stem = f"{self._n + 1:02d}-FAIL-navigation-{_slug(path) or 'goto'}"
             shot = os.path.join(self.evidence_dir, f"{stem}.png")

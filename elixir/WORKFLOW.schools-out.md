@@ -350,6 +350,28 @@ Skipping this artifact is a hard stop, not a style preference.
       destination instead of N identical wizard screenshots — but the right
       move is to use the vendor login from the start.
 
+      **If setup itself can fail, use the `try_*` variant.** The SODEV-765
+      run showed the failure mode: vendor promotion raised, the agent
+      hand-typed a "BLOCKED — inject_session failed" note in the report,
+      and `verdict.json` never recorded it (the verdict still said PASS).
+      `qa.try_login_as_vendor()` returns `(ok, err)` instead of raising,
+      so the failure becomes a real `note()` and the verdict reflects it:
+
+      ```python
+      with qa_run("fe-next-app", "{{ issue.identifier }}") as qa:
+          ok, err = qa.try_login_as_vendor(business_name="QA Co")
+          if not ok:
+              qa.note("setup - vendor promotion", False, f"BLOCKED: {err}")
+              sys.exit(1)
+          qa.goto("/business/<page-under-test>")
+          # ... expect_* calls
+      ```
+
+      Never hand-type a BLOCKED line into the report. The harness owns
+      that field — either through `qa.note(..., False, "BLOCKED: ...")`
+      mid-run, or through `write_report(..., notes="BLOCKED: ...")` when
+      `qa_run` itself never yielded.
+
       **AC coverage rules (every AC must be accounted for):**
       - **Link/href ACs** (`"renders a link to X"`, `"links to /path"`):
         `expect_visible` alone is insufficient — the element may render but
