@@ -176,12 +176,7 @@ defmodule SymphonyElixir.Orchestrator do
 
               state
               |> complete_issue(issue_id)
-              |> schedule_issue_retry(issue_id, 1, %{
-                identifier: running_entry.identifier,
-                delay_type: :continuation,
-                worker_host: Map.get(running_entry, :worker_host),
-                workspace_path: Map.get(running_entry, :workspace_path)
-              })
+              |> maybe_schedule_continuation_retry(issue_id, running_entry)
 
             _ ->
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
@@ -1239,6 +1234,28 @@ defmodule SymphonyElixir.Orchestrator do
   defp failure_retry_delay(attempt) do
     max_delay_power = min(attempt - 1, 10)
     min(@failure_retry_base_ms * (1 <<< max_delay_power), Config.settings!().agent.max_retry_backoff_ms)
+  end
+
+  # When a PR is already attached and the agent has already had one continuation
+  # retry (attempt >= 1), additional retries cannot help — the agent is stuck on
+  # CI failures it did not cause (e.g. infra rate limits). Stop the loop.
+  # The first continuation retry (attempt == 0) is preserved for the SODEV-765
+  # class: agent ships PR, CI fails due to code, one retry to fix.
+  defp maybe_schedule_continuation_retry(state, issue_id, running_entry) do
+    has_pr = has_pr_attachment?(Map.get(running_entry, :issue, %{}))
+    current_attempt = Map.get(running_entry, :retry_attempt, 0)
+
+    if has_pr and current_attempt >= 1 do
+      Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR attached and attempt=#{current_attempt} >= 1; agent cannot resolve infra CI failures")
+      state
+    else
+      schedule_issue_retry(state, issue_id, 1, %{
+        identifier: running_entry.identifier,
+        delay_type: :continuation,
+        worker_host: Map.get(running_entry, :worker_host),
+        workspace_path: Map.get(running_entry, :workspace_path)
+      })
+    end
   end
 
   defp normalize_retry_attempt(attempt) when is_integer(attempt) and attempt > 0, do: attempt
