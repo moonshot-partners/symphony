@@ -281,4 +281,44 @@ defmodule SymphonyElixir.WorkpadTest do
     updated = Workpad.maybe_sync(running_entry(), update, self())
     assert updated.last_agent_text == "first\nsecond"
   end
+
+  test "turn_failed update stores last_error_reason from details[error]" do
+    update = %{
+      event: :turn_failed,
+      details: %{"turn_id" => "turn-abc", "error" => "You've hit your limit · resets May 16, 2am (UTC)"},
+      payload: %{"method" => "turn/failed", "params" => %{}},
+      raw: "",
+      timestamp: DateTime.utc_now()
+    }
+
+    updated = Workpad.maybe_sync(running_entry(), update, self())
+    assert updated.last_error_reason == "You've hit your limit · resets May 16, 2am (UTC)"
+  end
+
+  test "turn_failed sync renders Error section in workpad body" do
+    update = %{
+      event: :turn_failed,
+      details: %{"turn_id" => "turn-abc", "error" => "Rate limit hit"},
+      payload: %{"method" => "turn/failed", "params" => %{}},
+      raw: "",
+      timestamp: DateTime.utc_now()
+    }
+
+    entry = running_entry(%{workpad_comment_id: "memory-comment-issue-wp", last_error_reason: "Rate limit hit"})
+    Workpad.maybe_sync(entry, update, self())
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
+    assert body =~ "### Error"
+    assert body =~ "Rate limit hit"
+  end
+
+  test "normal turn_completed does not render Error section" do
+    update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+    entry = running_entry(%{workpad_comment_id: "memory-comment-issue-wp"})
+    Workpad.maybe_sync(entry, update, self())
+
+    assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
+    refute body =~ "### Error"
+  end
 end

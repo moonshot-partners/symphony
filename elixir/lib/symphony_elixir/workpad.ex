@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Workpad do
   @spec maybe_sync(map(), map(), pid()) :: map()
   def maybe_sync(running_entry, update, reply_to) when is_map(running_entry) and is_map(update) do
     running_entry = update_last_agent_text(running_entry, update)
+    running_entry = update_last_error_reason(running_entry, update)
 
     cond do
       not enabled?() ->
@@ -97,6 +98,19 @@ defmodule SymphonyElixir.Workpad do
       text -> Map.put(running_entry, :last_agent_text, text)
     end
   end
+
+  defp update_last_error_reason(running_entry, %{event: :turn_failed, details: details})
+       when is_map(details) do
+    case Map.get(details, "error") do
+      error when is_binary(error) and error != "" ->
+        Map.put(running_entry, :last_error_reason, error)
+
+      _ ->
+        running_entry
+    end
+  end
+
+  defp update_last_error_reason(running_entry, _update), do: running_entry
 
   defp extract_agent_text(%{payload: payload}) when is_map(payload) do
     case payload do
@@ -212,6 +226,7 @@ defmodule SymphonyElixir.Workpad do
     in_tok = Map.get(running_entry, :agent_input_tokens, 0)
     out_tok = Map.get(running_entry, :agent_output_tokens, 0)
     total_tok = Map.get(running_entry, :agent_total_tokens, 0)
+    error_reason = Map.get(running_entry, :last_error_reason)
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
     """
@@ -229,7 +244,7 @@ defmodule SymphonyElixir.Workpad do
     ### Latest agent message
 
     #{format_last_text(last_text)}
-
+    #{format_error_section(error_reason)}
     ### Tokens
 
     `in=#{in_tok} out=#{out_tok} total=#{total_tok}`
@@ -239,6 +254,13 @@ defmodule SymphonyElixir.Workpad do
   defp format_event(nil), do: "(none)"
   defp format_event(event) when is_atom(event), do: Atom.to_string(event)
   defp format_event(event), do: inspect(event)
+
+  defp format_error_section(nil), do: ""
+  defp format_error_section(""), do: ""
+
+  defp format_error_section(reason) when is_binary(reason) do
+    "\n### Error\n\n> #{reason}\n"
+  end
 
   defp format_last_text(nil), do: "_(no agent text yet)_"
   defp format_last_text(""), do: "_(no agent text yet)_"
