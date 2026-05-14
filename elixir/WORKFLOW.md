@@ -147,6 +147,38 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - Operate autonomously end-to-end unless blocked by missing requirements, secrets, or permissions.
 - Use the blocked-access escape hatch only for true external blockers (missing required tools/auth) after exhausting documented fallbacks.
 
+## Read repo conventions (mandatory, before any code)
+
+Before any `Edit` / `Write` / mutating `Bash` call: read every
+repo-level instruction file in the workspace. These files override
+framework defaults and any phrasing in the ticket description.
+
+Run, at turn 1:
+
+```
+cat AGENTS.md 2>/dev/null
+cat CLAUDE.md 2>/dev/null
+```
+
+Also read any nested `AGENTS.md` / `CLAUDE.md` inside subdirectories
+you intend to touch.
+
+For every file path the ticket asks you to **create**, first run `ls`
+on it. If the file already exists, **extend** it; do not recreate it
+under a different name. Example: if the ticket says "create
+`src/middleware.ts`" but the repo ships `src/proxy.ts` (a documented
+convention), add the new logic to `src/proxy.ts`.
+
+Precedence, highest first:
+1. Repo `AGENTS.md` / `CLAUDE.md` (closest to the file you edit wins).
+2. This workflow.
+3. The ticket description.
+4. Framework defaults.
+
+A ticket that conflicts with `AGENTS.md`/`CLAUDE.md` is a ticket bug.
+Note the conflict in your progress workpad and follow the repo
+convention.
+
 ## Quality Gates (mandatory)
 
 These rules are non-negotiable for every implementation step. They are enforced both by the workspace pre-commit hook and by reviewer expectation.
