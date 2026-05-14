@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.Orchestrator.State
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -20,28 +21,6 @@ defmodule SymphonyElixir.Orchestrator do
     total_tokens: 0,
     seconds_running: 0
   }
-
-  defmodule State do
-    @moduledoc """
-    Runtime state for the orchestrator polling loop.
-    """
-
-    defstruct [
-      :poll_interval_ms,
-      :max_concurrent_agents,
-      :next_poll_due_at_ms,
-      :poll_check_in_progress,
-      :tick_timer_ref,
-      :tick_token,
-      running: %{},
-      completed: MapSet.new(),
-      claimed: MapSet.new(),
-      retry_attempts: %{},
-      workpads: %{},
-      agent_totals: nil,
-      agent_rate_limits: nil
-    ]
-  end
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -393,35 +372,15 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp maybe_transition_merged_pr(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    pr_urls =
-      issue.repos
-      |> Enum.map(fn repo -> get_in(repo, [:pr, :url]) end)
-      |> Enum.filter(&is_binary/1)
-
-    if Enum.any?(pr_urls, pr_check_fn) do
-      Logger.info("PR merged for #{issue.identifier}; transitioning to #{on_merge_state}")
-      Task.start(fn -> apply_state_transition(issue, on_merge_state) end)
-    end
+    SymphonyElixir.Orchestrator.PrMerge.maybe_transition(
+      issue,
+      on_merge_state,
+      pr_check_fn,
+      &apply_state_transition/2
+    )
   end
 
-  defp pr_merged?(pr_url) when is_binary(pr_url) do
-    case parse_github_pr_url(pr_url) do
-      {:ok, owner, repo, number} ->
-        case System.cmd(
-               "gh",
-               ["pr", "view", "#{number}", "--repo", "#{owner}/#{repo}", "--json", "merged", "--jq", ".merged"],
-               stderr_to_stdout: true
-             ) do
-          {"true\n", 0} -> true
-          _ -> false
-        end
-
-      :error ->
-        false
-    end
-  end
-
-  defp pr_merged?(_), do: false
+  defp pr_merged?(pr_url), do: SymphonyElixir.Orchestrator.PrMerge.merged?(pr_url)
 
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
