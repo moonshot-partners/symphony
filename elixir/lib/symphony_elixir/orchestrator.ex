@@ -407,36 +407,15 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
-  @spec sort_issues_for_dispatch_for_test([Issue.t()]) :: [Issue.t()]
-  def sort_issues_for_dispatch_for_test(issues) when is_list(issues) do
-    sort_issues_for_dispatch(issues)
-  end
-
-  @doc false
   @spec apply_state_transition_for_test(Issue.t(), String.t() | nil) :: :ok
   def apply_state_transition_for_test(%Issue{} = issue, state_name) do
     apply_state_transition(issue, state_name)
   end
 
   @doc false
-  @spec parse_github_pr_url_for_test(term()) ::
-          {:ok, String.t(), String.t(), pos_integer()} | :error
-  def parse_github_pr_url_for_test(url), do: parse_github_pr_url(url)
-
-  @doc false
   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
-  end
-
-  @doc false
-  def extract_token_delta_for_test(running_entry, update) do
-    TokenMetrics.extract_token_delta(running_entry, update)
-  end
-
-  @doc false
-  def maybe_transition_merged_pr_for_test(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    maybe_transition_merged_pr(issue, on_merge_state, pr_check_fn)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
