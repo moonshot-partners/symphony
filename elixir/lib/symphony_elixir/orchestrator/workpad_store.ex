@@ -25,10 +25,13 @@ defmodule SymphonyElixir.Orchestrator.WorkpadStore do
     end
   end
 
-  @spec save(Path.t(), %{String.t() => String.t()}) :: :ok
+  @spec save(Path.t(), %{String.t() => String.t()}) :: :ok | {:error, term()}
   def save(path, workpads) when is_binary(path) and is_map(workpads) do
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, Jason.encode!(workpads))
-    :ok
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(path, Jason.encode!(workpads)) do
+      :ok
+    else
+      {:error, _} = err -> err
+    end
   end
 end

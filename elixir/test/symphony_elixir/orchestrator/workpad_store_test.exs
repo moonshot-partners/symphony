@@ -43,4 +43,12 @@ defmodule SymphonyElixir.Orchestrator.WorkpadStoreTest do
     File.write!(path, ~s({"GOOD":"comment-1","BAD":42,"ALSO_GOOD":"comment-2"}))
     assert WorkpadStore.load(path) == %{"GOOD" => "comment-1", "ALSO_GOOD" => "comment-2"}
   end
+
+  test "save/2 returns {:error, reason} instead of raising when path is unwritable" do
+    # /dev/null cannot have a child directory created under it — File.mkdir_p
+    # blows up. Previously this raised a File.Error that crashed the
+    # Orchestrator GenServer; defensive save must surface a tagged error.
+    unwritable = "/dev/null/blocked/workpads.json"
+    assert {:error, _reason} = WorkpadStore.save(unwritable, %{"A" => "1"})
+  end
 end

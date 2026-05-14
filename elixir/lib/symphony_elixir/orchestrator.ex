@@ -68,7 +68,23 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp persist_workpads(%{workpads: workpads} = state) do
-    WorkpadStore.save(workpads_path(), workpads)
+    case WorkpadStore.save(workpads_path(), workpads) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        # Disk persistence failed (e.g. permission denied on
+        # workpads.json). Keep the in-memory map so the GenServer survives
+        # — the alternative (raise) crashes the Orchestrator, loses
+        # state.running, and the supervisor restart re-dispatches every
+        # ticket in Linear "In Development". Logged so the operator can
+        # repair the file ownership/path.
+        Logger.warning(
+          "WorkpadStore.save failed (reason=#{inspect(reason)}); " <>
+            "continuing with in-memory workpads only"
+        )
+    end
+
     state
   end
 
