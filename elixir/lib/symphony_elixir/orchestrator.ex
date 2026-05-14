@@ -9,7 +9,9 @@ defmodule SymphonyElixir.Orchestrator do
 
   alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, TokenMetrics}
+  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, TokenMetrics, WorkpadStore}
+
+  @default_workpads_path "/opt/symphony/state/workpads.json"
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -40,6 +42,7 @@ defmodule SymphonyElixir.Orchestrator do
       poll_check_in_progress: false,
       tick_timer_ref: nil,
       tick_token: nil,
+      workpads: WorkpadStore.load(workpads_path()),
       agent_totals: @empty_agent_totals,
       agent_rate_limits: nil
     }
@@ -48,6 +51,15 @@ defmodule SymphonyElixir.Orchestrator do
     state = schedule_tick(state, 0)
 
     {:ok, state}
+  end
+
+  defp workpads_path do
+    Application.get_env(:symphony_elixir, :workpads_path, @default_workpads_path)
+  end
+
+  defp persist_workpads(%{workpads: workpads} = state) do
+    WorkpadStore.save(workpads_path(), workpads)
+    state
   end
 
   @impl true
@@ -196,7 +208,9 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:workpad_comment_created, issue_id, comment_id}, %{running: running} = state)
       when is_binary(issue_id) and is_binary(comment_id) do
-    state = %{state | workpads: Map.put(state.workpads, issue_id, comment_id)}
+    state =
+      %{state | workpads: Map.put(state.workpads, issue_id, comment_id)}
+      |> persist_workpads()
 
     case Map.get(running, issue_id) do
       nil ->
@@ -537,13 +551,15 @@ defmodule SymphonyElixir.Orchestrator do
             state.workpads
           end
 
-        %{
+        new_state = %{
           state
           | running: Map.delete(state.running, issue_id),
             claimed: MapSet.delete(state.claimed, issue_id),
             retry_attempts: Map.delete(state.retry_attempts, issue_id),
             workpads: workpads
         }
+
+        if cleanup_workspace, do: persist_workpads(new_state), else: new_state
 
       _ ->
         release_issue_claim(state, issue_id)
