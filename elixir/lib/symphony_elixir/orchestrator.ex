@@ -277,6 +277,27 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  def handle_info({:workpad_update_failed, issue_id, _comment_id, _reason}, state)
+      when is_binary(issue_id) do
+    # The comment no longer exists in Linear (e.g. deleted after a ticket reset).
+    # Clear the stale id so the next sync dispatches a CREATE instead of
+    # repeatedly failing to UPDATE a ghost comment.
+    state = %{state | workpads: Map.delete(state.workpads, issue_id)} |> persist_workpads()
+
+    case Map.get(state.running, issue_id) do
+      nil ->
+        {:noreply, state}
+
+      running_entry ->
+        running_entry =
+          running_entry
+          |> Map.delete(:workpad_comment_id)
+          |> Map.delete(:workpad_creating)
+
+        {:noreply, %{state | running: Map.put(state.running, issue_id, running_entry)}}
+    end
+  end
+
   def handle_info({:workpad_update_failed, _issue_id, _comment_id, _reason}, state) do
     {:noreply, state}
   end
