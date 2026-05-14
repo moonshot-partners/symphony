@@ -152,6 +152,40 @@ integration branch.
 If a repo not listed above ever enters the whitelist, the table must be
 updated in the same diff. Do not guess the base branch.
 
+## Step 0 — Read repo conventions (mandatory, before any code)
+
+Before writing `understanding.md`, before any `Edit` / `Write`, before
+branching: read every repo-level instruction file in the workspace.
+These files override any framework default and any phrasing in the
+Linear description.
+
+Run, at turn 1, for each repo you may touch (root and any subdir the
+ticket targets):
+
+```
+cat AGENTS.md 2>/dev/null
+cat CLAUDE.md 2>/dev/null
+ls AGENTS.md CLAUDE.md 2>/dev/null
+```
+
+For every file path the Linear ticket asks you to **create**, first run
+`ls` on it. If the file already exists, you **extend** it; you do not
+recreate it under a different name. Example: if the ticket says
+"create `src/middleware.ts`" but the repo ships `src/proxy.ts` (Next.js
+16's new convention, documented in `CLAUDE.md`/`AGENTS.md`), add the
+new logic to `src/proxy.ts` and report the deviation in your
+`understanding.md` rather than creating `middleware.ts`.
+
+Precedence, highest first:
+1. Repo `AGENTS.md` / `CLAUDE.md` (closest to the file you edit wins).
+2. This workflow.
+3. The Linear ticket description.
+4. Framework defaults.
+
+A ticket that conflicts with `AGENTS.md`/`CLAUDE.md` is a ticket bug.
+Note the conflict in `understanding.md` `root_cause` and follow the
+repo convention.
+
 ## Mandatory turn-1 workpad post: AC Extracted
 
 Your very first turn-end message — the one Symphony posts to the Linear
