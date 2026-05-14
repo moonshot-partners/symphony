@@ -9,9 +9,11 @@ defmodule SymphonyElixir.Orchestrator do
 
   alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, TokenMetrics, WorkpadStore}
+  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, StatusFile, TokenMetrics, WorkpadStore}
 
   @default_workpads_path "/opt/symphony/state/workpads.json"
+  @default_status_path "/opt/symphony/state/status.json"
+  @default_drain_flag_path "/opt/symphony/state/drain.flag"
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -57,9 +59,29 @@ defmodule SymphonyElixir.Orchestrator do
     Application.get_env(:symphony_elixir, :workpads_path, @default_workpads_path)
   end
 
+  defp status_path do
+    Application.get_env(:symphony_elixir, :status_path, @default_status_path)
+  end
+
+  defp drain_flag_path do
+    Application.get_env(:symphony_elixir, :drain_flag_path, @default_drain_flag_path)
+  end
+
   defp persist_workpads(%{workpads: workpads} = state) do
     WorkpadStore.save(workpads_path(), workpads)
     state
+  end
+
+  defp sync_drain_status(%State{} = state, status_path, drain_flag_path) do
+    drain = StatusFile.drain_requested?(drain_flag_path)
+
+    if drain and not state.drain do
+      Logger.info("Drain requested via #{drain_flag_path}; pausing dispatch of new agents")
+    end
+
+    new_state = %{state | drain: drain}
+    StatusFile.save(status_path, %{running: Map.keys(new_state.running), drain: drain})
+    new_state
   end
 
   @impl true
@@ -102,6 +124,7 @@ defmodule SymphonyElixir.Orchestrator do
     state =
       try do
         state = refresh_runtime_config(state)
+        state = sync_drain_status(state, status_path(), drain_flag_path())
         maybe_dispatch(state)
       rescue
         e ->
@@ -287,6 +310,14 @@ defmodule SymphonyElixir.Orchestrator do
     state = reconcile_running_issues(state)
     state = reconcile_pr_merged_issues(state)
 
+    if state.drain do
+      state
+    else
+      do_dispatch(state)
+    end
+  end
+
+  defp do_dispatch(%State{} = state) do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          true <- available_slots(state) > 0 do
@@ -426,6 +457,16 @@ defmodule SymphonyElixir.Orchestrator do
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
   end
+
+  @doc false
+  @spec sync_drain_status_for_test(term(), Path.t(), Path.t()) :: term()
+  def sync_drain_status_for_test(%State{} = state, status_path, drain_flag_path) do
+    sync_drain_status(state, status_path, drain_flag_path)
+  end
+
+  @doc false
+  @spec maybe_dispatch_for_test(term()) :: term()
+  def maybe_dispatch_for_test(%State{} = state), do: maybe_dispatch(state)
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
