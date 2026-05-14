@@ -65,8 +65,9 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
 
     refute Map.has_key?(state.running, issue_id)
     assert MapSet.member?(state.completed, issue_id)
+
     refute Map.has_key?(state.retry_attempts, issue_id),
-      "expected no continuation retry but got: #{inspect(state.retry_attempts[issue_id])}"
+           "expected no continuation retry but got: #{inspect(state.retry_attempts[issue_id])}"
   end
 
   test "no continuation retry when PR attached and retry_attempt >= 2" do
@@ -111,7 +112,7 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
     state = :sys.get_state(pid)
 
     assert %{attempt: 1} = state.retry_attempts[issue_id],
-      "expected one continuation retry (SODEV-765 protection) but got: #{inspect(state.retry_attempts[issue_id])}"
+           "expected one continuation retry (SODEV-765 protection) but got: #{inspect(state.retry_attempts[issue_id])}"
   end
 
   test "continuation retry scheduled when no PR attached" do
@@ -134,7 +135,7 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
     state = :sys.get_state(pid)
 
     assert %{attempt: 1} = state.retry_attempts[issue_id],
-      "expected continuation retry when no PR attached"
+           "expected continuation retry when no PR attached"
   end
 
   test "abnormal exit retry path unchanged (crash with PR attached still retries)" do
@@ -157,6 +158,6 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
     state = :sys.get_state(pid)
 
     assert %{attempt: 2, error: "agent exited: :boom"} = state.retry_attempts[issue_id],
-      "crash retry path must be unchanged by PR cap"
+           "crash retry path must be unchanged by PR cap"
   end
 end
