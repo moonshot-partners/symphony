@@ -54,7 +54,5 @@ async def test_ignores_non_write_tools(tmp_path: Path) -> None:
 
 
 async def test_missing_file_is_noop(tmp_path: Path) -> None:
-    out = await file_size_check(
-        _hook_input(tmp_path / "gone.py"), None, {"signal": None}
-    )
+    out = await file_size_check(_hook_input(tmp_path / "gone.py"), None, {"signal": None})
     assert out.get("decision") != "block"
