@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, TokenMetrics}
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -20,28 +21,6 @@ defmodule SymphonyElixir.Orchestrator do
     total_tokens: 0,
     seconds_running: 0
   }
-
-  defmodule State do
-    @moduledoc """
-    Runtime state for the orchestrator polling loop.
-    """
-
-    defstruct [
-      :poll_interval_ms,
-      :max_concurrent_agents,
-      :next_poll_due_at_ms,
-      :poll_check_in_progress,
-      :tick_timer_ref,
-      :tick_token,
-      running: %{},
-      completed: MapSet.new(),
-      claimed: MapSet.new(),
-      retry_attempts: %{},
-      workpads: %{},
-      agent_totals: nil,
-      agent_rate_limits: nil
-    ]
-  end
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -393,35 +372,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp maybe_transition_merged_pr(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    pr_urls =
-      issue.repos
-      |> Enum.map(fn repo -> get_in(repo, [:pr, :url]) end)
-      |> Enum.filter(&is_binary/1)
-
-    if Enum.any?(pr_urls, pr_check_fn) do
-      Logger.info("PR merged for #{issue.identifier}; transitioning to #{on_merge_state}")
-      Task.start(fn -> apply_state_transition(issue, on_merge_state) end)
-    end
+    PrMerge.maybe_transition(issue, on_merge_state, pr_check_fn, &apply_state_transition/2)
   end
 
-  defp pr_merged?(pr_url) when is_binary(pr_url) do
-    case parse_github_pr_url(pr_url) do
-      {:ok, owner, repo, number} ->
-        case System.cmd(
-               "gh",
-               ["pr", "view", "#{number}", "--repo", "#{owner}/#{repo}", "--json", "merged", "--jq", ".merged"],
-               stderr_to_stdout: true
-             ) do
-          {"true\n", 0} -> true
-          _ -> false
-        end
-
-      :error ->
-        false
-    end
-  end
-
-  defp pr_merged?(_), do: false
+  defp pr_merged?(pr_url), do: PrMerge.merged?(pr_url)
 
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
@@ -448,36 +402,15 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
-  @spec sort_issues_for_dispatch_for_test([Issue.t()]) :: [Issue.t()]
-  def sort_issues_for_dispatch_for_test(issues) when is_list(issues) do
-    sort_issues_for_dispatch(issues)
-  end
-
-  @doc false
   @spec apply_state_transition_for_test(Issue.t(), String.t() | nil) :: :ok
   def apply_state_transition_for_test(%Issue{} = issue, state_name) do
     apply_state_transition(issue, state_name)
   end
 
   @doc false
-  @spec parse_github_pr_url_for_test(term()) ::
-          {:ok, String.t(), String.t(), pos_integer()} | :error
-  def parse_github_pr_url_for_test(url), do: parse_github_pr_url(url)
-
-  @doc false
   @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
-  end
-
-  @doc false
-  def extract_token_delta_for_test(running_entry, update) do
-    extract_token_delta(running_entry, update)
-  end
-
-  @doc false
-  def maybe_transition_merged_pr_for_test(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    maybe_transition_merged_pr(issue, on_merge_state, pr_check_fn)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
@@ -670,14 +603,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp apply_state_transition(_issue, _state_name), do: :ok
 
-  defp parse_github_pr_url(url) when is_binary(url) do
-    case Regex.run(~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}, url) do
-      [_, owner, repo, number] -> {:ok, owner, repo, String.to_integer(number)}
-      _ -> :error
-    end
-  end
-
-  defp parse_github_pr_url(_), do: :error
+  defp parse_github_pr_url(url), do: PrUrl.parse(url)
 
   defp apply_github_pr_label(%Issue{repos: repos}) do
     repos
@@ -821,25 +747,7 @@ defmodule SymphonyElixir.Orchestrator do
     end)
   end
 
-  defp sort_issues_for_dispatch(issues) when is_list(issues) do
-    Enum.sort_by(issues, fn
-      %Issue{} = issue ->
-        {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}
-
-      _ ->
-        {priority_rank(nil), issue_created_at_sort_key(nil), ""}
-    end)
-  end
-
-  defp priority_rank(priority) when is_integer(priority) and priority in 1..4, do: priority
-  defp priority_rank(_priority), do: 5
-
-  defp issue_created_at_sort_key(%Issue{created_at: %DateTime{} = created_at}) do
-    DateTime.to_unix(created_at, :microsecond)
-  end
-
-  defp issue_created_at_sort_key(%Issue{}), do: 9_223_372_036_854_775_807
-  defp issue_created_at_sort_key(_issue), do: 9_223_372_036_854_775_807
+  defp sort_issues_for_dispatch(issues), do: Dispatch.sort(issues)
 
   defp should_dispatch_issue?(
          %Issue{} = issue,
@@ -1471,7 +1379,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp integrate_agent_update(running_entry, %{event: event, timestamp: timestamp} = update) do
-    token_delta = extract_token_delta(running_entry, update)
+    token_delta = TokenMetrics.extract_token_delta(running_entry, update)
     agent_input_tokens = Map.get(running_entry, :agent_input_tokens, 0)
     agent_output_tokens = Map.get(running_entry, :agent_output_tokens, 0)
     agent_total_tokens = Map.get(running_entry, :agent_total_tokens, 0)
@@ -1624,7 +1532,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp apply_agent_token_delta(state, _token_delta), do: state
 
   defp apply_agent_rate_limits(%State{} = state, update) when is_map(update) do
-    case extract_rate_limits(update) do
+    case TokenMetrics.extract_rate_limits(update) do
       %{} = rate_limits ->
         %{state | agent_rate_limits: rate_limits}
 
@@ -1651,314 +1559,9 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp extract_token_delta(running_entry, %{event: _, timestamp: _} = update) do
-    running_entry = running_entry || %{}
-    usage = extract_token_usage(update)
-
-    {
-      compute_token_delta(
-        running_entry,
-        :input,
-        usage,
-        :agent_last_reported_input_tokens
-      ),
-      compute_token_delta(
-        running_entry,
-        :output,
-        usage,
-        :agent_last_reported_output_tokens
-      ),
-      compute_token_delta(
-        running_entry,
-        :total,
-        usage,
-        :agent_last_reported_total_tokens
-      )
-    }
-    |> Tuple.to_list()
-    |> then(fn [input, output, total] ->
-      # Anthropic SDK usage has no total_tokens field — derive from input + output.
-      effective_total =
-        if is_nil(get_token_usage(usage, :total)) do
-          %{delta: input.delta + output.delta, reported: input.reported + output.reported}
-        else
-          total
-        end
-
-      %{
-        input_tokens: input.delta,
-        output_tokens: output.delta,
-        total_tokens: effective_total.delta,
-        input_reported: input.reported,
-        output_reported: output.reported,
-        total_reported: effective_total.reported
-      }
-    end)
-  end
-
-  defp compute_token_delta(running_entry, token_key, usage, reported_key) do
-    next_total = get_token_usage(usage, token_key)
-    prev_reported = Map.get(running_entry, reported_key, 0)
-
-    delta =
-      if is_integer(next_total) and next_total >= prev_reported do
-        next_total - prev_reported
-      else
-        0
-      end
-
-    %{
-      delta: max(delta, 0),
-      reported: if(is_integer(next_total), do: next_total, else: prev_reported)
-    }
-  end
-
-  defp extract_token_usage(update) do
-    payloads = [
-      update[:usage],
-      Map.get(update, "usage"),
-      Map.get(update, :usage),
-      update[:payload],
-      Map.get(update, "payload"),
-      update
-    ]
-
-    Enum.find_value(payloads, &absolute_token_usage_from_payload/1) ||
-      Enum.find_value(payloads, &turn_completed_usage_from_payload/1) ||
-      %{}
-  end
-
-  defp extract_rate_limits(update) do
-    rate_limits_from_payload(update[:rate_limits]) ||
-      rate_limits_from_payload(Map.get(update, "rate_limits")) ||
-      rate_limits_from_payload(Map.get(update, :rate_limits)) ||
-      rate_limits_from_payload(update[:payload]) ||
-      rate_limits_from_payload(Map.get(update, "payload")) ||
-      rate_limits_from_payload(update)
-  end
-
-  defp absolute_token_usage_from_payload(payload) when is_map(payload) do
-    absolute_paths = [
-      ["params", "msg", "payload", "info", "total_token_usage"],
-      [:params, :msg, :payload, :info, :total_token_usage],
-      ["params", "msg", "info", "total_token_usage"],
-      [:params, :msg, :info, :total_token_usage],
-      ["params", "tokenUsage", "total"],
-      [:params, :tokenUsage, :total],
-      ["tokenUsage", "total"],
-      [:tokenUsage, :total]
-    ]
-
-    explicit_map_at_paths(payload, absolute_paths)
-  end
-
-  defp absolute_token_usage_from_payload(_payload), do: nil
-
-  defp turn_completed_usage_from_payload(payload) when is_map(payload) do
-    method = Map.get(payload, "method") || Map.get(payload, :method)
-
-    if method in ["turn/completed", :turn_completed] do
-      direct =
-        Map.get(payload, "usage") ||
-          Map.get(payload, :usage) ||
-          map_at_path(payload, ["params", "usage"]) ||
-          map_at_path(payload, [:params, :usage])
-
-      if is_map(direct) and integer_token_map?(direct), do: direct
-    end
-  end
-
-  defp turn_completed_usage_from_payload(_payload), do: nil
-
-  defp rate_limits_from_payload(payload) when is_map(payload) do
-    direct = Map.get(payload, "rate_limits") || Map.get(payload, :rate_limits)
-
-    cond do
-      rate_limits_map?(direct) ->
-        direct
-
-      rate_limits_map?(payload) ->
-        payload
-
-      true ->
-        rate_limit_payloads(payload)
-    end
-  end
-
-  defp rate_limits_from_payload(payload) when is_list(payload) do
-    rate_limit_payloads(payload)
-  end
-
-  defp rate_limits_from_payload(_payload), do: nil
-
-  defp rate_limit_payloads(payload) when is_map(payload) do
-    Map.values(payload)
-    |> Enum.reduce_while(nil, fn
-      value, nil ->
-        case rate_limits_from_payload(value) do
-          nil -> {:cont, nil}
-          rate_limits -> {:halt, rate_limits}
-        end
-
-      _value, result ->
-        {:halt, result}
-    end)
-  end
-
-  defp rate_limit_payloads(payload) when is_list(payload) do
-    payload
-    |> Enum.reduce_while(nil, fn
-      value, nil ->
-        case rate_limits_from_payload(value) do
-          nil -> {:cont, nil}
-          rate_limits -> {:halt, rate_limits}
-        end
-
-      _value, result ->
-        {:halt, result}
-    end)
-  end
-
-  defp rate_limits_map?(payload) when is_map(payload) do
-    limit_id =
-      Map.get(payload, "limit_id") ||
-        Map.get(payload, :limit_id) ||
-        Map.get(payload, "limit_name") ||
-        Map.get(payload, :limit_name)
-
-    has_buckets =
-      Enum.any?(
-        ["primary", :primary, "secondary", :secondary, "credits", :credits],
-        &Map.has_key?(payload, &1)
-      )
-
-    !is_nil(limit_id) and has_buckets
-  end
-
-  defp rate_limits_map?(_payload), do: false
-
-  defp explicit_map_at_paths(payload, paths) when is_map(payload) and is_list(paths) do
-    Enum.find_value(paths, fn path ->
-      value = map_at_path(payload, path)
-
-      if is_map(value) and integer_token_map?(value), do: value
-    end)
-  end
-
-  defp explicit_map_at_paths(_payload, _paths), do: nil
-
-  defp map_at_path(payload, path) when is_map(payload) and is_list(path) do
-    Enum.reduce_while(path, payload, fn key, acc ->
-      if is_map(acc) and Map.has_key?(acc, key) do
-        {:cont, Map.get(acc, key)}
-      else
-        {:halt, nil}
-      end
-    end)
-  end
-
-  defp map_at_path(_payload, _path), do: nil
-
-  defp integer_token_map?(payload) do
-    token_fields = [
-      :input_tokens,
-      :output_tokens,
-      :total_tokens,
-      :prompt_tokens,
-      :completion_tokens,
-      :inputTokens,
-      :outputTokens,
-      :totalTokens,
-      :promptTokens,
-      :completionTokens,
-      "input_tokens",
-      "output_tokens",
-      "total_tokens",
-      "prompt_tokens",
-      "completion_tokens",
-      "inputTokens",
-      "outputTokens",
-      "totalTokens",
-      "promptTokens",
-      "completionTokens"
-    ]
-
-    token_fields
-    |> Enum.any?(fn field ->
-      value = payload_get(payload, field)
-      !is_nil(integer_like(value))
-    end)
-  end
-
-  defp get_token_usage(usage, :input),
-    do:
-      payload_get(usage, [
-        "input_tokens",
-        "prompt_tokens",
-        :input_tokens,
-        :prompt_tokens,
-        :input,
-        "promptTokens",
-        :promptTokens,
-        "inputTokens",
-        :inputTokens
-      ])
-
-  defp get_token_usage(usage, :output),
-    do:
-      payload_get(usage, [
-        "output_tokens",
-        "completion_tokens",
-        :output_tokens,
-        :completion_tokens,
-        :output,
-        :completion,
-        "outputTokens",
-        :outputTokens,
-        "completionTokens",
-        :completionTokens
-      ])
-
-  defp get_token_usage(usage, :total),
-    do:
-      payload_get(usage, [
-        "total_tokens",
-        "total",
-        :total_tokens,
-        :total,
-        "totalTokens",
-        :totalTokens
-      ])
-
-  defp payload_get(payload, fields) when is_list(fields) do
-    Enum.find_value(fields, fn field -> map_integer_value(payload, field) end)
-  end
-
-  defp payload_get(payload, field), do: map_integer_value(payload, field)
-
-  defp map_integer_value(payload, field) do
-    if is_map(payload) do
-      value = Map.get(payload, field)
-      integer_like(value)
-    else
-      nil
-    end
-  end
-
   defp running_seconds(%DateTime{} = started_at, %DateTime{} = now) do
     max(0, DateTime.diff(now, started_at, :second))
   end
 
   defp running_seconds(_started_at, _now), do: 0
-
-  defp integer_like(value) when is_integer(value) and value >= 0, do: value
-
-  defp integer_like(value) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {num, _} when num >= 0 -> num
-      _ -> nil
-    end
-  end
-
-  defp integer_like(_value), do: nil
 end

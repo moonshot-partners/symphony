@@ -2,6 +2,7 @@ defmodule SymphonyElixir.OrchestratorPrMergeTest do
   use SymphonyElixir.TestSupport
 
   alias SymphonyElixir.{Linear.Issue, Orchestrator}
+  alias SymphonyElixir.Orchestrator.PrMerge
 
   defp make_issue(opts \\ []) do
     repos =
@@ -28,7 +29,10 @@ defmodule SymphonyElixir.OrchestratorPrMergeTest do
     on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
   end
 
-  describe "maybe_transition_merged_pr_for_test/3" do
+  defp apply_transition(issue, state_name),
+    do: Orchestrator.apply_state_transition_for_test(issue, state_name)
+
+  describe "PrMerge.maybe_transition/4" do
     test "transitions issue when pr_check_fn returns true" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
@@ -38,7 +42,7 @@ defmodule SymphonyElixir.OrchestratorPrMergeTest do
       set_memory_tracker_recipient()
 
       issue = make_issue(pr_url: "https://github.com/schoolsoutapp/schools-out/pull/100")
-      Orchestrator.maybe_transition_merged_pr_for_test(issue, "Released / Live", fn _url -> true end)
+      PrMerge.maybe_transition(issue, "Released / Live", fn _url -> true end, &apply_transition/2)
 
       assert_receive {:memory_tracker_state_update, "issue-pr-merge", "Released / Live"}, 500
     end
@@ -52,7 +56,7 @@ defmodule SymphonyElixir.OrchestratorPrMergeTest do
       set_memory_tracker_recipient()
 
       issue = make_issue(pr_url: "https://github.com/schoolsoutapp/schools-out/pull/100")
-      Orchestrator.maybe_transition_merged_pr_for_test(issue, "Released / Live", fn _url -> false end)
+      PrMerge.maybe_transition(issue, "Released / Live", fn _url -> false end, &apply_transition/2)
 
       refute_receive {:memory_tracker_state_update, _, _}, 200
     end
@@ -66,7 +70,7 @@ defmodule SymphonyElixir.OrchestratorPrMergeTest do
       set_memory_tracker_recipient()
 
       issue = make_issue()
-      Orchestrator.maybe_transition_merged_pr_for_test(issue, "Released / Live", fn _url -> true end)
+      PrMerge.maybe_transition(issue, "Released / Live", fn _url -> true end, &apply_transition/2)
 
       refute_receive {:memory_tracker_state_update, _, _}, 200
     end
