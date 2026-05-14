@@ -415,15 +415,22 @@ Skipping this artifact is a hard stop, not a style preference.
         won't start, or 500s on a route you did NOT touch). Confirm it's
         pre-existing with `git stash`: if the same error happens with your
         changes removed, it's an environment issue, not your bug — do NOT
-        spend fix attempts on it. Still run your unit tests
-        (`npx jest <filename>` from `fe-next-app/`) and record them plus the
-        blocking error: `write_report("qa-evidence", "{{ issue.identifier }}",
-        checks, notes="BLOCKED: <reason>")` (run from `fe-next-app/`). A
-        BLOCKED report writes `verdict.pass = false` on purpose — a run with
-        no browser evidence proves nothing, so don't dress it up as a green QA
-        pass. That is expected and does not stop you: paste the report's
-        message into the PR body, state plainly that browser QA was blocked
-        and why, and open the PR.
+        spend fix attempts on it. Write a BLOCKED report with `checks=[]`:
+        `write_report("qa-evidence", "{{ issue.identifier }}", [],
+        notes="BLOCKED: <reason>")` (run from `fe-next-app/`). A BLOCKED
+        report writes `verdict.pass = false` on purpose — a run with no
+        browser evidence proves nothing, so don't dress it up as a green QA
+        pass. **Do NOT pass unit-test results in `checks=` on a BLOCKED run.**
+        SODEV-765 lesson: agents have listed `[{name: "Unit: foo", pass: true}]`
+        as `checks`, which renders under `## Evidence` in qa-report.md and
+        makes the BLOCKED look like a partial-pass to a reviewer skimming the
+        Linear comment. Unit tests are useful, but they are NOT browser
+        proof — keep them out of the harness's evidence channel. Mention
+        `npx jest <files>` passing in the PR body as a separate paragraph
+        ("unit tests covering the change: 66/66 passing"), not in the QA
+        report. That is expected and does not stop you: paste the QA
+        report's message into the PR body, state plainly that browser QA
+        was blocked and why, and open the PR.
       - **PASS** — proceed.
 
    d. After PASS or BLOCKED: do **NOT** commit `qa-evidence/` or
