@@ -38,10 +38,14 @@ defmodule SymphonyElixir.TestSupport do
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
         stop_default_http_server()
 
+        workpads_path = Path.join(workflow_root, "workpads.json")
+        Application.put_env(:symphony_elixir, :workpads_path, workpads_path)
+
         on_exit(fn ->
           Application.delete_env(:symphony_elixir, :workflow_file_path)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+          Application.delete_env(:symphony_elixir, :workpads_path)
           File.rm_rf(workflow_root)
         end)
 
