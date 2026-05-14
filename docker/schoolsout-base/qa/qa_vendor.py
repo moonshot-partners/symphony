@@ -79,8 +79,10 @@ def qarun_login_as_vendor(qa, *, business_name: str = "QA Bot Co"):
         email=qa.email,
         api_base=qa.api_base,
     )
-    if not inject_session(qa.page, qa.base, qa.access, qa.refresh, qa.user):
+    ok, debug = inject_session(qa.page, qa.base, qa.access, qa.refresh, qa.user)
+    if not ok:
         raise RuntimeError(
-            "inject_session failed after vendor promotion — staging auth did not stick"
+            "inject_session failed after vendor promotion — staging auth did not stick "
+            f"debug={debug}"
         )
     return qa

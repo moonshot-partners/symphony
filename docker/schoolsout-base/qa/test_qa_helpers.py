@@ -117,6 +117,83 @@ class ProvisionVendorAccountTest(unittest.TestCase):
         self.assertIn("auth/me", str(ctx.exception).lower())
 
 
+class InjectSessionDiagnosticsTest(unittest.TestCase):
+    """`inject_session` must return `(ok, debug)` — the boolean alone hides WHY
+    auth didn't stick. When the SODEV-765 agent run reported BLOCKED, the
+    operator had nothing to grep — no localStorage dump, no landed URL, no
+    user-shape summary. Returning a debug dict makes the next failure
+    diagnosable from log lines alone (no rerun needed).
+    """
+
+    def _fake_page(self, *, url_after_reload, ls_after_reload, ls_eval_value):
+        evals = {"ls_after_reload": ls_after_reload, "is_auth": ls_eval_value}
+
+        class _P:
+            url = url_after_reload
+
+            def goto(self, *_a, **_kw):
+                pass
+
+            def wait_for_timeout(self, _ms):
+                pass
+
+            def reload(self, **_):
+                pass
+
+            def evaluate(self, expr, *_a, **_kw):
+                # setItem call — no return
+                if "setItem" in expr:
+                    return None
+                if "JSON.parse" in expr and "isAuthenticated" in expr:
+                    return evals["is_auth"]
+                if "getItem" in expr:
+                    return evals["ls_after_reload"]
+                return None
+
+        return _P()
+
+    def test_returns_tuple_with_debug_on_success(self):
+        page = self._fake_page(
+            url_after_reload="http://localhost:3001/parents",
+            ls_after_reload='{"state":{"isAuthenticated":true,"user":{"id":1,"vendor":{"id":42}}}}',
+            ls_eval_value=True,
+        )
+
+        result = qa_helpers.inject_session(
+            page, "http://localhost:3001", "acc", "ref", {"id": 1, "vendor": {"id": 42}}
+        )
+
+        self.assertIsInstance(result, tuple, "must return (ok, debug) tuple, not bool")
+        self.assertEqual(len(result), 2)
+        ok, debug = result
+        self.assertTrue(ok)
+        self.assertIsInstance(debug, dict)
+        self.assertIn("landed_url", debug, "debug must record where reload landed")
+        self.assertEqual(debug["landed_url"], "http://localhost:3001/parents")
+        self.assertIn("user_has_vendor", debug, "debug must declare whether injected user carried vendor — drives vendor-flow root-cause analysis")
+        self.assertTrue(debug["user_has_vendor"])
+
+    def test_returns_tuple_with_debug_on_failure(self):
+        page = self._fake_page(
+            url_after_reload="http://localhost:3001/business/signin",
+            ls_after_reload='{"state":{"isAuthenticated":false,"user":null}}',
+            ls_eval_value=False,
+        )
+
+        ok, debug = qa_helpers.inject_session(
+            page, "http://localhost:3001", "acc", "ref", {"id": 1, "vendor": None}
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(debug["landed_url"], "http://localhost:3001/business/signin")
+        self.assertFalse(debug["user_has_vendor"])
+        self.assertIn(
+            "localstorage_after",
+            debug,
+            "debug must include localStorage snapshot so the operator can see what Zustand kept",
+        )
+
+
 class _FakePage:
     """Minimal Playwright Page double for tests that need to drive `QaRun.goto`
     and `_record` without a real browser. `final_url` is what `page.url` returns
@@ -214,7 +291,7 @@ class QaRunLoginAsVendorTest(unittest.TestCase):
 
         def fake_inject(page, base, access, refresh, user):
             inject_calls.append({"access": access, "refresh": refresh, "user": user})
-            return True
+            return True, {"landed_url": f"{base}/parents", "user_has_vendor": True}
 
         with patch.object(qa_helpers, "provision_account", fake_provision), patch.object(
             qa_vendor, "provision_vendor_account", fake_vendor
@@ -244,6 +321,69 @@ class QaRunLoginAsVendorTest(unittest.TestCase):
         self.assertEqual(qa.email, "qa@example.com")
         self.assertEqual(qa.access, "access-tok")
         self.assertEqual(qa.user["vendor"]["business_name"], "QA Co")
+
+
+class QaRunTryLoginAsVendorTest(unittest.TestCase):
+    """`try_login_as_vendor` is the non-raising sibling of `login_as_vendor`.
+    Without it, an agent script that hits a vendor-promotion failure must
+    catch the RuntimeError manually — and the SODEV-765 agent run shows what
+    happens when that catch is missing: the agent invents a BLOCKED note
+    in qa-report.md by hand instead of letting the harness record it. The
+    `try_*` form returns `(ok, err)` so the agent's script can do
+    `ok, err = qa.try_login_as_vendor(); if not ok: qa.note(...)` and the
+    harness owns the BLOCKED record + verdict.json.
+    """
+
+    def test_returns_true_none_on_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            qa = qa_helpers.QaRun(app_dir=tmp, evidence_dir=tmp, ticket="SODEV-TEST")
+            qa.page = _FakePage("http://localhost:3001/business/dashboard")
+            qa.base = "http://localhost:3001"
+
+            def fake_login_as_vendor(*, business_name):
+                return qa
+
+            with patch.object(qa, "login_as_vendor", fake_login_as_vendor):
+                ok, err = qa.try_login_as_vendor(business_name="QA Co")
+
+            self.assertTrue(ok)
+            self.assertIsNone(err)
+
+    def test_returns_false_with_error_when_login_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            qa = qa_helpers.QaRun(app_dir=tmp, evidence_dir=tmp, ticket="SODEV-TEST")
+            qa.page = _FakePage("http://localhost:3001/")
+            qa.base = "http://localhost:3001"
+
+            def fake_login_as_vendor(*, business_name):
+                raise RuntimeError("inject_session failed — staging auth did not stick debug={'landed_url': '/business/signin'}")
+
+            with patch.object(qa, "login_as_vendor", fake_login_as_vendor):
+                ok, err = qa.try_login_as_vendor(business_name="QA Co")
+
+            self.assertFalse(ok)
+            self.assertIsNotNone(err)
+            self.assertIn(
+                "inject_session failed",
+                err,
+                "err must surface the original exception text so the harness BLOCKED note is self-explanatory",
+            )
+
+    def test_does_not_swallow_keyboardinterrupt_or_systemexit(self):
+        """The catch must be narrow — KeyboardInterrupt and SystemExit must
+        propagate, or Ctrl-C against a stuck Playwright session gets eaten.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            qa = qa_helpers.QaRun(app_dir=tmp, evidence_dir=tmp, ticket="SODEV-TEST")
+            qa.page = _FakePage("http://localhost:3001/")
+            qa.base = "http://localhost:3001"
+
+            def fake_login_as_vendor(*, business_name):
+                raise KeyboardInterrupt()
+
+            with patch.object(qa, "login_as_vendor", fake_login_as_vendor):
+                with self.assertRaises(KeyboardInterrupt):
+                    qa.try_login_as_vendor(business_name="QA Co")
 
 
 class QaRunGotoRedirectTest(unittest.TestCase):
@@ -314,6 +454,41 @@ class QaRunGotoRedirectTest(unittest.TestCase):
             qa.goto("/parents", wait_ms=0)
             self.assertEqual(len(qa.checks), 1)
             self.assertTrue(qa._nav_blocked)
+
+    def test_subsequent_goto_skipped_no_redundant_screenshot(self):
+        """After the first goto detected a redirect and flipped `_nav_blocked`,
+        a second `goto()` call must NOT take another viewport screenshot of the
+        same (still-redirected) landing page. The first nav-FAIL screenshot is
+        already the proof; a second one only inflates evidence_dir with
+        byte-identical PNGs (seen in SODEV-765 agent run: two `01-FAIL-*.png`
+        files with EXACT same 82660-byte size — both shots of the same
+        redirect destination). Record the second nav-FAIL with empty
+        `screenshots` so the report still names it, without duplicating proof.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            qa = self._qa(tmp, "http://localhost:3001/business/signup/about-you")
+            qa.goto("/business/dashboard", wait_ms=0)
+            self.assertTrue(qa._nav_blocked)
+            self.assertEqual(len(qa.checks), 1)
+            first_screenshots = qa.checks[0]["screenshots"]
+            self.assertEqual(len(first_screenshots), 1)
+
+            qa.goto("/business/settings/account", wait_ms=0)
+
+            self.assertEqual(len(qa.checks), 2, "second goto still recorded")
+            second = qa.checks[1]
+            self.assertEqual(second["name"], "navigation /business/settings/account")
+            self.assertFalse(second["pass"])
+            self.assertIn(
+                "blocked: nav already redirected",
+                second["detail"].lower(),
+                "second nav-FAIL must declare WHY no new screenshot — to make the report self-explanatory",
+            )
+            self.assertEqual(
+                second["screenshots"],
+                [],
+                "second redirect during blocked state must NOT take a screenshot — first nav-FAIL is the proof",
+            )
 
     def test_subsequent_expect_visible_skipped_with_no_screenshot(self):
         with tempfile.TemporaryDirectory() as tmp:

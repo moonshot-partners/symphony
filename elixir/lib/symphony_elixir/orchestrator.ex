@@ -1200,6 +1200,11 @@ defmodule SymphonyElixir.Orchestrator do
     if retry_candidate_issue?(issue, terminal_state_set()) and
          dispatch_slots_available?(issue, state) and
          worker_slots_available?(state, metadata[:worker_host]) do
+      # SODEV-765 lesson: the previous attempt left `state/<TICKET>/qa_check.py`
+      # and `qa-evidence/` in the workspace. On retry the next agent inherits
+      # those files and either re-uses a stale check or trips over a dirty
+      # `git status`. Wipe the workspace so retry starts from a fresh clone.
+      cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
       {:noreply, dispatch_issue(state, issue, attempt, metadata[:worker_host])}
     else
       Logger.debug("No available slots for retrying #{issue_context(issue)}; retrying again")
