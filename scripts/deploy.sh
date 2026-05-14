@@ -44,14 +44,29 @@ fi
 
 log "git pull"
 cd "$SYMPHONY_DIR"
+old_sha=$(git rev-parse HEAD)
 git fetch --quiet origin main
 git reset --hard origin/main
+new_sha=$(git rev-parse HEAD)
 
 log "build escript"
 export PATH=/home/ubuntu/.local/share/mise/installs/erlang/28.5/bin:/home/ubuntu/.local/share/mise/installs/elixir/1.19.5-otp-28/bin:$PATH
 cd "$SYMPHONY_DIR/elixir"
 mix deps.get >/dev/null
 mix escript.build >/dev/null
+
+# Rebuild schoolsout-base Docker image when its source changed. The shim
+# image bakes /opt/qa from docker/schoolsout-base/qa, so a stale image
+# silently runs old QA harness code in newly dispatched agent containers
+# (SODEV-879 reproduced this: PR shipped, deploy succeeded, image stale,
+# agent kept running `npm run dev`).
+if git -C "$SYMPHONY_DIR" diff --name-only "$old_sha" "$new_sha" | grep -q '^docker/schoolsout-base/'; then
+  log "rebuild schoolsout-base image (source changed)"
+  cd "$SYMPHONY_DIR"
+  docker build --quiet -t schoolsout-base:latest -f docker/schoolsout-base/Dockerfile . >/dev/null
+else
+  log "schoolsout-base image unchanged; skip rebuild"
+fi
 
 log "restart symphony"
 sudo systemctl restart symphony
