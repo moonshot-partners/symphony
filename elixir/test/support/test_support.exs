@@ -41,11 +41,19 @@ defmodule SymphonyElixir.TestSupport do
         workpads_path = Path.join(workflow_root, "workpads.json")
         Application.put_env(:symphony_elixir, :workpads_path, workpads_path)
 
+        status_path = Path.join(workflow_root, "status.json")
+        Application.put_env(:symphony_elixir, :status_path, status_path)
+
+        drain_flag_path = Path.join(workflow_root, "drain.flag")
+        Application.put_env(:symphony_elixir, :drain_flag_path, drain_flag_path)
+
         on_exit(fn ->
           Application.delete_env(:symphony_elixir, :workflow_file_path)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
           Application.delete_env(:symphony_elixir, :workpads_path)
+          Application.delete_env(:symphony_elixir, :status_path)
+          Application.delete_env(:symphony_elixir, :drain_flag_path)
           File.rm_rf(workflow_root)
         end)
 

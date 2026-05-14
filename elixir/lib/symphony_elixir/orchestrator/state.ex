@@ -20,6 +20,7 @@ defmodule SymphonyElixir.Orchestrator.State do
     retry_attempts: %{},
     workpads: %{},
     agent_totals: nil,
-    agent_rate_limits: nil
+    agent_rate_limits: nil,
+    drain: false
   ]
 end

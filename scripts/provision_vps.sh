@@ -183,6 +183,8 @@ Environment="PATH=${home}/.local/share/mise/shims:${home}/.local/bin:${home}/.lo
 ExecStart=${SYMPHONY_DIR}/elixir/bin/symphony --i-understand-that-this-will-be-running-without-the-usual-guardrails ${SYMPHONY_DIR}/elixir/WORKFLOW.schools-out.md
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=900
+KillMode=mixed
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=symphony
