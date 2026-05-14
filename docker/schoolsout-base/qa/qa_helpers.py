@@ -467,12 +467,16 @@ def qa_run(app_dir: str, ticket: str, *, build_sha: str | None = None, port: int
            api_base: str = STAGING_API, viewport=(1366, 900), headless: bool = True, notes: str = ""):
     """One-stop QA harness for a fe-next-app UI change.
 
-    Starts `next dev` for `app_dir` on `port` (pointed at the staging API),
-    launches headless Chromium recording a session `.webm`, and yields a
-    `QaRun`. On exit it always writes `app_dir/qa-evidence/qa-report.md` +
-    `verdict.json` (even if an assertion raised) and tears everything down.
+    Builds `app_dir` (`npm run build`) then serves it (`npm start`) on `port`
+    pointed at the staging API, launches headless Chromium recording a session
+    `.webm`, and yields a `QaRun`. On exit it always writes
+    `app_dir/qa-evidence/qa-report.md` + `verdict.json` (even if an assertion
+    raised) and tears everything down. Production-mode boot eliminates the
+    on-demand route compile that caused SODEV-879 (45s blank Playwright
+    timeout against a cold `/parents`).
 
-    If `next dev` won't start, this raises `RuntimeError` before yielding — that
+    If the build or server won't start, this raises `RuntimeError` before
+    yielding — that
     is the WORKFLOW "BLOCKED" case (confirm pre-existing with `git stash`, then
     write a manual `write_report(..., notes=...)` and open the PR).
     """

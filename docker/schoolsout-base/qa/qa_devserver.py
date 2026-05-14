@@ -1,4 +1,4 @@
-"""`next dev` lifecycle helpers for the QA harness.
+"""Next.js production-mode lifecycle for the QA harness.
 
 Extracted from `qa_helpers.py` so that file stays under the project length
 limit. The agent doesn't import this module directly — it uses `qa_run()`
@@ -7,14 +7,23 @@ in `qa_helpers`, which delegates here for `dev_server` + `_resolve_app_dir`.
 What lives here:
   * `_port_open` — fast TCP-level liveness check used as the first gate.
   * `_http_ready` — HTTP 200 poll. TCP open only means the socket is
-    accepting — Next.js still compiles routes after that. Without HTTP 200
-    we'd yield to assertions while `session.webm` records 30s of spinner.
+    accepting — Next.js may still be warming up. Without HTTP 200 we'd
+    yield to assertions while `session.webm` records 30s of spinner.
   * `_resolve_app_dir` — `qa_run("fe-next-app", ...)` works whether the
     agent's cwd is the workspace root or `fe-next-app/`. Public-ish (used
     by `qa_run`); the others are module-private.
   * `_tail` — last N lines of a log file for error messages.
-  * `dev_server` — context manager: start `npm run dev`, yield base URL,
-    tear down on exit.
+  * `dev_server` — context manager: `npm run build` then `npm start`,
+    yield base URL, tear down on exit.
+
+Why production-mode (build+start), not `next dev`:
+  `next dev` compiles routes on demand. The first hit of any route pays a
+  30-90s compile cost — fresh middleware.ts can force a whole-tree
+  recompile. SODEV-879 reproduced this: Playwright's `page.goto("/parents",
+  timeout=45000)` hit a cold route and the 45s timeout fired against a 45s
+  blank session.webm. Running `next build` once upfront pays that cost
+  ONCE, surfaces build errors before Playwright launches, and lets the
+  server respond in milliseconds.
 """
 
 from __future__ import annotations
@@ -61,7 +70,7 @@ def _resolve_app_dir(app_dir: str) -> str:
     both: a `<app_dir>/package.json` (cwd = workspace root), a `./package.json`
     (cwd = inside the app, the common case), or `../<app_dir>/package.json`.
     Returns an absolute path. Raises if none has a `package.json` — a clear
-    error beats silently `mkdir`-ing a phantom dir and failing `npm run dev`.
+    error beats silently `mkdir`-ing a phantom dir and failing `npm run build`.
     """
     for cand in (app_dir, ".", os.path.join("..", os.path.basename(app_dir.rstrip("/")))):
         if os.path.isfile(os.path.join(cand, "package.json")):
@@ -82,12 +91,16 @@ def _tail(path: str, n: int = 30) -> str:
 
 @contextlib.contextmanager
 def dev_server(app_dir: str, *, port: int, api_base: str,
-               build_sha: str | None = None, ready_timeout: int = 240):
-    """Start `npm run dev` for `app_dir` on `port`, pointed at the staging API,
-    yield the base URL, and tear the process down on exit. If something is
-    already listening on `port` (an earlier `next dev`), reuse it."""
+               build_sha: str | None = None, ready_timeout: int = 240,
+               build_timeout: int = 600):
+    """Production-mode server for `app_dir` on `port`, pointed at the staging
+    API. Runs `npm run build` once (fail loud with log tail), then serves via
+    `npm start`. Yields the base URL; tears the server down on exit.
+
+    If something is already listening on `port` (an earlier `npm start`),
+    reuse it — skip both build and start."""
     if _port_open(port):
-        # TCP open but Next.js may still be compiling routes; wait for HTTP 200
+        # TCP open but server may still be warming up; wait for HTTP 200
         _http_ready(port)
         yield f"http://localhost:{port}"
         return
@@ -96,28 +109,47 @@ def dev_server(app_dir: str, *, port: int, api_base: str,
     env = {**os.environ, "PORT": str(port), "NEXT_PUBLIC_API_URL": api_base}
     if build_sha is not None:
         env["NEXT_PUBLIC_BUILD_SHA"] = build_sha
-    log_path = os.path.join(app_dir, "qa-evidence", "next-dev.log")
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    evidence_dir = os.path.join(app_dir, "qa-evidence")
+    os.makedirs(evidence_dir, exist_ok=True)
+
+    build_log_path = os.path.join(evidence_dir, "next-build.log")
+    with open(build_log_path, "w") as build_fh:
+        build_result = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=app_dir,
+            env=env,
+            stdout=build_fh,
+            stderr=subprocess.STDOUT,
+            timeout=build_timeout,
+        )
+    if build_result.returncode != 0:
+        raise RuntimeError(
+            f"`npm run build` (cwd={app_dir}) failed with exit code "
+            f"{build_result.returncode}. Last lines of {build_log_path}:\n"
+            f"{_tail(build_log_path)}"
+        )
+
+    log_path = os.path.join(evidence_dir, "next-start.log")
     log_fh = open(log_path, "w")
     proc = subprocess.Popen(
-        ["npm", "run", "dev"], cwd=app_dir, env=env, stdout=log_fh, stderr=subprocess.STDOUT
+        ["npm", "start"], cwd=app_dir, env=env, stdout=log_fh, stderr=subprocess.STDOUT
     )
     try:
         deadline = time.time() + ready_timeout
         while time.time() < deadline:
             if _port_open(port):
-                # TCP open != Next.js ready; poll HTTP 200 before yielding
+                # TCP open != server ready; poll HTTP 200 before yielding
                 _http_ready(port)
                 break
             if proc.poll() is not None:
                 raise RuntimeError(
-                    f"`npm run dev` (cwd={app_dir}) exited early (code {proc.returncode}). "
+                    f"`npm start` (cwd={app_dir}) exited early (code {proc.returncode}). "
                     f"Last lines of {log_path}:\n{_tail(log_path)}"
                 )
             time.sleep(2)
         else:
             raise RuntimeError(
-                f"`next dev` not ready on :{port} after {ready_timeout}s (cwd={app_dir}). "
+                f"`npm start` not ready on :{port} after {ready_timeout}s (cwd={app_dir}). "
                 f"Last lines of {log_path}:\n{_tail(log_path)}"
             )
         yield f"http://localhost:{port}"
