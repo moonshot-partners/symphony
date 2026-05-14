@@ -9,7 +9,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Orchestrator.{State, TokenMetrics}
+  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, TokenMetrics}
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -372,15 +372,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp maybe_transition_merged_pr(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    SymphonyElixir.Orchestrator.PrMerge.maybe_transition(
-      issue,
-      on_merge_state,
-      pr_check_fn,
-      &apply_state_transition/2
-    )
+    PrMerge.maybe_transition(issue, on_merge_state, pr_check_fn, &apply_state_transition/2)
   end
 
-  defp pr_merged?(pr_url), do: SymphonyElixir.Orchestrator.PrMerge.merged?(pr_url)
+  defp pr_merged?(pr_url), do: PrMerge.merged?(pr_url)
 
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
@@ -608,7 +603,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp apply_state_transition(_issue, _state_name), do: :ok
 
-  defp parse_github_pr_url(url), do: SymphonyElixir.Orchestrator.PrUrl.parse(url)
+  defp parse_github_pr_url(url), do: PrUrl.parse(url)
 
   defp apply_github_pr_label(%Issue{repos: repos}) do
     repos
@@ -752,7 +747,7 @@ defmodule SymphonyElixir.Orchestrator do
     end)
   end
 
-  defp sort_issues_for_dispatch(issues), do: SymphonyElixir.Orchestrator.Dispatch.sort(issues)
+  defp sort_issues_for_dispatch(issues), do: Dispatch.sort(issues)
 
   defp should_dispatch_issue?(
          %Issue{} = issue,
