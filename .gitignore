@@ -6,3 +6,4 @@ mvp-claude-sodev/
 .qa-spike/
 __pycache__/
 *.pyc
+.DS_Store

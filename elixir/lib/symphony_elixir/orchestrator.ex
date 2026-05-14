@@ -670,14 +670,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp apply_state_transition(_issue, _state_name), do: :ok
 
-  defp parse_github_pr_url(url) when is_binary(url) do
-    case Regex.run(~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}, url) do
-      [_, owner, repo, number] -> {:ok, owner, repo, String.to_integer(number)}
-      _ -> :error
-    end
-  end
-
-  defp parse_github_pr_url(_), do: :error
+  defp parse_github_pr_url(url), do: SymphonyElixir.Orchestrator.PrUrl.parse(url)
 
   defp apply_github_pr_label(%Issue{repos: repos}) do
     repos
@@ -821,25 +814,7 @@ defmodule SymphonyElixir.Orchestrator do
     end)
   end
 
-  defp sort_issues_for_dispatch(issues) when is_list(issues) do
-    Enum.sort_by(issues, fn
-      %Issue{} = issue ->
-        {priority_rank(issue.priority), issue_created_at_sort_key(issue), issue.identifier || issue.id || ""}
-
-      _ ->
-        {priority_rank(nil), issue_created_at_sort_key(nil), ""}
-    end)
-  end
-
-  defp priority_rank(priority) when is_integer(priority) and priority in 1..4, do: priority
-  defp priority_rank(_priority), do: 5
-
-  defp issue_created_at_sort_key(%Issue{created_at: %DateTime{} = created_at}) do
-    DateTime.to_unix(created_at, :microsecond)
-  end
-
-  defp issue_created_at_sort_key(%Issue{}), do: 9_223_372_036_854_775_807
-  defp issue_created_at_sort_key(_issue), do: 9_223_372_036_854_775_807
+  defp sort_issues_for_dispatch(issues), do: SymphonyElixir.Orchestrator.Dispatch.sort(issues)
 
   defp should_dispatch_issue?(
          %Issue{} = issue,
