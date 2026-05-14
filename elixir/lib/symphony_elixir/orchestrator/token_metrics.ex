@@ -14,10 +14,65 @@ defmodule SymphonyElixir.Orchestrator.TokenMetrics do
     * `extract_rate_limits/1` — locates a rate-limits payload inside an update
       event, handling the several shapes returned by Anthropic / Claude Agent
       SDK and any nested `params.payload` wrappers.
+    * `token_delta_guard/3` — returns `:ok` while the running total has not
+      crossed the threshold above a baseline, or `{:halt, info}` once it has.
 
   Everything else is private detail (payload traversal, integer coercion,
   shape detection for token/rate-limit maps).
+
+  ## Token Delta Guard
+
+  `token_delta_guard/3` is the pure decision helper behind the orchestrator's
+  150k-tokens-since-last-PASS halt rule. The caller tracks a `baseline`
+  (running total at the most recent PASS verdict) and the current
+  `running_total`; the guard signals `{:halt, info}` strictly above the
+  threshold so a value exactly at the threshold still counts as "headroom
+  remaining". Baselines greater than the running total are clamped to zero —
+  a backwards-moving running total is a caller-side accounting glitch, not a
+  token burn, and must not trip the guard.
   """
+
+  @default_token_delta_threshold 150_000
+
+  @type guard_halt_info :: %{
+          running_total: non_neg_integer(),
+          baseline: non_neg_integer(),
+          delta: non_neg_integer(),
+          threshold: pos_integer()
+        }
+
+  @doc """
+  Decides whether the running token total has exceeded `threshold` tokens
+  above the `baseline` captured at the last PASS verdict.
+
+  Returns `:ok` while the delta (`running_total - baseline`, clamped to zero)
+  is at or below the threshold; returns `{:halt, info}` once the delta is
+  strictly greater. The halt payload carries `running_total`, `baseline`,
+  `delta` and `threshold` for the caller to log / surface to the operator.
+
+  The default threshold is `#{@default_token_delta_threshold}` tokens, matching
+  the documented Token Delta Guard from the orchestrator behavior contract.
+  """
+  @spec token_delta_guard(non_neg_integer(), non_neg_integer(), pos_integer()) ::
+          :ok | {:halt, guard_halt_info()}
+  def token_delta_guard(running_total, baseline, threshold \\ @default_token_delta_threshold)
+      when is_integer(running_total) and running_total >= 0 and
+             is_integer(baseline) and baseline >= 0 and
+             is_integer(threshold) and threshold > 0 do
+    delta = max(running_total - baseline, 0)
+
+    if delta > threshold do
+      {:halt,
+       %{
+         running_total: running_total,
+         baseline: baseline,
+         delta: delta,
+         threshold: threshold
+       }}
+    else
+      :ok
+    end
+  end
 
   @doc """
   Extracts the input/output/total token delta from `update`, using
