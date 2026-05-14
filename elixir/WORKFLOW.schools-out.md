@@ -29,22 +29,18 @@ hooks:
     # secrets aren't present.
     set -euo pipefail
     # Primary repo at workspace root.
-    git clone --depth 1 https://github.com/schoolsoutapp/schools-out .
-    # schools-out's integration branch is `dev`. The shallow clone only brings
-    # `main`, so fetch `dev` explicitly into a real remote-tracking ref BEFORE
-    # pointing origin/HEAD at it (set-head fails if the ref doesn't exist yet).
-    # This makes `gh pr create` default to dev and lets `git checkout -B ...
-    # origin/dev` work without an extra fetch.
+    git clone --depth 1 -b dev https://github.com/schoolsoutapp/schools-out .
+    # Clone lands on `dev` so AGENTS.md/CLAUDE.md (committed to dev, not main)
+    # are readable at Step 0 before any branching. The explicit fetch below
+    # ensures origin/dev ref exists even if git's shallow clone omits it.
     git fetch --depth=1 origin dev:refs/remotes/origin/dev
     git remote set-head origin dev
     # Frontend repo at ./fe-next-app — eliminates the SODEV-827 class of
     # bugs where the agent had to clone the right repo mid-run after
     # burning turns on the wrong one. Whitelist mirrored in the prompt
     # body's "Allowed repositories" section.
-    git clone --depth 1 https://github.com/schoolsoutapp/fe-next-app fe-next-app
-    # fe-next-app's integration branch is `dev`. The shallow clone only brings
-    # `main`, so fetch `dev` explicitly into a real remote-tracking ref BEFORE
-    # pointing origin/HEAD at it.
+    git clone --depth 1 -b dev https://github.com/schoolsoutapp/fe-next-app fe-next-app
+    # Same as above: clone dev so AGENTS.md is in the working tree at Step 0.
     git -C fe-next-app fetch --depth=1 origin dev:refs/remotes/origin/dev
     git -C fe-next-app remote set-head origin dev
     # fe-next-app is an npm project (versions package-lock.json). Install deps
