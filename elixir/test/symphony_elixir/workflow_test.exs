@@ -84,6 +84,47 @@ defmodule SymphonyElixir.WorkflowTest do
     end
   end
 
+  describe "WORKFLOW.schools-out.md tracker transition states" do
+    setup do
+      original_app_env = Application.get_env(:symphony_elixir, :workflow_file_path)
+      original_os_env = System.get_env("SYMPHONY_WORKFLOW_FILE")
+
+      Application.delete_env(:symphony_elixir, :workflow_file_path)
+      System.put_env("SYMPHONY_WORKFLOW_FILE", "WORKFLOW.schools-out.md")
+
+      on_exit(fn ->
+        if original_app_env do
+          Application.put_env(:symphony_elixir, :workflow_file_path, original_app_env)
+        else
+          Application.delete_env(:symphony_elixir, :workflow_file_path)
+        end
+
+        if original_os_env do
+          System.put_env("SYMPHONY_WORKFLOW_FILE", original_os_env)
+        else
+          System.delete_env("SYMPHONY_WORKFLOW_FILE")
+        end
+      end)
+
+      :ok
+    end
+
+    test "on_pickup_state is 'In Development' (SODEV column for active agent work)" do
+      {:ok, %{config: config}} = Workflow.load()
+      assert get_in(config, ["tracker", "on_pickup_state"]) == "In Development"
+    end
+
+    test "on_complete_state is 'In Code Review' (SODEV column created by Marianna 2026-05-14 for PR-open hand-off)" do
+      {:ok, %{config: config}} = Workflow.load()
+      assert get_in(config, ["tracker", "on_complete_state"]) == "In Code Review"
+    end
+
+    test "on_pr_merge_state is 'Ready for QA' (SODEV column for human QA on staging post-merge)" do
+      {:ok, %{config: config}} = Workflow.load()
+      assert get_in(config, ["tracker", "on_pr_merge_state"]) == "Ready for QA"
+    end
+  end
+
   defp extract_status_map_section(prompt) do
     case Regex.run(~r/## Status map\n(.*?)(?=\n## |\z)/s, prompt) do
       [_full, body] -> body
