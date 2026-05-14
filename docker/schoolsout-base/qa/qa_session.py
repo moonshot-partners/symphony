@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import time
 
 
 def inject_session(page, base_url: str, access_token: str, refresh_token: str, user: dict):
@@ -42,13 +43,26 @@ def inject_session(page, base_url: str, access_token: str, refresh_token: str, u
     page.wait_for_timeout(1500)
     page.evaluate("([k, v]) => localStorage.setItem(k, v)", ["session-storage", session])
     page.reload(wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
-    is_auth = bool(
-        page.evaluate(
-            "() => { try { return JSON.parse(localStorage.getItem('session-storage')||'{}')"
-            ".state?.isAuthenticated || false } catch (e) { return false } }"
+    # SODEV-765 follow-up: a fixed 4000ms wait is racy. On the VPS the
+    # `SessionHydration.useEffect` sometimes fires before Zustand's persist
+    # middleware finished restoring `accessToken` from localStorage; `hydrate()`
+    # then sees `!accessToken`, zeros the store, and the harness reports a
+    # spurious BLOCKED. Poll until the store reflects `isAuthenticated:true`
+    # (i.e. hydrate succeeded AND the /auth/me round-trip stuck) or give up
+    # after 15s with debug. The 200ms polling step is small enough that a fast
+    # local run completes in ~300ms instead of always paying 4s.
+    is_auth = False
+    deadline = time.time() + 15.0
+    while time.time() < deadline:
+        is_auth = bool(
+            page.evaluate(
+                "() => { try { return JSON.parse(localStorage.getItem('session-storage')||'{}')"
+                ".state?.isAuthenticated || false } catch (e) { return false } }"
+            )
         )
-    )
+        if is_auth:
+            break
+        page.wait_for_timeout(200)
     ls_after = ""
     with contextlib.suppress(Exception):
         ls_after = page.evaluate("() => localStorage.getItem('session-storage')") or ""
