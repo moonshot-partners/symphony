@@ -50,13 +50,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install devflow-agent (vendored) then shim
-COPY docker/schoolsout-base/vendor/devflow-agent /opt/devflow-agent
+# Install agent_shim (carries its own guardrail hooks — no separate devflow package)
 COPY elixir/priv/agent_shim /opt/agent_shim
 
-RUN pip install --break-system-packages --no-cache-dir \
-      /opt/devflow-agent \
-      /opt/agent_shim
+RUN pip install --break-system-packages --no-cache-dir /opt/agent_shim
 
 # Playwright + headless Chromium for the agent's UI QA self-review step.
 # Browsers live in a world-readable shared dir (default ~/.cache is per-user

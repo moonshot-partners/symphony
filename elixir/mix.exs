@@ -13,7 +13,6 @@ defmodule SymphonyElixir.MixProject do
         ],
         ignore_modules: [
           SymphonyElixir.Agent.AppServer,
-          SymphonyElixir.Agent.DevflowContext,
           SymphonyElixir.Agent.DynamicTool,
           SymphonyElixir.AgentRunner,
           SymphonyElixir.Application,
