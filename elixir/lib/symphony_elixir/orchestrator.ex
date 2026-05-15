@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Orchestrator do
     GateCTrigger,
     GithubLabel,
     PrMerge,
+    Snapshot,
     State,
     StateTransition,
     StatusFile,
@@ -1191,56 +1192,7 @@ defmodule SymphonyElixir.Orchestrator do
     state = refresh_runtime_config(state)
     now = DateTime.utc_now()
     now_ms = System.monotonic_time(:millisecond)
-
-    running =
-      state.running
-      |> Enum.map(fn {issue_id, metadata} ->
-        %{
-          issue_id: issue_id,
-          identifier: metadata.identifier,
-          state: metadata.issue.state,
-          worker_host: Map.get(metadata, :worker_host),
-          workspace_path: Map.get(metadata, :workspace_path),
-          session_id: metadata.session_id,
-          agent_pid: metadata.agent_pid,
-          agent_input_tokens: metadata.agent_input_tokens,
-          agent_output_tokens: metadata.agent_output_tokens,
-          agent_total_tokens: metadata.agent_total_tokens,
-          turn_count: Map.get(metadata, :turn_count, 0),
-          started_at: metadata.started_at,
-          last_agent_timestamp: metadata.last_agent_timestamp,
-          last_agent_message: metadata.last_agent_message,
-          last_agent_event: metadata.last_agent_event,
-          runtime_seconds: AgentTotals.running_seconds(metadata.started_at, now)
-        }
-      end)
-
-    retrying =
-      state.retry_attempts
-      |> Enum.map(fn {issue_id, %{attempt: attempt, due_at_ms: due_at_ms} = retry} ->
-        %{
-          issue_id: issue_id,
-          attempt: attempt,
-          due_in_ms: max(0, due_at_ms - now_ms),
-          identifier: Map.get(retry, :identifier),
-          error: Map.get(retry, :error),
-          worker_host: Map.get(retry, :worker_host),
-          workspace_path: Map.get(retry, :workspace_path)
-        }
-      end)
-
-    {:reply,
-     %{
-       running: running,
-       retrying: retrying,
-       agent_totals: state.agent_totals,
-       rate_limits: Map.get(state, :agent_rate_limits),
-       polling: %{
-         checking?: state.poll_check_in_progress == true,
-         next_poll_in_ms: next_poll_in_ms(state.next_poll_due_at_ms, now_ms),
-         poll_interval_ms: state.poll_interval_ms
-       }
-     }, state}
+    {:reply, Snapshot.build(state, now, now_ms), state}
   end
 
   def handle_call(:request_refresh, _from, state) do
@@ -1277,12 +1229,6 @@ defmodule SymphonyElixir.Orchestrator do
   defp schedule_poll_cycle_start do
     :timer.send_after(@poll_transition_render_delay_ms, self(), :run_poll_cycle)
     :ok
-  end
-
-  defp next_poll_in_ms(nil, _now_ms), do: nil
-
-  defp next_poll_in_ms(next_poll_due_at_ms, now_ms) when is_integer(next_poll_due_at_ms) do
-    max(0, next_poll_due_at_ms - now_ms)
   end
 
   defp pop_running_entry(state, issue_id) do
