@@ -15,6 +15,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Agent.AppServer,
           SymphonyElixir.Agent.AppServer.Approval,
           SymphonyElixir.Agent.AppServer.Transport,
+          SymphonyElixir.Agent.AppServer.Turn,
           SymphonyElixir.Agent.DynamicTool,
           SymphonyElixir.AgentRunner,
           SymphonyElixir.Application,
