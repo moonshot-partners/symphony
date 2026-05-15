@@ -89,9 +89,7 @@ defmodule SymphonyElixir.Orchestrator.DispatchGateTest do
 
   describe "candidate?/3" do
     setup do
-      {:ok,
-       active: MapSet.new(["in progress", "todo"]),
-       terminal: MapSet.new(["done", "merged"])}
+      {:ok, active: MapSet.new(["in progress", "todo"]), terminal: MapSet.new(["done", "merged"])}
     end
 
     test "true for a routable Issue in an active, non-terminal state", %{
