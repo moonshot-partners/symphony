@@ -3,6 +3,21 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
 
   alias SymphonyElixir.Orchestrator.AgentUpdate
 
+  defp turn_completed_update(usage) do
+    payload = %{
+      "method" => "turn/completed",
+      "params" => %{"turn_id" => "t-1", "usage" => usage}
+    }
+
+    %{
+      event: :turn_completed,
+      timestamp: ~U[2026-05-15 13:00:00Z],
+      payload: payload,
+      raw: "",
+      details: payload
+    }
+  end
+
   describe "integrate/2 — token accumulation" do
     test "sums per-event token deltas into running totals" do
       running_entry = %{
@@ -16,13 +31,7 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
         turn_count: 0
       }
 
-      update = %{
-        event: :token_usage,
-        timestamp: ~U[2026-05-15 13:00:00Z],
-        input_tokens: 15,
-        output_tokens: 25,
-        total_tokens: 40
-      }
+      update = turn_completed_update(%{"input_tokens" => 15, "output_tokens" => 25, "total_tokens" => 40})
 
       {updated, token_delta} = AgentUpdate.integrate(running_entry, update)
 
@@ -49,13 +58,7 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
         turn_count: 0
       }
 
-      update = %{
-        event: :token_usage,
-        timestamp: ~U[2026-05-15 13:00:00Z],
-        input_tokens: 50,
-        output_tokens: 50,
-        total_tokens: 50
-      }
+      update = turn_completed_update(%{"input_tokens" => 50, "output_tokens" => 50, "total_tokens" => 50})
 
       {updated, _token_delta} = AgentUpdate.integrate(running_entry, update)
 
