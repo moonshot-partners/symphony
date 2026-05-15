@@ -7,9 +7,20 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, GateC, GitHubPr, Tracker, Workpad, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Orchestrator.{Dispatch, PrMerge, PrUrl, State, StatusFile, TokenMetrics, WorkpadStore}
+
+  alias SymphonyElixir.Orchestrator.{
+    Dispatch,
+    GateCTrigger,
+    GithubLabel,
+    PrMerge,
+    State,
+    StateTransition,
+    StatusFile,
+    TokenMetrics,
+    WorkpadStore
+  }
 
   @default_workpads_path "/opt/symphony/state/workpads.json"
   @default_status_path "/opt/symphony/state/status.json"
@@ -226,7 +237,7 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry ->
         {updated_running_entry, token_delta} = integrate_agent_update(running_entry, update)
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
-        updated_running_entry = maybe_run_gate_c(updated_running_entry, update)
+        updated_running_entry = GateCTrigger.maybe_run(updated_running_entry, update)
 
         state =
           state
@@ -314,29 +325,6 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.debug("Orchestrator ignored message: #{inspect(msg)}")
     {:noreply, state}
   end
-
-  defp maybe_run_gate_c(running_entry, %{event: :turn_completed}) do
-    cond do
-      Map.get(running_entry, :gate_c_checked) == true ->
-        running_entry
-
-      Map.get(running_entry, :turn_count) != 1 ->
-        running_entry
-
-      true ->
-        case GateC.validate_first_turn(Map.get(running_entry, :last_agent_text)) do
-          :ok ->
-            :ok
-
-          {:violation, _} = violation ->
-            GateC.log_violation(violation, running_entry)
-        end
-
-        Map.put(running_entry, :gate_c_checked, true)
-    end
-  end
-
-  defp maybe_run_gate_c(running_entry, _update), do: running_entry
 
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
@@ -449,7 +437,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp maybe_transition_merged_pr(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    PrMerge.maybe_transition(issue, on_merge_state, pr_check_fn, &apply_state_transition/2)
+    PrMerge.maybe_transition(issue, on_merge_state, pr_check_fn, &StateTransition.apply/2)
   end
 
   defp pr_merged?(pr_url), do: PrMerge.merged?(pr_url)
@@ -481,7 +469,7 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec apply_state_transition_for_test(Issue.t(), String.t() | nil) :: :ok
   def apply_state_transition_for_test(%Issue{} = issue, state_name) do
-    apply_state_transition(issue, state_name)
+    StateTransition.apply(issue, state_name)
   end
 
   @doc false
@@ -666,8 +654,8 @@ defmodule SymphonyElixir.Orchestrator do
   defp run_pr_attached_side_effects(nil, _running_entry), do: :ok
 
   defp run_pr_attached_side_effects(issue, running_entry) do
-    apply_state_transition(issue, Config.settings!().tracker.on_complete_state)
-    Task.start(fn -> apply_github_pr_label(issue) end)
+    StateTransition.apply(issue, Config.settings!().tracker.on_complete_state)
+    Task.start(fn -> GithubLabel.apply(issue) end)
 
     SymphonyElixir.QaEvidence.maybe_publish(
       Map.get(issue, :id),
@@ -675,74 +663,6 @@ defmodule SymphonyElixir.Orchestrator do
     )
 
     :ok
-  end
-
-  defp apply_state_transition(%Issue{} = issue, state_name)
-       when is_binary(state_name) and state_name != "" do
-    case Tracker.update_issue_state(issue.id, state_name) do
-      :ok ->
-        Logger.info("Linear state transition: #{issue_context(issue)} → #{state_name}")
-
-      {:error, reason} ->
-        Logger.warning("Linear state transition failed: #{issue_context(issue)} → #{state_name}: #{inspect(reason)}")
-    end
-
-    :ok
-  end
-
-  defp apply_state_transition(_issue, _state_name), do: :ok
-
-  defp parse_github_pr_url(url), do: PrUrl.parse(url)
-
-  defp apply_github_pr_label(%Issue{repos: repos}) do
-    repos
-    |> Enum.flat_map(fn
-      %{pr: %{url: url}} when is_binary(url) -> [url]
-      _ -> []
-    end)
-    |> Enum.each(&label_github_pr/1)
-  end
-
-  defp apply_github_pr_label(_), do: :ok
-
-  defp label_github_pr(pr_url) do
-    case parse_github_pr_url(pr_url) do
-      {:ok, owner, repo, number} ->
-        full_repo = "#{owner}/#{repo}"
-
-        case System.cmd(
-               "gh",
-               ["label", "create", "symphony", "--color", "7C3AED", "--repo", full_repo],
-               stderr_to_stdout: true
-             ) do
-          {_, 0} ->
-            :ok
-
-          {out, _code} when is_binary(out) ->
-            handle_label_create_output(out, full_repo)
-        end
-
-        case System.cmd(
-               "gh",
-               ["pr", "edit", "#{number}", "--add-label", "symphony", "--repo", full_repo],
-               stderr_to_stdout: true
-             ) do
-          {_, 0} ->
-            Logger.info("Applied symphony label: #{pr_url}")
-
-          {out, code} ->
-            Logger.warning("Failed to apply symphony label to #{pr_url}: exit=#{code} #{String.trim(out)}")
-        end
-
-      :error ->
-        Logger.warning("Cannot parse GitHub PR URL for labeling: #{inspect(pr_url)}")
-    end
-  end
-
-  defp handle_label_create_output(out, repo) do
-    unless String.contains?(out, "already exists") do
-      Logger.warning("gh label create failed for #{repo}: #{String.trim(out)}")
-    end
   end
 
   defp maybe_put_workpad_comment_id(entry, nil), do: entry
@@ -1016,7 +936,7 @@ defmodule SymphonyElixir.Orchestrator do
             workpad_comment_id: Map.get(state.workpads, issue.id)
           })
 
-        apply_state_transition(issue, pickup_state)
+        StateTransition.apply(issue, pickup_state)
 
         %{
           state
