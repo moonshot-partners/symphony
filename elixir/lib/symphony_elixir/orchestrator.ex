@@ -15,7 +15,6 @@ defmodule SymphonyElixir.Orchestrator do
     Dispatch,
     DispatchGate,
     GateCTrigger,
-    GithubLabel,
     PrMerge,
     RetryPlan,
     RunningEntry,
@@ -26,6 +25,7 @@ defmodule SymphonyElixir.Orchestrator do
     StateTransition,
     StatusFile,
     WorkerSelector,
+    WorkpadPrSync,
     WorkpadStore,
     WorkspaceCleanup
   }
@@ -485,7 +485,7 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
         state
-        |> sync_workpad_pr_attached(issue.id)
+        |> WorkpadPrSync.sync(issue.id, self())
         |> terminate_running_issue(issue.id, false)
 
       DispatchGate.has_pr_attachment?(issue) ->
@@ -600,44 +600,6 @@ defmodule SymphonyElixir.Orchestrator do
       _ ->
         release_issue_claim(state, issue_id)
     end
-  end
-
-  defp sync_workpad_pr_attached(%State{} = state, issue_id) when is_binary(issue_id) do
-    case Map.get(state.running, issue_id) do
-      nil ->
-        state
-
-      running_entry ->
-        comment_id =
-          Map.get(running_entry, :workpad_comment_id) || Map.get(state.workpads, issue_id)
-
-        entry =
-          running_entry
-          |> Map.put(:last_agent_event, :pr_attached)
-          |> RunningEntry.put_workpad_comment_id(comment_id)
-
-        update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
-        _ = Workpad.maybe_sync(entry, update, self())
-
-        issue = Map.get(running_entry, :issue)
-        run_pr_attached_side_effects(issue, running_entry)
-
-        state
-    end
-  end
-
-  defp run_pr_attached_side_effects(nil, _running_entry), do: :ok
-
-  defp run_pr_attached_side_effects(issue, running_entry) do
-    StateTransition.apply(issue, Config.settings!().tracker.on_complete_state)
-    Task.start(fn -> GithubLabel.apply(issue) end)
-
-    SymphonyElixir.QaEvidence.maybe_publish(
-      Map.get(issue, :id),
-      Map.get(running_entry, :workspace_path)
-    )
-
-    :ok
   end
 
   defp reconcile_stalled_running_issues(%State{} = state) do
