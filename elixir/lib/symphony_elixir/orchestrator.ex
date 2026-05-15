@@ -19,6 +19,7 @@ defmodule SymphonyElixir.Orchestrator do
     PrMerge,
     RetryPlan,
     RunningEntry,
+    SlotPolicy,
     Snapshot,
     StallScan,
     State,
@@ -344,7 +345,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp do_dispatch(%State{} = state) do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
-         true <- available_slots(state) > 0 do
+         true <- SlotPolicy.available_slots(state) > 0 do
       choose_issues(issues, state)
     else
       {:error, :missing_linear_api_token} ->
@@ -428,7 +429,7 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    should_dispatch_issue?(issue, state, DispatchGate.active_state_set(), DispatchGate.terminal_state_set())
+    SlotPolicy.should_dispatch?(issue, state, DispatchGate.active_state_set(), DispatchGate.terminal_state_set())
   end
 
   @doc false
@@ -688,52 +689,13 @@ defmodule SymphonyElixir.Orchestrator do
     terminal_states = DispatchGate.terminal_state_set()
 
     issues
-    |> sort_issues_for_dispatch()
+    |> Dispatch.sort()
     |> Enum.reduce(state, fn issue, state_acc ->
-      if should_dispatch_issue?(issue, state_acc, active_states, terminal_states) do
+      if SlotPolicy.should_dispatch?(issue, state_acc, active_states, terminal_states) do
         dispatch_issue(state_acc, issue)
       else
         state_acc
       end
-    end)
-  end
-
-  defp sort_issues_for_dispatch(issues), do: Dispatch.sort(issues)
-
-  defp should_dispatch_issue?(
-         %Issue{} = issue,
-         %State{running: running, claimed: claimed} = state,
-         active_states,
-         terminal_states
-       ) do
-    DispatchGate.candidate?(issue, active_states, terminal_states) and
-      !DispatchGate.todo_blocked_by_non_terminal?(issue, terminal_states) and
-      !MapSet.member?(claimed, issue.id) and
-      !Map.has_key?(running, issue.id) and
-      available_slots(state) > 0 and
-      state_slots_available?(issue, running) and
-      WorkerSelector.slots_available?(state)
-  end
-
-  defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
-
-  defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
-    limit = Config.max_concurrent_agents_for_state(issue_state)
-    used = running_issue_count_for_state(running, issue_state)
-    limit > used
-  end
-
-  defp state_slots_available?(_issue, _running), do: false
-
-  defp running_issue_count_for_state(running, issue_state) when is_map(running) do
-    normalized_state = DispatchGate.normalize_state(issue_state)
-
-    Enum.count(running, fn
-      {_id, %{issue: %Issue{state: state_name}}} ->
-        DispatchGate.normalize_state(state_name) == normalized_state
-
-      _ ->
-        false
     end)
   end
 
@@ -967,7 +929,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp handle_active_retry(state, issue, attempt, metadata) do
     if DispatchGate.retry_candidate?(issue, DispatchGate.terminal_state_set()) and
-         dispatch_slots_available?(issue, state) and
+         SlotPolicy.dispatch_slots_available?(issue, state) and
          WorkerSelector.slots_available?(state, metadata[:worker_host]) do
       # SODEV-765 lesson: the previous attempt left `state/<TICKET>/qa_check.py`
       # and `qa-evidence/` in the workspace. On retry the next agent inherits
@@ -1015,14 +977,6 @@ defmodule SymphonyElixir.Orchestrator do
         workspace_path: Map.get(running_entry, :workspace_path)
       })
     end
-  end
-
-  defp available_slots(%State{} = state) do
-    max(
-      (state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents) -
-        map_size(state.running),
-      0
-    )
   end
 
   @spec request_refresh() :: map() | :unavailable
@@ -1108,9 +1062,5 @@ defmodule SymphonyElixir.Orchestrator do
       | poll_interval_ms: config.polling.interval_ms,
         max_concurrent_agents: config.agent.max_concurrent_agents
     }
-  end
-
-  defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do
-    available_slots(state) > 0 and state_slots_available?(issue, state.running)
   end
 end
