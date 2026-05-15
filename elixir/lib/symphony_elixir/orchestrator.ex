@@ -16,6 +16,7 @@ defmodule SymphonyElixir.Orchestrator do
     DispatchGate,
     GateCTrigger,
     PrMerge,
+    RetryAttempts,
     RetryPlan,
     RunningEntry,
     SlotPolicy,
@@ -199,12 +200,18 @@ defmodule SymphonyElixir.Orchestrator do
 
               next_attempt = RetryPlan.next_attempt_from_running(running_entry)
 
-              schedule_issue_retry(state, issue_id, next_attempt, %{
-                identifier: running_entry.identifier,
-                error: "agent exited: #{inspect(reason)}",
-                worker_host: Map.get(running_entry, :worker_host),
-                workspace_path: Map.get(running_entry, :workspace_path)
-              })
+              RetryAttempts.schedule(
+                state,
+                issue_id,
+                next_attempt,
+                %{
+                  identifier: running_entry.identifier,
+                  error: "agent exited: #{inspect(reason)}",
+                  worker_host: Map.get(running_entry, :worker_host),
+                  workspace_path: Map.get(running_entry, :workspace_path)
+                },
+                self()
+              )
           end
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
@@ -315,7 +322,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:retry_issue, issue_id, retry_token}, state) do
     result =
-      case pop_retry_attempt_state(state, issue_id, retry_token) do
+      case RetryAttempts.pop(state, issue_id, retry_token) do
         {:ok, attempt, metadata, state} -> handle_retry_issue(state, issue_id, attempt, metadata)
         :missing -> {:noreply, state}
       end
@@ -628,10 +635,15 @@ defmodule SymphonyElixir.Orchestrator do
 
     state
     |> terminate_running_issue(issue_id, false)
-    |> schedule_issue_retry(issue_id, next_attempt, %{
-      identifier: identifier,
-      error: "stalled for #{elapsed_ms}ms without agent activity"
-    })
+    |> RetryAttempts.schedule(
+      issue_id,
+      next_attempt,
+      %{
+        identifier: identifier,
+        error: "stalled for #{elapsed_ms}ms without agent activity"
+      },
+      self()
+    )
   end
 
   defp terminate_task(pid) when is_pid(pid) do
@@ -745,11 +757,17 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.error("Unable to spawn agent for #{RunningEntry.format_context(issue)}: #{inspect(reason)}")
         next_attempt = if is_integer(attempt), do: attempt + 1, else: nil
 
-        schedule_issue_retry(state, issue.id, next_attempt, %{
-          identifier: issue.identifier,
-          error: "failed to spawn agent: #{inspect(reason)}",
-          worker_host: worker_host
-        })
+        RetryAttempts.schedule(
+          state,
+          issue.id,
+          next_attempt,
+          %{
+            identifier: issue.identifier,
+            error: "failed to spawn agent: #{inspect(reason)}",
+            worker_host: worker_host
+          },
+          self()
+        )
     end
   end
 
@@ -759,62 +777,6 @@ defmodule SymphonyElixir.Orchestrator do
       | completed: MapSet.put(state.completed, issue_id),
         retry_attempts: Map.delete(state.retry_attempts, issue_id)
     }
-  end
-
-  defp schedule_issue_retry(%State{} = state, issue_id, attempt, metadata)
-       when is_binary(issue_id) and is_map(metadata) do
-    previous_retry = Map.get(state.retry_attempts, issue_id, %{attempt: 0})
-    next_attempt = if is_integer(attempt), do: attempt, else: previous_retry.attempt + 1
-    delay_ms = RetryPlan.delay_ms(next_attempt, metadata)
-    old_timer = Map.get(previous_retry, :timer_ref)
-    retry_token = make_ref()
-    due_at_ms = System.monotonic_time(:millisecond) + delay_ms
-    identifier = RetryPlan.pick_identifier(issue_id, previous_retry, metadata)
-    error = RetryPlan.pick_error(previous_retry, metadata)
-    worker_host = RetryPlan.pick_worker_host(previous_retry, metadata)
-    workspace_path = RetryPlan.pick_workspace_path(previous_retry, metadata)
-
-    if is_reference(old_timer) do
-      Process.cancel_timer(old_timer)
-    end
-
-    timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
-
-    error_suffix = if is_binary(error), do: " error=#{error}", else: ""
-
-    Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
-
-    %{
-      state
-      | retry_attempts:
-          Map.put(state.retry_attempts, issue_id, %{
-            attempt: next_attempt,
-            timer_ref: timer_ref,
-            retry_token: retry_token,
-            due_at_ms: due_at_ms,
-            identifier: identifier,
-            error: error,
-            worker_host: worker_host,
-            workspace_path: workspace_path
-          })
-    }
-  end
-
-  defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do
-    case Map.get(state.retry_attempts, issue_id) do
-      %{attempt: attempt, retry_token: ^retry_token} = retry_entry ->
-        metadata = %{
-          identifier: Map.get(retry_entry, :identifier),
-          error: Map.get(retry_entry, :error),
-          worker_host: Map.get(retry_entry, :worker_host),
-          workspace_path: Map.get(retry_entry, :workspace_path)
-        }
-
-        {:ok, attempt, metadata, %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}}
-
-      _ ->
-        :missing
-    end
   end
 
   defp handle_retry_issue(%State{} = state, issue_id, attempt, metadata) do
@@ -828,11 +790,12 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
 
         {:noreply,
-         schedule_issue_retry(
+         RetryAttempts.schedule(
            state,
            issue_id,
            attempt + 1,
-           Map.merge(metadata, %{error: "retry poll failed: #{inspect(reason)}"})
+           Map.merge(metadata, %{error: "retry poll failed: #{inspect(reason)}"}),
+           self()
          )}
     end
   end
@@ -878,14 +841,15 @@ defmodule SymphonyElixir.Orchestrator do
       Logger.debug("No available slots for retrying #{RunningEntry.format_context(issue)}; retrying again")
 
       {:noreply,
-       schedule_issue_retry(
+       RetryAttempts.schedule(
          state,
          issue.id,
          attempt + 1,
          Map.merge(metadata, %{
            identifier: issue.identifier,
            error: "no available orchestrator slots"
-         })
+         }),
+         self()
        )}
     end
   end
@@ -907,12 +871,18 @@ defmodule SymphonyElixir.Orchestrator do
       Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR attached and attempt=#{current_attempt} >= 1; agent cannot resolve infra CI failures")
       state
     else
-      schedule_issue_retry(state, issue_id, 1, %{
-        identifier: running_entry.identifier,
-        delay_type: :continuation,
-        worker_host: Map.get(running_entry, :worker_host),
-        workspace_path: Map.get(running_entry, :workspace_path)
-      })
+      RetryAttempts.schedule(
+        state,
+        issue_id,
+        1,
+        %{
+          identifier: running_entry.identifier,
+          delay_type: :continuation,
+          worker_host: Map.get(running_entry, :worker_host),
+          workspace_path: Map.get(running_entry, :workspace_path)
+        },
+        self()
+      )
     end
   end
 
