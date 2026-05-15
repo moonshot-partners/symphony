@@ -4,15 +4,13 @@ defmodule SymphonyElixir.Agent.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Agent.DynamicTool, Config, PathSafety}
+  alias SymphonyElixir.{Agent.AppServer.Transport, Agent.DynamicTool, Config, PathSafety}
 
-  @dialyzer {:nowarn_function, port_metadata: 2, session_policies: 2}
+  @dialyzer {:nowarn_function, session_policies: 2}
 
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
-  @port_line_bytes 1_048_576
-  @max_stream_log_bytes 1_000
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
 
   @type session :: %{
@@ -43,8 +41,8 @@ defmodule SymphonyElixir.Agent.AppServer do
     worker_host = Keyword.get(opts, :worker_host)
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host) do
-      metadata = port_metadata(port, worker_host)
+         {:ok, port} <- Transport.start_port(expanded_workspace, worker_host) do
+      metadata = Transport.port_metadata(port, worker_host)
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
            {:ok, thread_id} <-
@@ -63,7 +61,7 @@ defmodule SymphonyElixir.Agent.AppServer do
          }}
       else
         {:error, reason} ->
-          stop_port(port)
+          Transport.stop_port(port)
           {:error, reason}
       end
     end
@@ -144,7 +142,7 @@ defmodule SymphonyElixir.Agent.AppServer do
 
   @spec stop_session(session()) :: :ok
   def stop_session(%{port: port}) when is_port(port) do
-    stop_port(port)
+    Transport.stop_port(port)
   end
 
   defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
@@ -189,108 +187,6 @@ defmodule SymphonyElixir.Agent.AppServer do
     end
   end
 
-  defp start_port(workspace, nil) do
-    case Config.settings!().agent_runtime.docker_image do
-      nil -> start_port_bash(workspace)
-      image -> start_port_docker(workspace, image)
-    end
-  end
-
-  defp start_port_bash(workspace) do
-    executable = System.find_executable("bash")
-
-    if is_nil(executable) do
-      {:error, :bash_not_found}
-    else
-      port =
-        Port.open(
-          {:spawn_executable, String.to_charlist(executable)},
-          [
-            :binary,
-            :exit_status,
-            :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.settings!().agent_runtime.command)],
-            cd: String.to_charlist(workspace),
-            line: @port_line_bytes
-          ]
-        )
-
-      {:ok, port}
-    end
-  end
-
-  @docker_passthrough_env ~w[
-    ANTHROPIC_API_KEY
-    ANTHROPIC_OAUTH_TOKEN
-    ANTHROPIC_BASE_URL
-    CLAUDE_CODE_OAUTH_TOKEN
-    LINEAR_API_KEY
-    GH_TOKEN
-    GITHUB_TOKEN
-    SYMPHONY_WORKFLOW_FILE
-  ]
-
-  defp start_port_docker(workspace, image) do
-    case System.find_executable("docker") do
-      nil ->
-        {:error, :docker_not_found}
-
-      executable ->
-        # CMD is baked into the image — no override needed here.
-        args =
-          ["run", "--rm", "-i"] ++
-            docker_env_args() ++
-            ["-v", "#{workspace}:/workspace", "-w", "/workspace", image]
-
-        port =
-          Port.open(
-            {:spawn_executable, String.to_charlist(executable)},
-            [
-              :binary,
-              :exit_status,
-              :stderr_to_stdout,
-              args: Enum.map(args, &String.to_charlist/1),
-              line: @port_line_bytes
-            ]
-          )
-
-        {:ok, port}
-    end
-  end
-
-  defp docker_env_args do
-    Enum.flat_map(@docker_passthrough_env, fn var ->
-      case System.get_env(var) do
-        nil -> []
-        val -> ["-e", "#{var}=#{val}"]
-      end
-    end)
-  end
-
-  defp shim_cwd(host_path) do
-    case Config.settings!().agent_runtime.docker_image do
-      nil -> host_path
-      # Workspace is mounted at /workspace inside the container.
-      _image -> "/workspace"
-    end
-  end
-
-  defp port_metadata(port, worker_host) when is_port(port) do
-    base_metadata =
-      case :erlang.port_info(port, :os_pid) do
-        {:os_pid, os_pid} ->
-          %{agent_pid: to_string(os_pid)}
-
-        _ ->
-          %{}
-      end
-
-    case worker_host do
-      host when is_binary(host) -> Map.put(base_metadata, :worker_host, host)
-      _ -> base_metadata
-    end
-  end
-
   defp send_initialize(port) do
     payload = %{
       "method" => "initialize",
@@ -307,10 +203,10 @@ defmodule SymphonyElixir.Agent.AppServer do
       }
     }
 
-    send_message(port, payload)
+    Transport.send_message(port, payload)
 
-    with {:ok, _} <- await_response(port, @initialize_id) do
-      send_message(port, %{"method" => "initialized", "params" => %{}})
+    with {:ok, _} <- Transport.await_response(port, @initialize_id) do
+      Transport.send_message(port, %{"method" => "initialized", "params" => %{}})
       :ok
     end
   end
@@ -338,17 +234,17 @@ defmodule SymphonyElixir.Agent.AppServer do
     params = %{
       "approvalPolicy" => approval_policy,
       "sandbox" => thread_sandbox,
-      "cwd" => shim_cwd(workspace),
+      "cwd" => Transport.shim_cwd(workspace),
       "dynamicTools" => DynamicTool.tool_specs()
     }
 
-    send_message(port, %{
+    Transport.send_message(port, %{
       "method" => "thread/start",
       "id" => @thread_start_id,
       "params" => params
     })
 
-    case await_response(port, @thread_start_id) do
+    case Transport.await_response(port, @thread_start_id) do
       {:ok, %{"thread" => thread_payload}} ->
         case thread_payload do
           %{"id" => thread_id} -> {:ok, thread_id}
@@ -361,7 +257,7 @@ defmodule SymphonyElixir.Agent.AppServer do
   end
 
   defp start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
-    send_message(port, %{
+    Transport.send_message(port, %{
       "method" => "turn/start",
       "id" => @turn_start_id,
       "params" => %{
@@ -372,14 +268,14 @@ defmodule SymphonyElixir.Agent.AppServer do
             "text" => prompt
           }
         ],
-        "cwd" => shim_cwd(workspace),
+        "cwd" => Transport.shim_cwd(workspace),
         "title" => "#{issue.identifier}: #{issue.title}",
         "approvalPolicy" => approval_policy,
         "sandboxPolicy" => turn_sandbox_policy
       }
     })
 
-    case await_response(port, @turn_start_id) do
+    case Transport.await_response(port, @turn_start_id) do
       {:ok, %{"turn" => %{"id" => turn_id}}} -> {:ok, turn_id}
       other -> other
     end
@@ -479,9 +375,9 @@ defmodule SymphonyElixir.Agent.AppServer do
         receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
 
       {:error, _reason} ->
-        log_non_json_stream_line(payload_string, "turn stream")
+        Transport.log_non_json_stream_line(payload_string, "turn stream")
 
-        if protocol_message_candidate?(payload_string) do
+        if Transport.protocol_message_candidate?(payload_string) do
           emit_message(
             on_message,
             :malformed,
@@ -622,7 +518,7 @@ defmodule SymphonyElixir.Agent.AppServer do
       |> tool_executor.(arguments)
       |> normalize_dynamic_tool_result()
 
-    send_message(port, %{
+    Transport.send_message(port, %{
       "id" => id,
       "result" => result
     })
@@ -788,7 +684,7 @@ defmodule SymphonyElixir.Agent.AppServer do
          metadata,
          true
        ) do
-    send_message(port, %{"id" => id, "result" => %{"decision" => decision}})
+    Transport.send_message(port, %{"id" => id, "result" => %{"decision" => decision}})
 
     emit_message(
       on_message,
@@ -825,7 +721,7 @@ defmodule SymphonyElixir.Agent.AppServer do
        ) do
     case tool_request_user_input_approval_answers(params) do
       {:ok, answers, decision} ->
-        send_message(port, %{"id" => id, "result" => %{"answers" => answers}})
+        Transport.send_message(port, %{"id" => id, "result" => %{"answers" => answers}})
 
         emit_message(
           on_message,
@@ -902,7 +798,7 @@ defmodule SymphonyElixir.Agent.AppServer do
        ) do
     case tool_request_user_input_unavailable_answers(params) do
       {:ok, answers} ->
-        send_message(port, %{"id" => id, "result" => %{"answers" => answers}})
+        Transport.send_message(port, %{"id" => id, "result" => %{"answers" => answers}})
 
         emit_message(
           on_message,
@@ -978,91 +874,8 @@ defmodule SymphonyElixir.Agent.AppServer do
     String.starts_with?(normalized_label, "approve") or String.starts_with?(normalized_label, "allow")
   end
 
-  defp await_response(port, request_id) do
-    with_timeout_response(port, request_id, Config.settings!().agent_runtime.read_timeout_ms, "")
-  end
-
-  defp with_timeout_response(port, request_id, timeout_ms, pending_line) do
-    receive do
-      {^port, {:data, {:eol, chunk}}} ->
-        complete_line = pending_line <> to_string(chunk)
-        handle_response(port, request_id, complete_line, timeout_ms)
-
-      {^port, {:data, {:noeol, chunk}}} ->
-        with_timeout_response(port, request_id, timeout_ms, pending_line <> to_string(chunk))
-
-      {^port, {:exit_status, status}} ->
-        {:error, {:port_exit, status}}
-    after
-      timeout_ms ->
-        {:error, :response_timeout}
-    end
-  end
-
-  defp handle_response(port, request_id, data, timeout_ms) do
-    payload = to_string(data)
-
-    case Jason.decode(payload) do
-      {:ok, %{"id" => ^request_id, "error" => error}} ->
-        {:error, {:response_error, error}}
-
-      {:ok, %{"id" => ^request_id, "result" => result}} ->
-        {:ok, result}
-
-      {:ok, %{"id" => ^request_id} = response_payload} ->
-        {:error, {:response_error, response_payload}}
-
-      {:ok, %{} = other} ->
-        Logger.debug("Ignoring message while waiting for response: #{inspect(other)}")
-        with_timeout_response(port, request_id, timeout_ms, "")
-
-      {:error, _} ->
-        log_non_json_stream_line(payload, "response stream")
-        with_timeout_response(port, request_id, timeout_ms, "")
-    end
-  end
-
-  defp log_non_json_stream_line(data, stream_label) do
-    text =
-      data
-      |> to_string()
-      |> String.trim()
-      |> String.slice(0, @max_stream_log_bytes)
-
-    if text != "" do
-      if String.match?(text, ~r/\b(error|warn|warning|failed|fatal|panic|exception)\b/i) do
-        Logger.warning("Agent #{stream_label} output: #{text}")
-      else
-        Logger.debug("Agent #{stream_label} output: #{text}")
-      end
-    end
-  end
-
-  defp protocol_message_candidate?(data) do
-    data
-    |> to_string()
-    |> String.trim_leading()
-    |> String.starts_with?("{")
-  end
-
   defp issue_context(%{id: issue_id, identifier: identifier}) do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
-  end
-
-  defp stop_port(port) when is_port(port) do
-    case :erlang.port_info(port) do
-      :undefined ->
-        :ok
-
-      _ ->
-        try do
-          Port.close(port)
-          :ok
-        rescue
-          ArgumentError ->
-            :ok
-        end
-    end
   end
 
   defp emit_message(on_message, event, details, metadata) when is_function(on_message, 1) do
@@ -1071,7 +884,7 @@ defmodule SymphonyElixir.Agent.AppServer do
   end
 
   defp metadata_from_message(port, payload) do
-    port |> port_metadata(nil) |> maybe_set_usage(payload)
+    port |> Transport.port_metadata(nil) |> maybe_set_usage(payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
@@ -1108,11 +921,6 @@ defmodule SymphonyElixir.Agent.AppServer do
   end
 
   defp tool_call_arguments(_params), do: %{}
-
-  defp send_message(port, message) do
-    line = Jason.encode!(message) <> "\n"
-    Port.command(port, line)
-  end
 
   defp needs_input?(method, payload)
        when is_binary(method) and is_map(payload) do
