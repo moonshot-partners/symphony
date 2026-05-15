@@ -1,7 +1,8 @@
 .superpowers/
 .claude/
 .symphony-runtime/
-/docs/
+docs/*
+!docs/spec/
 mvp-claude-sodev/
 .qa-spike/
 __pycache__/
