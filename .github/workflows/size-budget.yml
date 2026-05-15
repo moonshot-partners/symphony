@@ -29,7 +29,6 @@ jobs:
           # Format: one path per line.
           EXEMPT=$(cat <<'EOF'
           elixir/lib/symphony_elixir/orchestrator.ex
-          elixir/lib/symphony_elixir/agent/app_server.ex
           EOF
           )
 
