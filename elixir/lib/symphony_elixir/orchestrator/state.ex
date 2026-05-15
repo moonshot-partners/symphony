@@ -23,4 +23,6 @@ defmodule SymphonyElixir.Orchestrator.State do
     agent_rate_limits: nil,
     drain: false
   ]
+
+  @type t :: %__MODULE__{}
 end
