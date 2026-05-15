@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Orchestrator do
     GithubLabel,
     PrMerge,
     RetryPlan,
+    RunningEntry,
     Snapshot,
     StallScan,
     State,
@@ -174,14 +175,14 @@ defmodule SymphonyElixir.Orchestrator do
         {:DOWN, ref, :process, _pid, reason},
         %{running: running} = state
       ) do
-    case find_issue_id_for_ref(running, ref) do
+    case RunningEntry.find_id_for_ref(running, ref) do
       nil ->
         {:noreply, state}
 
       issue_id ->
-        {running_entry, state} = pop_running_entry(state, issue_id)
+        {running_entry, state} = RunningEntry.pop(state, issue_id)
         state = AgentTotals.record_session_completion(state, running_entry)
-        session_id = running_entry_session_id(running_entry)
+        session_id = RunningEntry.session_id(running_entry)
 
         state =
           case reason do
@@ -221,8 +222,8 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry ->
         updated_running_entry =
           running_entry
-          |> maybe_put_runtime_value(:worker_host, runtime_info[:worker_host])
-          |> maybe_put_runtime_value(:workspace_path, runtime_info[:workspace_path])
+          |> RunningEntry.put_runtime_value(:worker_host, runtime_info[:worker_host])
+          |> RunningEntry.put_runtime_value(:workspace_path, runtime_info[:workspace_path])
 
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
@@ -474,29 +475,29 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       DispatchGate.terminal_state?(issue.state, terminal_states) ->
-        Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
+        Logger.info("Issue moved to terminal state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_running_issue(state, issue.id, true)
 
       DispatchGate.has_pr_attachment?(issue) and GitHubPr.ready?(issue) ->
-        Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{issue_context(issue)} state=#{issue.state}; stopping active agent without retry")
+        Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
         state
         |> sync_workpad_pr_attached(issue.id)
         |> terminate_running_issue(issue.id, false)
 
       DispatchGate.has_pr_attachment?(issue) ->
-        Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{issue_context(issue)} state=#{issue.state}; keeping agent running")
+        Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
 
         if DispatchGate.active_state?(issue.state, active_states) do
           refresh_running_issue_state(state, issue)
         else
-          Logger.info("Issue moved to non-active state with stale PR: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
+          Logger.info("Issue moved to non-active state with stale PR: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
           terminate_running_issue(state, issue.id, false)
         end
 
       !DispatchGate.routable_to_worker?(issue) ->
-        Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
+        Logger.info("Issue no longer routed to this worker: #{RunningEntry.format_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
         terminate_running_issue(state, issue.id, false)
 
@@ -504,7 +505,7 @@ defmodule SymphonyElixir.Orchestrator do
         refresh_running_issue_state(state, issue)
 
       true ->
-        Logger.info("Issue moved to non-active state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
+        Logger.info("Issue moved to non-active state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_running_issue(state, issue.id, false)
     end
@@ -611,7 +612,7 @@ defmodule SymphonyElixir.Orchestrator do
         entry =
           running_entry
           |> Map.put(:last_agent_event, :pr_attached)
-          |> maybe_put_workpad_comment_id(comment_id)
+          |> RunningEntry.put_workpad_comment_id(comment_id)
 
         update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
         _ = Workpad.maybe_sync(entry, update, self())
@@ -636,11 +637,6 @@ defmodule SymphonyElixir.Orchestrator do
 
     :ok
   end
-
-  defp maybe_put_workpad_comment_id(entry, nil), do: entry
-
-  defp maybe_put_workpad_comment_id(entry, comment_id) when is_binary(comment_id),
-    do: Map.put(entry, :workpad_comment_id, comment_id)
 
   defp reconcile_stalled_running_issues(%State{} = state) do
     timeout_ms = Config.settings!().agent_runtime.stall_timeout_ms
@@ -747,16 +743,18 @@ defmodule SymphonyElixir.Orchestrator do
         do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
 
       {:skip, :missing} ->
-        Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
+        Logger.info("Skipping dispatch; issue no longer active or visible: #{RunningEntry.format_context(issue)}")
         state
 
       {:skip, %Issue{} = refreshed_issue} ->
-        Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+        Logger.info(
+          "Skipping stale dispatch after issue refresh: #{RunningEntry.format_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}"
+        )
 
         state
 
       {:error, reason} ->
-        Logger.warning("Skipping dispatch; issue refresh failed for #{issue_context(issue)}: #{inspect(reason)}")
+        Logger.warning("Skipping dispatch; issue refresh failed for #{RunningEntry.format_context(issue)}: #{inspect(reason)}")
         state
     end
   end
@@ -766,7 +764,7 @@ defmodule SymphonyElixir.Orchestrator do
 
     case WorkerSelector.select(state, preferred_worker_host) do
       :no_worker_capacity ->
-        Logger.debug("No SSH worker slots available for #{issue_context(issue)} preferred_worker_host=#{inspect(preferred_worker_host)}")
+        Logger.debug("No SSH worker slots available for #{RunningEntry.format_context(issue)} preferred_worker_host=#{inspect(preferred_worker_host)}")
         state
 
       worker_host ->
@@ -783,7 +781,7 @@ defmodule SymphonyElixir.Orchestrator do
       {:ok, pid} ->
         ref = Process.monitor(pid)
 
-        Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
+        Logger.info("Dispatching issue to agent: #{RunningEntry.format_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
 
         running =
           Map.put(state.running, issue.id, %{
@@ -820,7 +818,7 @@ defmodule SymphonyElixir.Orchestrator do
         }
 
       {:error, reason} ->
-        Logger.error("Unable to spawn agent for #{issue_context(issue)}: #{inspect(reason)}")
+        Logger.error("Unable to spawn agent for #{RunningEntry.format_context(issue)}: #{inspect(reason)}")
         next_attempt = if is_integer(attempt), do: attempt + 1, else: nil
 
         schedule_issue_retry(state, issue.id, next_attempt, %{
@@ -899,7 +897,7 @@ defmodule SymphonyElixir.Orchestrator do
     case Tracker.fetch_candidate_issues() do
       {:ok, issues} ->
         issues
-        |> find_issue_by_id(issue_id)
+        |> RunningEntry.find_issue_by_id(issue_id)
         |> handle_retry_issue_lookup(state, issue_id, attempt, metadata)
 
       {:error, reason} ->
@@ -978,7 +976,7 @@ defmodule SymphonyElixir.Orchestrator do
       cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
       {:noreply, dispatch_issue(state, issue, attempt, metadata[:worker_host])}
     else
-      Logger.debug("No available slots for retrying #{issue_context(issue)}; retrying again")
+      Logger.debug("No available slots for retrying #{RunningEntry.format_context(issue)}; retrying again")
 
       {:noreply,
        schedule_issue_retry(
@@ -1017,38 +1015,6 @@ defmodule SymphonyElixir.Orchestrator do
         workspace_path: Map.get(running_entry, :workspace_path)
       })
     end
-  end
-
-  defp maybe_put_runtime_value(running_entry, _key, nil), do: running_entry
-
-  defp maybe_put_runtime_value(running_entry, key, value) when is_map(running_entry) do
-    Map.put(running_entry, key, value)
-  end
-
-  defp find_issue_by_id(issues, issue_id) when is_binary(issue_id) do
-    Enum.find(issues, fn
-      %Issue{id: ^issue_id} ->
-        true
-
-      _ ->
-        false
-    end)
-  end
-
-  defp find_issue_id_for_ref(running, ref) do
-    running
-    |> Enum.find_value(fn {issue_id, %{ref: running_ref}} ->
-      if running_ref == ref, do: issue_id
-    end)
-  end
-
-  defp running_entry_session_id(%{session_id: session_id}) when is_binary(session_id),
-    do: session_id
-
-  defp running_entry_session_id(_running_entry), do: "n/a"
-
-  defp issue_context(%Issue{id: issue_id, identifier: identifier}) do
-    "issue_id=#{issue_id} issue_identifier=#{identifier}"
   end
 
   defp available_slots(%State{} = state) do
@@ -1132,10 +1098,6 @@ defmodule SymphonyElixir.Orchestrator do
   defp schedule_poll_cycle_start do
     :timer.send_after(@poll_transition_render_delay_ms, self(), :run_poll_cycle)
     :ok
-  end
-
-  defp pop_running_entry(state, issue_id) do
-    {Map.get(state.running, issue_id), %{state | running: Map.delete(state.running, issue_id)}}
   end
 
   defp refresh_runtime_config(%State{} = state) do
