@@ -5,15 +5,16 @@ defmodule SymphonyElixir.Orchestrator.PrMerge do
 
   Extracted from `SymphonyElixir.Orchestrator` so the merge-check and the
   conditional state-transition logic are testable without `*_for_test`
-  shims. The orchestrator's `defp reconcile_pr_merged_issues/1` still
-  fetches the candidate issues and supplies the default `transition_fn`;
-  this module owns the leaf behaviour.
+  shims. CP13 moved the full reconciliation sweep
+  (`reconcile/2`) into this module too, so the orchestrator's poll cycle
+  just delegates here.
   """
 
   require Logger
 
+  alias SymphonyElixir.{Config, Tracker}
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Orchestrator.PrUrl
+  alias SymphonyElixir.Orchestrator.{PrUrl, StateTransition}
 
   @doc """
   Returns `true` when `gh pr view <number> --repo <owner>/<repo> --json merged`
@@ -71,5 +72,45 @@ defmodule SymphonyElixir.Orchestrator.PrMerge do
     end
 
     :ok
+  end
+
+  @doc """
+  Sweep every issue currently in `on_complete_state` that carries a PR
+  attachment and, for any whose PR is merged on GitHub, transition the
+  Linear issue to `on_pr_merge_state`. No-op when either tracker
+  setting in `Config` is missing (binary-shape guard).
+
+  Returns `:ok` regardless of outcome — the orchestrator only needs to
+  know the sweep ran. Used by `Orchestrator.maybe_dispatch/1` once per
+  poll cycle. The injection points (`fetch_fn`, `pr_check_fn`,
+  `transition_fn`) let tests stub out Linear/GitHub/StateTransition
+  without `*_for_test` shims.
+  """
+  @spec reconcile(keyword()) :: :ok
+  def reconcile(opts \\ []) do
+    on_complete = Config.settings!().tracker.on_complete_state
+    on_merge = Config.settings!().tracker.on_pr_merge_state
+
+    if is_binary(on_complete) and is_binary(on_merge) do
+      fetch_fn = Keyword.get(opts, :fetch_fn, fn -> Tracker.fetch_issues_by_states([on_complete]) end)
+      pr_check_fn = Keyword.get(opts, :pr_check_fn, &merged?/1)
+      transition_fn = Keyword.get(opts, :transition_fn, &StateTransition.apply/2)
+
+      do_reconcile(on_merge, fetch_fn, pr_check_fn, transition_fn)
+    end
+
+    :ok
+  end
+
+  defp do_reconcile(on_merge, fetch_fn, pr_check_fn, transition_fn) do
+    case fetch_fn.() do
+      {:ok, issues} ->
+        issues
+        |> Enum.filter(& &1.has_pr_attachment)
+        |> Enum.each(&maybe_transition(&1, on_merge, pr_check_fn, transition_fn))
+
+      {:error, reason} ->
+        Logger.debug("PrMerge.reconcile: fetch failed #{inspect(reason)}")
+    end
   end
 end
