@@ -19,6 +19,7 @@ defmodule SymphonyElixir.Orchestrator do
     PrMerge,
     RetryPlan,
     Snapshot,
+    StallScan,
     State,
     StateTransition,
     StatusFile,
@@ -644,61 +645,35 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_stalled_running_issues(%State{} = state) do
     timeout_ms = Config.settings!().agent_runtime.stall_timeout_ms
 
-    cond do
-      timeout_ms <= 0 ->
-        state
-
-      map_size(state.running) == 0 ->
-        state
-
-      true ->
-        now = DateTime.utc_now()
-
-        Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
-          restart_stalled_issue(state_acc, issue_id, running_entry, now, timeout_ms)
-        end)
-    end
-  end
-
-  defp restart_stalled_issue(state, issue_id, running_entry, now, timeout_ms) do
-    elapsed_ms = stall_elapsed_ms(running_entry, now)
-
-    if is_integer(elapsed_ms) and elapsed_ms > timeout_ms do
-      identifier = Map.get(running_entry, :identifier, issue_id)
-      session_id = running_entry_session_id(running_entry)
-
-      Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
-
-      next_attempt = RetryPlan.next_attempt_from_running(running_entry)
-
+    if timeout_ms <= 0 or map_size(state.running) == 0 do
       state
-      |> terminate_running_issue(issue_id, false)
-      |> schedule_issue_retry(issue_id, next_attempt, %{
-        identifier: identifier,
-        error: "stalled for #{elapsed_ms}ms without agent activity"
-      })
     else
-      state
+      state.running
+      |> StallScan.find_stalled(DateTime.utc_now(), timeout_ms)
+      |> Enum.reduce(state, &restart_stalled_issue/2)
     end
   end
 
-  defp stall_elapsed_ms(running_entry, now) do
-    running_entry
-    |> last_activity_timestamp()
-    |> case do
-      %DateTime{} = timestamp ->
-        max(0, DateTime.diff(now, timestamp, :millisecond))
+  defp restart_stalled_issue(stalled, state) do
+    %{
+      issue_id: issue_id,
+      identifier: identifier,
+      session_id: session_id,
+      running_entry: running_entry,
+      elapsed_ms: elapsed_ms
+    } = stalled
 
-      _ ->
-        nil
-    end
+    Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
+
+    next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+
+    state
+    |> terminate_running_issue(issue_id, false)
+    |> schedule_issue_retry(issue_id, next_attempt, %{
+      identifier: identifier,
+      error: "stalled for #{elapsed_ms}ms without agent activity"
+    })
   end
-
-  defp last_activity_timestamp(running_entry) when is_map(running_entry) do
-    Map.get(running_entry, :last_agent_timestamp) || Map.get(running_entry, :started_at)
-  end
-
-  defp last_activity_timestamp(_running_entry), do: nil
 
   defp terminate_task(pid) when is_pid(pid) do
     case Task.Supervisor.terminate_child(SymphonyElixir.TaskSupervisor, pid) do
