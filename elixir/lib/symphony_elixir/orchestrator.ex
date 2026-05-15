@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Orchestrator do
     PrMerge,
     Reconcile,
     RetryAttempts,
+    RetryDispatch,
     RetryPlan,
     RunningEntry,
     SlotPolicy,
@@ -194,7 +195,11 @@ defmodule SymphonyElixir.Orchestrator do
 
               state
               |> complete_issue(issue_id)
-              |> maybe_schedule_continuation_retry(issue_id, running_entry)
+              |> RetryDispatch.maybe_schedule_continuation_retry(
+                issue_id,
+                running_entry,
+                retry_dispatch_opts()
+              )
 
             _ ->
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
@@ -322,14 +327,17 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_info({:retry_issue, issue_id, retry_token}, state) do
-    result =
+    new_state =
       case RetryAttempts.pop(state, issue_id, retry_token) do
-        {:ok, attempt, metadata, state} -> handle_retry_issue(state, issue_id, attempt, metadata)
-        :missing -> {:noreply, state}
+        {:ok, attempt, metadata, state} ->
+          RetryDispatch.handle_retry_issue(state, issue_id, attempt, metadata, retry_dispatch_opts())
+
+        :missing ->
+          state
       end
 
     notify_dashboard()
-    result
+    {:noreply, new_state}
   end
 
   def handle_info({:retry_issue, _issue_id}, state), do: {:noreply, state}
@@ -672,111 +680,18 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp handle_retry_issue(%State{} = state, issue_id, attempt, metadata) do
-    case Tracker.fetch_candidate_issues() do
-      {:ok, issues} ->
-        issues
-        |> RunningEntry.find_issue_by_id(issue_id)
-        |> handle_retry_issue_lookup(state, issue_id, attempt, metadata)
-
-      {:error, reason} ->
-        Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
-
-        {:noreply,
-         RetryAttempts.schedule(
-           state,
-           issue_id,
-           attempt + 1,
-           Map.merge(metadata, %{error: "retry poll failed: #{inspect(reason)}"}),
-           self()
-         )}
-    end
-  end
-
-  defp handle_retry_issue_lookup(%Issue{} = issue, state, issue_id, attempt, metadata) do
-    terminal_states = DispatchGate.terminal_state_set()
-
-    cond do
-      DispatchGate.terminal_state?(issue.state, terminal_states) ->
-        Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
-
-        WorkspaceCleanup.cleanup_for_identifier(issue.identifier, metadata[:worker_host])
-        {:noreply, release_issue_claim(state, issue_id)}
-
-      DispatchGate.retry_candidate?(issue, terminal_states) ->
-        handle_active_retry(state, issue, attempt, metadata)
-
-      true ->
-        Logger.debug("Issue left active states, removing claim issue_id=#{issue_id} issue_identifier=#{issue.identifier}")
-
-        {:noreply, release_issue_claim(state, issue_id)}
-    end
-  end
-
-  defp handle_retry_issue_lookup(nil, state, issue_id, _attempt, _metadata) do
-    Logger.debug("Issue no longer visible, removing claim issue_id=#{issue_id}")
-    {:noreply, release_issue_claim(state, issue_id)}
-  end
-
   defp notify_dashboard, do: :ok
-
-  defp handle_active_retry(state, issue, attempt, metadata) do
-    if DispatchGate.retry_candidate?(issue, DispatchGate.terminal_state_set()) and
-         SlotPolicy.dispatch_slots_available?(issue, state) and
-         WorkerSelector.slots_available?(state, metadata[:worker_host]) do
-      # SODEV-765 lesson: the previous attempt left `state/<TICKET>/qa_check.py`
-      # and `qa-evidence/` in the workspace. On retry the next agent inherits
-      # those files and either re-uses a stale check or trips over a dirty
-      # `git status`. Wipe the workspace so retry starts from a fresh clone.
-      WorkspaceCleanup.cleanup_for_identifier(issue.identifier, metadata[:worker_host])
-      {:noreply, dispatch_issue(state, issue, attempt, metadata[:worker_host])}
-    else
-      Logger.debug("No available slots for retrying #{RunningEntry.format_context(issue)}; retrying again")
-
-      {:noreply,
-       RetryAttempts.schedule(
-         state,
-         issue.id,
-         attempt + 1,
-         Map.merge(metadata, %{
-           identifier: issue.identifier,
-           error: "no available orchestrator slots"
-         }),
-         self()
-       )}
-    end
-  end
 
   defp release_issue_claim(%State{} = state, issue_id) do
     %{state | claimed: MapSet.delete(state.claimed, issue_id)}
   end
 
-  # When a PR is already attached and the agent has already had one continuation
-  # retry (attempt >= 1), additional retries cannot help — the agent is stuck on
-  # CI failures it did not cause (e.g. infra rate limits). Stop the loop.
-  # The first continuation retry (attempt == 0) is preserved for the SODEV-765
-  # class: agent ships PR, CI fails due to code, one retry to fix.
-  defp maybe_schedule_continuation_retry(state, issue_id, running_entry) do
-    has_pr = DispatchGate.has_pr_attachment?(Map.get(running_entry, :issue, %{}))
-    current_attempt = Map.get(running_entry, :retry_attempt, 0)
-
-    if has_pr and current_attempt >= 1 do
-      Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR attached and attempt=#{current_attempt} >= 1; agent cannot resolve infra CI failures")
-      state
-    else
-      RetryAttempts.schedule(
-        state,
-        issue_id,
-        1,
-        %{
-          identifier: running_entry.identifier,
-          delay_type: :continuation,
-          worker_host: Map.get(running_entry, :worker_host),
-          workspace_path: Map.get(running_entry, :workspace_path)
-        },
-        self()
-      )
-    end
+  defp retry_dispatch_opts do
+    %{
+      recipient: self(),
+      dispatch_fn: &dispatch_issue/4,
+      release_claim_fn: &release_issue_claim/2
+    }
   end
 
   @spec request_refresh() :: map() | :unavailable
