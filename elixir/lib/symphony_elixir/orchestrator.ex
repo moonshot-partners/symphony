@@ -5,7 +5,6 @@ defmodule SymphonyElixir.Orchestrator do
 
   use GenServer
   require Logger
-  import Bitwise, only: [<<<: 2]
 
   alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Linear.Issue
@@ -18,6 +17,7 @@ defmodule SymphonyElixir.Orchestrator do
     GateCTrigger,
     GithubLabel,
     PrMerge,
+    RetryPlan,
     Snapshot,
     State,
     StateTransition,
@@ -30,8 +30,6 @@ defmodule SymphonyElixir.Orchestrator do
   @default_status_path "/opt/symphony/state/status.json"
   @default_drain_flag_path "/opt/symphony/state/drain.flag"
 
-  @continuation_retry_delay_ms 1_000
-  @failure_retry_base_ms 10_000
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_agent_totals %{
@@ -196,7 +194,7 @@ defmodule SymphonyElixir.Orchestrator do
             _ ->
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
 
-              next_attempt = next_retry_attempt_from_running(running_entry)
+              next_attempt = RetryPlan.next_attempt_from_running(running_entry)
 
               schedule_issue_retry(state, issue_id, next_attempt, %{
                 identifier: running_entry.identifier,
@@ -671,7 +669,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
 
-      next_attempt = next_retry_attempt_from_running(running_entry)
+      next_attempt = RetryPlan.next_attempt_from_running(running_entry)
 
       state
       |> terminate_running_issue(issue_id, false)
@@ -832,7 +830,7 @@ defmodule SymphonyElixir.Orchestrator do
             agent_last_reported_output_tokens: 0,
             agent_last_reported_total_tokens: 0,
             turn_count: 0,
-            retry_attempt: normalize_retry_attempt(attempt),
+            retry_attempt: RetryPlan.normalize_attempt(attempt),
             started_at: DateTime.utc_now(),
             workpad_comment_id: Map.get(state.workpads, issue.id)
           })
@@ -870,14 +868,14 @@ defmodule SymphonyElixir.Orchestrator do
        when is_binary(issue_id) and is_map(metadata) do
     previous_retry = Map.get(state.retry_attempts, issue_id, %{attempt: 0})
     next_attempt = if is_integer(attempt), do: attempt, else: previous_retry.attempt + 1
-    delay_ms = retry_delay(next_attempt, metadata)
+    delay_ms = RetryPlan.delay_ms(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
     due_at_ms = System.monotonic_time(:millisecond) + delay_ms
-    identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
-    error = pick_retry_error(previous_retry, metadata)
-    worker_host = pick_retry_worker_host(previous_retry, metadata)
-    workspace_path = pick_retry_workspace_path(previous_retry, metadata)
+    identifier = RetryPlan.pick_identifier(issue_id, previous_retry, metadata)
+    error = RetryPlan.pick_error(previous_retry, metadata)
+    worker_host = RetryPlan.pick_worker_host(previous_retry, metadata)
+    workspace_path = RetryPlan.pick_workspace_path(previous_retry, metadata)
 
     if is_reference(old_timer) do
       Process.cancel_timer(old_timer)
@@ -1024,19 +1022,6 @@ defmodule SymphonyElixir.Orchestrator do
     %{state | claimed: MapSet.delete(state.claimed, issue_id)}
   end
 
-  defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
-    if metadata[:delay_type] == :continuation and attempt == 1 do
-      @continuation_retry_delay_ms
-    else
-      failure_retry_delay(attempt)
-    end
-  end
-
-  defp failure_retry_delay(attempt) do
-    max_delay_power = min(attempt - 1, 10)
-    min(@failure_retry_base_ms * (1 <<< max_delay_power), Config.settings!().agent.max_retry_backoff_ms)
-  end
-
   # When a PR is already attached and the agent has already had one continuation
   # retry (attempt >= 1), additional retries cannot help — the agent is stuck on
   # CI failures it did not cause (e.g. infra rate limits). Stop the loop.
@@ -1057,32 +1042,6 @@ defmodule SymphonyElixir.Orchestrator do
         workspace_path: Map.get(running_entry, :workspace_path)
       })
     end
-  end
-
-  defp normalize_retry_attempt(attempt) when is_integer(attempt) and attempt > 0, do: attempt
-  defp normalize_retry_attempt(_attempt), do: 0
-
-  defp next_retry_attempt_from_running(running_entry) do
-    case Map.get(running_entry, :retry_attempt) do
-      attempt when is_integer(attempt) and attempt > 0 -> attempt + 1
-      _ -> nil
-    end
-  end
-
-  defp pick_retry_identifier(issue_id, previous_retry, metadata) do
-    metadata[:identifier] || Map.get(previous_retry, :identifier) || issue_id
-  end
-
-  defp pick_retry_error(previous_retry, metadata) do
-    metadata[:error] || Map.get(previous_retry, :error)
-  end
-
-  defp pick_retry_worker_host(previous_retry, metadata) do
-    metadata[:worker_host] || Map.get(previous_retry, :worker_host)
-  end
-
-  defp pick_retry_workspace_path(previous_retry, metadata) do
-    metadata[:workspace_path] || Map.get(previous_retry, :workspace_path)
   end
 
   defp maybe_put_runtime_value(running_entry, _key, nil), do: running_entry
