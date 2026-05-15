@@ -24,6 +24,7 @@ defmodule SymphonyElixir.Orchestrator do
     State,
     StateTransition,
     StatusFile,
+    TickScheduler,
     WorkerSelector,
     WorkpadPrSync,
     WorkpadStore,
@@ -34,8 +35,6 @@ defmodule SymphonyElixir.Orchestrator do
   @default_status_path "/opt/symphony/state/status.json"
   @default_drain_flag_path "/opt/symphony/state/drain.flag"
 
-  # Slightly above the dashboard render interval so "checking now…" can render.
-  @poll_transition_render_delay_ms 20
   @empty_agent_totals %{
     input_tokens: 0,
     output_tokens: 0,
@@ -67,7 +66,7 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     WorkspaceCleanup.run_terminal()
-    state = schedule_tick(state, 0)
+    state = TickScheduler.schedule_tick(state, 0, self())
 
     {:ok, state}
   end
@@ -120,7 +119,7 @@ defmodule SymphonyElixir.Orchestrator do
   @impl true
   def handle_info({:tick, tick_token}, %{tick_token: tick_token} = state)
       when is_reference(tick_token) do
-    state = refresh_runtime_config(state)
+    state = TickScheduler.refresh_runtime_config(state)
 
     state = %{
       state
@@ -131,14 +130,14 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     notify_dashboard()
-    :ok = schedule_poll_cycle_start()
+    :ok = TickScheduler.schedule_poll_cycle_start(self())
     {:noreply, state}
   end
 
   def handle_info({:tick, _tick_token}, state), do: {:noreply, state}
 
   def handle_info(:tick, state) do
-    state = refresh_runtime_config(state)
+    state = TickScheduler.refresh_runtime_config(state)
 
     state = %{
       state
@@ -149,14 +148,14 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     notify_dashboard()
-    :ok = schedule_poll_cycle_start()
+    :ok = TickScheduler.schedule_poll_cycle_start(self())
     {:noreply, state}
   end
 
   def handle_info(:run_poll_cycle, state) do
     state =
       try do
-        state = refresh_runtime_config(state)
+        state = TickScheduler.refresh_runtime_config(state)
         state = sync_drain_status(state, status_path(), drain_flag_path())
         maybe_dispatch(state)
       rescue
@@ -166,7 +165,7 @@ defmodule SymphonyElixir.Orchestrator do
           state
       end
 
-    state = schedule_tick(state, state.poll_interval_ms)
+    state = TickScheduler.schedule_tick(state, state.poll_interval_ms, self())
     state = %{state | poll_check_in_progress: false}
 
     notify_dashboard()
@@ -950,7 +949,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    state = refresh_runtime_config(state)
+    state = TickScheduler.refresh_runtime_config(state)
     now = DateTime.utc_now()
     now_ms = System.monotonic_time(:millisecond)
     {:reply, Snapshot.build(state, now, now_ms), state}
@@ -960,7 +959,7 @@ defmodule SymphonyElixir.Orchestrator do
     now_ms = System.monotonic_time(:millisecond)
     already_due? = is_integer(state.next_poll_due_at_ms) and state.next_poll_due_at_ms <= now_ms
     coalesced = state.poll_check_in_progress == true or already_due?
-    state = if coalesced, do: state, else: schedule_tick(state, 0)
+    state = if coalesced, do: state, else: TickScheduler.schedule_tick(state, 0, self())
 
     {:reply,
      %{
@@ -969,36 +968,5 @@ defmodule SymphonyElixir.Orchestrator do
        requested_at: DateTime.utc_now(),
        operations: ["poll", "reconcile"]
      }, state}
-  end
-
-  defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
-    if is_reference(state.tick_timer_ref) do
-      Process.cancel_timer(state.tick_timer_ref)
-    end
-
-    tick_token = make_ref()
-    timer_ref = Process.send_after(self(), {:tick, tick_token}, delay_ms)
-
-    %{
-      state
-      | tick_timer_ref: timer_ref,
-        tick_token: tick_token,
-        next_poll_due_at_ms: System.monotonic_time(:millisecond) + delay_ms
-    }
-  end
-
-  defp schedule_poll_cycle_start do
-    :timer.send_after(@poll_transition_render_delay_ms, self(), :run_poll_cycle)
-    :ok
-  end
-
-  defp refresh_runtime_config(%State{} = state) do
-    config = Config.settings!()
-
-    %{
-      state
-      | poll_interval_ms: config.polling.interval_ms,
-        max_concurrent_agents: config.agent.max_concurrent_agents
-    }
   end
 end
