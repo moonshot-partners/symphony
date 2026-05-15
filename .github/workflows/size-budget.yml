@@ -1,0 +1,49 @@
+name: size-budget
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  enforce-file-size:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Enforce 800 LOC budget on elixir/lib/**/*.ex
+        run: |
+          set -euo pipefail
+
+          # Hard ceiling for any single Elixir source file under elixir/lib/.
+          # Rationale: anything north of ~800 LOC is a refactoring smell. The
+          # repo's own CLAUDE.md flags ">600 mandatory split" — we use 800 to
+          # absorb the realistic post-split tail (helpers + types + specs).
+          LIMIT=800
+
+          # Modules currently above the limit that are tracked by an in-flight
+          # split refactor. Remove the entry once the file lands under LIMIT.
+          # Format: one path per line.
+          EXEMPT=$(cat <<'EOF'
+          elixir/lib/symphony_elixir/orchestrator.ex
+          elixir/lib/symphony_elixir/agent/app_server.ex
+          EOF
+          )
+
+          fail=0
+          while IFS= read -r path; do
+            loc=$(wc -l < "$path" | tr -d ' ')
+            if [ "$loc" -gt "$LIMIT" ]; then
+              if echo "$EXEMPT" | grep -qx "$path"; then
+                echo "::warning file=$path::$loc LOC (exempt — see size-budget.yml)"
+              else
+                echo "::error file=$path::$loc LOC exceeds $LIMIT-LOC budget. Split it or add to EXEMPT in .github/workflows/size-budget.yml."
+                fail=1
+              fi
+            fi
+          done < <(find elixir/lib -type f -name '*.ex')
+
+          exit "$fail"
