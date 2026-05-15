@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Orchestrator do
   use GenServer
   require Logger
 
-  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad}
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -26,7 +26,8 @@ defmodule SymphonyElixir.Orchestrator do
     StateTransition,
     StatusFile,
     WorkerSelector,
-    WorkpadStore
+    WorkpadStore,
+    WorkspaceCleanup
   }
 
   @default_workpads_path "/opt/symphony/state/workpads.json"
@@ -65,7 +66,7 @@ defmodule SymphonyElixir.Orchestrator do
       agent_rate_limits: nil
     }
 
-    run_terminal_workspace_cleanup()
+    WorkspaceCleanup.run_terminal()
     state = schedule_tick(state, 0)
 
     {:ok, state}
@@ -568,7 +569,7 @@ defmodule SymphonyElixir.Orchestrator do
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
-          cleanup_issue_workspace(identifier, worker_host)
+          WorkspaceCleanup.cleanup_for_identifier(identifier, worker_host)
         end
 
         if is_pid(pid) do
@@ -882,7 +883,7 @@ defmodule SymphonyElixir.Orchestrator do
       DispatchGate.terminal_state?(issue.state, terminal_states) ->
         Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
 
-        cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
+        WorkspaceCleanup.cleanup_for_identifier(issue.identifier, metadata[:worker_host])
         {:noreply, release_issue_claim(state, issue_id)}
 
       DispatchGate.retry_candidate?(issue, terminal_states) ->
@@ -900,31 +901,6 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, release_issue_claim(state, issue_id)}
   end
 
-  defp cleanup_issue_workspace(identifier, worker_host \\ nil)
-
-  defp cleanup_issue_workspace(identifier, worker_host) when is_binary(identifier) do
-    Workspace.remove_issue_workspaces(identifier, worker_host)
-  end
-
-  defp cleanup_issue_workspace(_identifier, _worker_host), do: :ok
-
-  defp run_terminal_workspace_cleanup do
-    case Tracker.fetch_issues_by_states(Config.settings!().tracker.terminal_states) do
-      {:ok, issues} ->
-        issues
-        |> Enum.each(fn
-          %Issue{identifier: identifier} when is_binary(identifier) ->
-            cleanup_issue_workspace(identifier)
-
-          _ ->
-            :ok
-        end)
-
-      {:error, reason} ->
-        Logger.warning("Skipping startup terminal workspace cleanup; failed to fetch terminal issues: #{inspect(reason)}")
-    end
-  end
-
   defp notify_dashboard, do: :ok
 
   defp handle_active_retry(state, issue, attempt, metadata) do
@@ -935,7 +911,7 @@ defmodule SymphonyElixir.Orchestrator do
       # and `qa-evidence/` in the workspace. On retry the next agent inherits
       # those files and either re-uses a stale check or trips over a dirty
       # `git status`. Wipe the workspace so retry starts from a fresh clone.
-      cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
+      WorkspaceCleanup.cleanup_for_identifier(issue.identifier, metadata[:worker_host])
       {:noreply, dispatch_issue(state, issue, attempt, metadata[:worker_host])}
     else
       Logger.debug("No available slots for retrying #{RunningEntry.format_context(issue)}; retrying again")
