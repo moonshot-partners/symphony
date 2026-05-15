@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Orchestrator do
   use GenServer
   require Logger
 
-  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad}
+  alias SymphonyElixir.{AgentRunner, Config, Tracker, Workpad}
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -16,6 +16,7 @@ defmodule SymphonyElixir.Orchestrator do
     DispatchGate,
     GateCTrigger,
     PrMerge,
+    Reconcile,
     RetryAttempts,
     RetryPlan,
     RunningEntry,
@@ -399,38 +400,26 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp reconcile_running_issues(%State{} = state) do
-    state = reconcile_stalled_running_issues(state)
-    running_ids = Map.keys(state.running)
-
-    if running_ids == [] do
-      state
-    else
-      case Tracker.fetch_issue_states_by_ids(running_ids) do
-        {:ok, issues} ->
-          issues
-          |> reconcile_running_issue_states(
-            state,
-            DispatchGate.active_state_set(),
-            DispatchGate.terminal_state_set()
-          )
-          |> reconcile_missing_running_issue_ids(running_ids, issues)
-
-        {:error, reason} ->
-          Logger.debug("Failed to refresh running issue states: #{inspect(reason)}; keeping active workers")
-
-          state
-      end
-    end
+    state
+    |> reconcile_stalled_running_issues()
+    |> Reconcile.run(%{
+      terminate_fn: &terminate_running_issue/3,
+      pr_sync_fn: fn s, id -> WorkpadPrSync.sync(s, id, self()) end
+    })
   end
 
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
   def reconcile_issue_states_for_test(issues, %State{} = state) when is_list(issues) do
-    reconcile_running_issue_states(issues, state, DispatchGate.active_state_set(), DispatchGate.terminal_state_set())
+    Reconcile.reconcile_issue_states(state, issues, &terminate_running_issue/3, fn s, id ->
+      WorkpadPrSync.sync(s, id, self())
+    end)
   end
 
   def reconcile_issue_states_for_test(issues, state) when is_list(issues) do
-    reconcile_running_issue_states(issues, state, DispatchGate.active_state_set(), DispatchGate.terminal_state_set())
+    Reconcile.reconcile_issue_states(state, issues, &terminate_running_issue/3, fn s, id ->
+      WorkpadPrSync.sync(s, id, self())
+    end)
   end
 
   @doc false
@@ -468,102 +457,6 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec maybe_dispatch_for_test(term()) :: term()
   def maybe_dispatch_for_test(%State{} = state), do: maybe_dispatch(state)
-
-  defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
-
-  defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
-    reconcile_running_issue_states(
-      rest,
-      reconcile_issue_state(issue, state, active_states, terminal_states),
-      active_states,
-      terminal_states
-    )
-  end
-
-  defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
-    cond do
-      DispatchGate.terminal_state?(issue.state, terminal_states) ->
-        Logger.info("Issue moved to terminal state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
-
-        terminate_running_issue(state, issue.id, true)
-
-      DispatchGate.has_pr_attachment?(issue) and GitHubPr.ready?(issue) ->
-        Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
-
-        state
-        |> WorkpadPrSync.sync(issue.id, self())
-        |> terminate_running_issue(issue.id, false)
-
-      DispatchGate.has_pr_attachment?(issue) ->
-        Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
-
-        if DispatchGate.active_state?(issue.state, active_states) do
-          refresh_running_issue_state(state, issue)
-        else
-          Logger.info("Issue moved to non-active state with stale PR: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
-          terminate_running_issue(state, issue.id, false)
-        end
-
-      !DispatchGate.routable_to_worker?(issue) ->
-        Logger.info("Issue no longer routed to this worker: #{RunningEntry.format_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
-
-        terminate_running_issue(state, issue.id, false)
-
-      DispatchGate.active_state?(issue.state, active_states) ->
-        refresh_running_issue_state(state, issue)
-
-      true ->
-        Logger.info("Issue moved to non-active state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
-
-        terminate_running_issue(state, issue.id, false)
-    end
-  end
-
-  defp reconcile_issue_state(_issue, state, _active_states, _terminal_states), do: state
-
-  defp reconcile_missing_running_issue_ids(%State{} = state, requested_issue_ids, issues)
-       when is_list(requested_issue_ids) and is_list(issues) do
-    visible_issue_ids =
-      issues
-      |> Enum.flat_map(fn
-        %Issue{id: issue_id} when is_binary(issue_id) -> [issue_id]
-        _ -> []
-      end)
-      |> MapSet.new()
-
-    Enum.reduce(requested_issue_ids, state, fn issue_id, state_acc ->
-      if MapSet.member?(visible_issue_ids, issue_id) do
-        state_acc
-      else
-        log_missing_running_issue(state_acc, issue_id)
-        terminate_running_issue(state_acc, issue_id, false)
-      end
-    end)
-  end
-
-  defp reconcile_missing_running_issue_ids(state, _requested_issue_ids, _issues), do: state
-
-  defp log_missing_running_issue(%State{} = state, issue_id) when is_binary(issue_id) do
-    case Map.get(state.running, issue_id) do
-      %{identifier: identifier} ->
-        Logger.info("Issue no longer visible during running-state refresh: issue_id=#{issue_id} issue_identifier=#{identifier}; stopping active agent")
-
-      _ ->
-        Logger.info("Issue no longer visible during running-state refresh: issue_id=#{issue_id}; stopping active agent")
-    end
-  end
-
-  defp log_missing_running_issue(_state, _issue_id), do: :ok
-
-  defp refresh_running_issue_state(%State{} = state, %Issue{} = issue) do
-    case Map.get(state.running, issue.id) do
-      %{issue: _} = running_entry ->
-        %{state | running: Map.put(state.running, issue.id, %{running_entry | issue: issue})}
-
-      _ ->
-        state
-    end
-  end
 
   defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace) do
     case Map.get(state.running, issue_id) do
