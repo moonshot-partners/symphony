@@ -332,7 +332,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
-    state = reconcile_pr_merged_issues(state)
+    PrMerge.reconcile()
 
     if state.drain do
       state
@@ -414,37 +414,6 @@ defmodule SymphonyElixir.Orchestrator do
       end
     end
   end
-
-  defp reconcile_pr_merged_issues(%State{} = state) do
-    on_complete = Config.settings!().tracker.on_complete_state
-    on_merge = Config.settings!().tracker.on_pr_merge_state
-
-    if is_binary(on_complete) and is_binary(on_merge) do
-      do_reconcile_pr_merged_issues(on_complete, on_merge)
-    end
-
-    state
-  end
-
-  defp do_reconcile_pr_merged_issues(on_complete, on_merge) do
-    case Tracker.fetch_issues_by_states([on_complete]) do
-      {:ok, issues} ->
-        pr_check = &pr_merged?/1
-
-        issues
-        |> Enum.filter(& &1.has_pr_attachment)
-        |> Enum.each(&maybe_transition_merged_pr(&1, on_merge, pr_check))
-
-      {:error, reason} ->
-        Logger.debug("reconcile_pr_merged_issues: fetch failed #{inspect(reason)}")
-    end
-  end
-
-  defp maybe_transition_merged_pr(%Issue{} = issue, on_merge_state, pr_check_fn) do
-    PrMerge.maybe_transition(issue, on_merge_state, pr_check_fn, &StateTransition.apply/2)
-  end
-
-  defp pr_merged?(pr_url), do: PrMerge.merged?(pr_url)
 
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
