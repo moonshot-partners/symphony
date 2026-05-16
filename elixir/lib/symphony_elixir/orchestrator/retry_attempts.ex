@@ -20,18 +20,46 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
 
   require Logger
 
+  alias SymphonyElixir.Config
   alias SymphonyElixir.Orchestrator.{RetryPlan, State}
 
   @doc """
   Arm a retry timer for `issue_id`, replacing any previously-armed
   retry entry. Returns the updated `%State{}` with the new retry
   bookkeeping under `state.retry_attempts[issue_id]`.
+
+  When `next_attempt` exceeds `agent.max_retries`, no timer is armed,
+  the previous retry entry is cleared, and a warning is logged. The
+  caller still receives the updated `%State{}` (with the entry removed).
   """
   @spec schedule(State.t(), String.t(), term(), map(), pid()) :: State.t()
   def schedule(%State{} = state, issue_id, attempt, metadata, recipient)
       when is_binary(issue_id) and is_map(metadata) and is_pid(recipient) do
     previous_retry = Map.get(state.retry_attempts, issue_id, %{attempt: 0})
     next_attempt = if is_integer(attempt), do: attempt, else: previous_retry.attempt + 1
+    max_retries = Config.settings!().agent.max_retries
+
+    if next_attempt > max_retries do
+      halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata)
+    else
+      arm_retry(state, issue_id, previous_retry, next_attempt, metadata, recipient)
+    end
+  end
+
+  defp halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata) do
+    old_timer = Map.get(previous_retry, :timer_ref)
+    if is_reference(old_timer), do: Process.cancel_timer(old_timer)
+
+    identifier = RetryPlan.pick_identifier(issue_id, previous_retry, metadata)
+    error = RetryPlan.pick_error(previous_retry, metadata)
+    error_suffix = if is_binary(error), do: " error=#{error}", else: ""
+
+    Logger.warning("Retry cap reached issue_id=#{issue_id} issue_identifier=#{identifier} attempt=#{next_attempt} cap=#{max_retries}#{error_suffix}; not arming further retries")
+
+    %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}
+  end
+
+  defp arm_retry(state, issue_id, previous_retry, next_attempt, metadata, recipient) do
     delay_ms = RetryPlan.delay_ms(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
