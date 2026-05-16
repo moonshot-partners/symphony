@@ -14,6 +14,17 @@ log() {
 
 trap 'rm -f "$DRAIN_FLAG"' EXIT
 
+# Capture the deployed SHA *before* drain. WorkflowStore (running inside the
+# Symphony Elixir process) does its own periodic `git pull --ff-only` of this
+# directory, so during the 10-minute drain HEAD can be silently fast-forwarded
+# to the new commit. If we read HEAD post-drain, old_sha == new_sha → the diff
+# below is empty → image rebuild is skipped even when docker/ changed.
+# Reproduced live with PR #101 (qa_publish.py shipped but image stayed stale).
+log "capture pre-drain HEAD"
+cd "$SYMPHONY_DIR"
+old_sha=$(git rev-parse HEAD)
+log "old_sha=$old_sha"
+
 log "begin drain"
 mkdir -p "$STATE_DIR"
 touch "$DRAIN_FLAG"
@@ -44,10 +55,10 @@ fi
 
 log "git pull"
 cd "$SYMPHONY_DIR"
-old_sha=$(git rev-parse HEAD)
 git fetch --quiet origin main
 git reset --hard origin/main
 new_sha=$(git rev-parse HEAD)
+log "new_sha=$new_sha"
 
 log "build escript"
 export PATH=/home/ubuntu/.local/share/mise/installs/erlang/28.5/bin:/home/ubuntu/.local/share/mise/installs/elixir/1.19.5-otp-28/bin:$PATH
