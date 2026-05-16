@@ -114,7 +114,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       assert_received {:terminate, "issue-1", true}
     end
 
-    test "ready PR attachment -> pr_sync then terminate without cleanup" do
+    test "ready PR attachment -> pr_sync then terminate with cleanup" do
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
       issue =
@@ -132,7 +132,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       })
 
       assert_received {:pr_sync, "issue-1"}
-      assert_received {:terminate, "issue-1", false}
+      assert_received {:terminate, "issue-1", true}
     end
 
     test "stale (not-ready) PR attachment + active state -> keep agent running, refresh issue" do
@@ -159,7 +159,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       assert Map.has_key?(result.running, "issue-1")
     end
 
-    test "stale PR attachment + non-active state -> terminate without cleanup" do
+    test "stale PR attachment + non-active state -> terminate with cleanup" do
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
 
       issue =
@@ -177,10 +177,10 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
         fetch_fn: fn _ids -> {:ok, [issue]} end
       })
 
-      assert_received {:terminate, "issue-1", false}
+      assert_received {:terminate, "issue-1", true}
     end
 
-    test "no longer routed to worker -> terminate without cleanup" do
+    test "no longer routed to worker -> terminate with cleanup" do
       issue = build_issue(assigned_to_worker: false, assignee_id: "someone-else")
       state = running_state(issue)
 
@@ -190,7 +190,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
         fetch_fn: fn _ids -> {:ok, [issue]} end
       })
 
-      assert_received {:terminate, "issue-1", false}
+      assert_received {:terminate, "issue-1", true}
     end
 
     test "active state, routable, no PR -> refresh cached issue payload" do
@@ -209,7 +209,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       assert result.running["issue-1"].issue == refreshed
     end
 
-    test "non-active, non-terminal, no PR -> terminate without cleanup" do
+    test "non-active, non-terminal, no PR -> terminate with cleanup" do
       issue = build_issue(state: "Backlog")
       state = running_state(issue)
 
@@ -219,7 +219,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
         fetch_fn: fn _ids -> {:ok, [issue]} end
       })
 
-      assert_received {:terminate, "issue-1", false}
+      assert_received {:terminate, "issue-1", true}
     end
 
     test "running issue missing from fetch result -> terminate (without cleanup)" do
