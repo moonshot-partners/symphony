@@ -1,6 +1,7 @@
 defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Config
   alias SymphonyElixir.Orchestrator.{RetryAttempts, State}
 
   defp empty_state(overrides \\ %{}) do
@@ -78,6 +79,56 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
       refute is_integer(Process.read_timer(previous_ref))
       assert updated.retry_attempts["issue-1"].attempt == 1
       assert_receive {:retry_issue, "issue-1", _token}, 2_000
+    end
+  end
+
+  describe "Sprint 3: max_retries cap" do
+    test "halts retry and clears retry_attempts entry when next_attempt exceeds the cap" do
+      max_retries = Config.settings!().agent.max_retries
+
+      state =
+        empty_state(%{
+          retry_attempts: %{
+            "issue-cap" => %{
+              attempt: max_retries,
+              timer_ref: Process.send_after(self(), :stale, 60_000),
+              retry_token: make_ref(),
+              identifier: "ISS-CAP"
+            }
+          }
+        })
+
+      updated =
+        RetryAttempts.schedule(
+          state,
+          "issue-cap",
+          max_retries + 1,
+          %{identifier: "ISS-CAP", error: "boom"},
+          self()
+        )
+
+      refute Map.has_key?(updated.retry_attempts, "issue-cap")
+      refute_receive {:retry_issue, "issue-cap", _token}, 200
+    end
+
+    test "schedules normally when next_attempt is at the cap" do
+      max_retries = Config.settings!().agent.max_retries
+      state = empty_state()
+
+      updated =
+        RetryAttempts.schedule(
+          state,
+          "issue-edge",
+          max_retries,
+          %{identifier: "ISS-EDGE"},
+          self()
+        )
+
+      assert %{attempt: ^max_retries, timer_ref: timer_ref} =
+               Map.fetch!(updated.retry_attempts, "issue-edge")
+
+      assert is_reference(timer_ref)
+      assert is_integer(Process.cancel_timer(timer_ref))
     end
   end
 
