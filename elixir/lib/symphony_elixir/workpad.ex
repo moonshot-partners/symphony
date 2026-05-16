@@ -227,33 +227,81 @@ defmodule SymphonyElixir.Workpad do
     out_tok = Map.get(running_entry, :agent_output_tokens, 0)
     total_tok = Map.get(running_entry, :agent_total_tokens, 0)
     error_reason = Map.get(running_entry, :last_error_reason)
+    pr_suffix = format_pr_link(issue)
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
     """
     ## Symphony Workpad
 
-    - **Issue**: #{identifier}
-    - **State**: #{state}
-    - **Workspace**: `#{workspace}`
-    - **Worker host**: #{worker_host}
-    - **Attempt**: #{retry}
-    - **Turn**: #{turn}
-    - **Last event**: #{format_event(last_event)}
-    - **Updated**: #{now}
-
-    ### Latest agent message
+    **Symphony — #{format_event(last_event)}**#{pr_suffix}
 
     #{format_last_text(last_text)}
     #{format_error_section(error_reason)}
-    ### Tokens
+    <details>
+    <summary>Detalhes técnicos</summary>
 
-    `in=#{in_tok} out=#{out_tok} total=#{total_tok}`
+    | | |
+    |---|---|
+    | Issue | #{identifier} |
+    | State | #{state} |
+    | Workspace | `#{workspace}` |
+    | Worker host | #{worker_host} |
+    | Tentativa | #{retry} |
+    | Turno | #{turn} |
+    | Último evento | `#{format_raw_event(last_event)}` |
+    | Tokens | in=#{in_tok} · out=#{out_tok} · total=#{total_tok} |
+    | Atualizado | #{now} |
+
+    </details>
     """
   end
 
-  defp format_event(nil), do: "(none)"
+  defp format_event(:session_started), do: "Iniciando"
+  defp format_event(:turn_completed), do: "Trabalhando"
+  defp format_event(:pr_attached), do: "PR aberto"
+  defp format_event(:turn_input_required), do: "Aguarda resposta humana"
+  defp format_event(:approval_required), do: "Aguarda aprovação"
+  defp format_event(:turn_failed), do: "Falhou"
+  defp format_event(:turn_ended_with_error), do: "Erro"
+  defp format_event(:turn_cancelled), do: "Cancelado"
+  defp format_event(:notification), do: "Trabalhando"
+  defp format_event(nil), do: "Iniciando"
   defp format_event(event) when is_atom(event), do: Atom.to_string(event)
   defp format_event(event), do: inspect(event)
+
+  defp format_raw_event(nil), do: "—"
+  defp format_raw_event(event) when is_atom(event), do: Atom.to_string(event)
+  defp format_raw_event(event), do: inspect(event)
+
+  defp format_pr_link(%{repos: repos}) when is_list(repos) do
+    Enum.find_value(repos, "", fn
+      %{pr: %{url: url}, name: name} when is_binary(url) and is_binary(name) ->
+        " · " <> render_pr_link(url, name)
+
+      _ ->
+        nil
+    end) || ""
+  end
+
+  defp format_pr_link(_), do: ""
+
+  defp render_pr_link(url, repo_name) do
+    short_repo =
+      repo_name
+      |> String.split("/")
+      |> List.last()
+
+    case String.split(url, "/pull/") do
+      [_, rest] ->
+        case String.replace(rest, ~r/\D.*/, "") do
+          "" -> "[#{short_repo}](#{url})"
+          pr_num -> "[##{pr_num} #{short_repo}](#{url})"
+        end
+
+      _ ->
+        "[#{short_repo}](#{url})"
+    end
+  end
 
   defp format_error_section(nil), do: ""
   defp format_error_section(""), do: ""

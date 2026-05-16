@@ -65,7 +65,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     assert_receive {:memory_tracker_comment_update, "wp-comment-pr-sync-1", body}, 1_000
-    assert body =~ "**Last event**: pr_attached"
+    assert body =~ "PR aberto"
   end
 
   test "falls back to state.workpads when workpad_comment_id is not on the running entry" do
@@ -85,7 +85,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     assert_receive {:memory_tracker_comment_update, "wp-comment-pr-sync-2", body}, 1_000
-    assert body =~ "**Last event**: pr_attached"
+    assert body =~ "PR aberto"
   end
 
   test "skips the StateTransition/GithubLabel/QaEvidence side-effects when :issue is missing" do

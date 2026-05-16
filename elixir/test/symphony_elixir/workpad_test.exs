@@ -181,7 +181,8 @@ defmodule SymphonyElixir.WorkpadTest do
     Workpad.maybe_sync(entry, update, self())
 
     assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
-    assert body =~ "**Last event**: pr_attached"
+    assert body =~ "PR aberto"
+    refute body =~ "**Last event**: pr_attached"
     assert body =~ "ready for review"
     refute_received {:memory_tracker_comment, _, _}
   end
@@ -320,5 +321,241 @@ defmodule SymphonyElixir.WorkpadTest do
 
     assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
     refute body =~ "### Error"
+  end
+
+  describe "Sprint 1: template visual redesign" do
+    defp pr_running_entry(pr_url) do
+      issue = %Issue{
+        id: "issue-wp",
+        identifier: "MT-WP",
+        title: "Workpad",
+        state: "In Development",
+        url: "https://example.org/issues/MT-WP",
+        repos: [%{name: "schoolsoutapp/fe-next-app", pr: %{url: pr_url}}]
+      }
+
+      %{
+        identifier: "MT-WP",
+        issue: issue,
+        session_id: nil,
+        turn_count: 2,
+        retry_attempt: 0,
+        worker_host: "local",
+        workspace_path: "/home/ubuntu/code/ws",
+        last_agent_event: :pr_attached,
+        last_agent_text: "ready for review",
+        agent_input_tokens: 55,
+        agent_output_tokens: 23_593,
+        agent_total_tokens: 23_648,
+        workpad_comment_id: "memory-comment-issue-wp"
+      }
+    end
+
+    test "status line maps :pr_attached to friendly text" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/schoolsoutapp/fe-next-app/pull/511"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "PR aberto"
+      refute body =~ "Last event**: pr_attached"
+    end
+
+    test "status line maps turn_completed to 'Trabalhando'" do
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_completed,
+          last_agent_text: "doing things"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Trabalhando"
+    end
+
+    test "status line maps session_started to 'Iniciando'" do
+      update = %{event: :session_started, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          last_agent_event: :session_started,
+          last_agent_text: "warming up"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment, _, body}, 1_000
+      assert body =~ "Iniciando"
+    end
+
+    test "status line maps turn_input_required to 'Aguarda resposta humana'" do
+      update = %{event: :turn_input_required, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_input_required,
+          last_agent_text: "need input"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Aguarda resposta humana"
+    end
+
+    test "status line maps turn_failed to 'Falhou'" do
+      update = %{
+        event: :turn_failed,
+        details: %{"error" => "boom"},
+        timestamp: DateTime.utc_now()
+      }
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_failed,
+          last_agent_text: "blew up"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Falhou"
+    end
+
+    test "PR url renders as markdown link when issue.repos carries pr.url" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      pr_url = "https://github.com/schoolsoutapp/fe-next-app/pull/511"
+      Workpad.maybe_sync(pr_running_entry(pr_url), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "[#511 fe-next-app](#{pr_url})"
+    end
+
+    test "PR url line absent when no repo carries a pr" do
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_completed
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      refute body =~ ~r/\[#\d+ /
+      refute body =~ ~r/\]\(https?:\/\//
+    end
+
+    test "PR url with trailing slash falls back to repo-only label" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      pr_url = "https://github.com/schoolsoutapp/fe-next-app/pull/511/"
+      Workpad.maybe_sync(pr_running_entry(pr_url), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "[#511 fe-next-app](#{pr_url})"
+    end
+
+    test "PR url without /pull/ segment renders repo-only label without empty number" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      pr_url = "https://github.com/schoolsoutapp/fe-next-app"
+      Workpad.maybe_sync(pr_running_entry(pr_url), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "[fe-next-app](#{pr_url})"
+      refute body =~ "[# "
+      refute body =~ "[#]"
+    end
+
+    test "status line maps approval_required to friendly text" do
+      update = %{event: :approval_required, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :approval_required,
+          last_agent_text: "need approval"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Aguarda aprovação"
+    end
+
+    test "status line maps turn_ended_with_error to 'Erro'" do
+      update = %{event: :turn_ended_with_error, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_ended_with_error,
+          last_agent_text: "ended bad"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Erro"
+    end
+
+    test "status line maps turn_cancelled to 'Cancelado'" do
+      update = %{event: :turn_cancelled, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_cancelled,
+          last_agent_text: "stop"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Cancelado"
+    end
+
+    test "details block wraps technical metadata" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "<details>"
+      assert body =~ "<summary>Detalhes técnicos</summary>"
+      assert body =~ "</details>"
+    end
+
+    test "workspace path renders only inside details block" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      [main, _details] = String.split(body, "<details>", parts: 2)
+      refute main =~ "/home/ubuntu/code/ws"
+    end
+
+    test "no ISO timestamp in primary view above details block" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      [main, _details] = String.split(body, "<details>", parts: 2)
+      refute main =~ ~r/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+    end
+
+    test "header literal '## Symphony Workpad' persists (regression)" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+
+      assert String.starts_with?(body, "## Symphony Workpad") or
+               String.starts_with?(body, "\n## Symphony Workpad")
+    end
   end
 end
