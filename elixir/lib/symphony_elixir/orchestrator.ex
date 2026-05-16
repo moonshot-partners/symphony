@@ -221,7 +221,10 @@ defmodule SymphonyElixir.Orchestrator do
               )
           end
 
-        Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
+        Logger.info(
+          "Agent task finished for issue_id=#{issue_id} session_id=#{session_id} " <>
+            "reason=#{inspect(reason)} " <> RunningEntry.format_token_totals(running_entry)
+        )
 
         notify_dashboard()
         {:noreply, state}
