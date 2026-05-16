@@ -16,6 +16,7 @@ defmodule SymphonyElixir.Orchestrator do
     DispatchGate,
     GateCTrigger,
     PrMerge,
+    ProcessLiveness,
     Reconcile,
     RetryAttempts,
     RetryDispatch,
@@ -409,11 +410,54 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp reconcile_running_issues(%State{} = state) do
     state
+    |> reconcile_dead_workers()
     |> reconcile_stalled_running_issues()
     |> Reconcile.run(%{
       terminate_fn: &terminate_running_issue/3,
       pr_sync_fn: fn s, id -> WorkpadPrSync.sync(s, id, self()) end
     })
+  end
+
+  defp reconcile_dead_workers(%State{} = state) do
+    if map_size(state.running) == 0 do
+      state
+    else
+      state.running
+      |> ProcessLiveness.dead_issue_ids()
+      |> Enum.reduce(state, &restart_dead_worker/2)
+    end
+  end
+
+  defp restart_dead_worker(issue_id, %State{} = state) do
+    case Map.get(state.running, issue_id) do
+      nil ->
+        state
+
+      running_entry ->
+        identifier = Map.get(running_entry, :identifier, issue_id)
+        session_id = RunningEntry.session_id(running_entry)
+
+        Logger.warning(
+          "Dead worker detected: issue_id=#{issue_id} issue_identifier=#{identifier} " <>
+            "session_id=#{session_id}; :DOWN was not delivered, treating as failed exit"
+        )
+
+        next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+
+        state
+        |> terminate_running_issue(issue_id, false)
+        |> RetryAttempts.schedule(
+          issue_id,
+          next_attempt,
+          %{
+            identifier: identifier,
+            error: "worker pid dead without :DOWN message",
+            worker_host: Map.get(running_entry, :worker_host),
+            workspace_path: Map.get(running_entry, :workspace_path)
+          },
+          self()
+        )
+    end
   end
 
   @doc false
