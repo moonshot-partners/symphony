@@ -20,7 +20,8 @@ defmodule SymphonyElixir.Linear.FileUpload do
     ".md" => "text/markdown",
     ".json" => "application/json",
     ".txt" => "text/plain",
-    ".log" => "text/plain"
+    ".log" => "text/plain",
+    ".zip" => "application/zip"
   }
 
   @mutation """
@@ -86,7 +87,8 @@ defmodule SymphonyElixir.Linear.FileUpload do
     end
   end
 
-  defp content_type_for(path) do
+  @doc false
+  def content_type_for(path) do
     ext = path |> Path.extname() |> String.downcase()
     Map.get(@content_types, ext, "application/octet-stream")
   end
