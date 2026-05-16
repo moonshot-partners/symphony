@@ -79,6 +79,40 @@ defmodule SymphonyElixir.Orchestrator.RunningEntryTest do
     end
   end
 
+  describe "format_token_totals/1" do
+    test "renders the cumulative token counters as a single log fragment" do
+      entry = %{
+        agent_input_tokens: 1200,
+        agent_output_tokens: 340,
+        agent_total_tokens: 1540
+      }
+
+      assert RunningEntry.format_token_totals(entry) ==
+               "tokens_in=1200 tokens_out=340 tokens_total=1540"
+    end
+
+    test "falls back to 0 for missing counter keys" do
+      assert RunningEntry.format_token_totals(%{}) ==
+               "tokens_in=0 tokens_out=0 tokens_total=0"
+    end
+
+    test "falls back to 0 for non-integer counter values" do
+      entry = %{
+        agent_input_tokens: nil,
+        agent_output_tokens: "350",
+        agent_total_tokens: -1
+      }
+
+      assert RunningEntry.format_token_totals(entry) ==
+               "tokens_in=0 tokens_out=0 tokens_total=0"
+    end
+
+    test "returns the all-zero fragment when the entry is not a map" do
+      assert RunningEntry.format_token_totals(nil) ==
+               "tokens_in=0 tokens_out=0 tokens_total=0"
+    end
+  end
+
   describe "pop/2" do
     test "removes the entry from state.running and returns it along with the new state" do
       state = %State{running: %{"iss-1" => %{pid: self()}, "iss-2" => %{pid: self()}}}

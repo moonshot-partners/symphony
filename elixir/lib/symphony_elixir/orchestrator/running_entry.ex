@@ -62,6 +62,28 @@ defmodule SymphonyElixir.Orchestrator.RunningEntry do
   end
 
   @doc """
+  Render the running entry's cumulative token usage as a single log
+  fragment: `"tokens_in=N tokens_out=N tokens_total=N"`. Missing or
+  non-integer counters fall back to `0` so the line stays parseable
+  even when an issue terminates before the first usage event arrived.
+  """
+  @spec format_token_totals(any()) :: String.t()
+  def format_token_totals(entry) when is_map(entry) do
+    "tokens_in=#{token_counter(entry, :agent_input_tokens)} " <>
+      "tokens_out=#{token_counter(entry, :agent_output_tokens)} " <>
+      "tokens_total=#{token_counter(entry, :agent_total_tokens)}"
+  end
+
+  def format_token_totals(_entry), do: "tokens_in=0 tokens_out=0 tokens_total=0"
+
+  defp token_counter(entry, key) do
+    case Map.get(entry, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
+
+  @doc """
   Pop the running entry for `issue_id` from `state.running`, returning
   `{entry, new_state}`. Returns `{nil, state}` when the issue is not
   tracked.
