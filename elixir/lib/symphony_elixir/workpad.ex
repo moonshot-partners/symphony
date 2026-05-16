@@ -235,7 +235,7 @@ defmodule SymphonyElixir.Workpad do
 
     **Symphony — #{format_event(last_event)}**#{pr_suffix}
 
-    #{format_last_text(last_text)}
+    #{format_primary_text(last_event, last_text)}
     #{format_error_section(error_reason)}
     <details>
     <summary>Detalhes técnicos</summary>
@@ -249,12 +249,20 @@ defmodule SymphonyElixir.Workpad do
     | Tentativa | #{retry} |
     | Turno | #{turn} |
     | Último evento | `#{format_raw_event(last_event)}` |
-    | Tokens | in=#{in_tok} · out=#{out_tok} · total=#{total_tok} |
+    | Tokens | #{format_tokens(in_tok, out_tok, total_tok)} |
     | Atualizado | #{now} |
 
     </details>
     """
   end
+
+  defp format_primary_text(:pr_attached, _last_text), do: "_PR enviado para revisão._"
+  defp format_primary_text(_event, last_text), do: format_last_text(last_text)
+
+  defp format_tokens(0, 0, 0), do: "—"
+
+  defp format_tokens(in_tok, out_tok, total_tok),
+    do: "in=#{in_tok} · out=#{out_tok} · total=#{total_tok}"
 
   defp format_event(:session_started), do: "Iniciando"
   defp format_event(:turn_completed), do: "Trabalhando"
