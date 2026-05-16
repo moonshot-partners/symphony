@@ -21,23 +21,27 @@ defmodule SymphonyElixir.QaEvidence do
   @image_exts ~w(.png .jpg .jpeg .gif)
   @max_images 20
 
-  @spec maybe_publish(String.t() | nil, String.t() | nil) :: :ok
-  def maybe_publish(issue_id, workspace_path)
-      when is_binary(issue_id) and is_binary(workspace_path) do
+  @spec maybe_publish(String.t() | nil, String.t() | nil, keyword()) :: :ok
+  def maybe_publish(issue_id, workspace_path, opts \\ [])
+
+  def maybe_publish(issue_id, workspace_path, opts)
+      when is_binary(issue_id) and is_binary(workspace_path) and is_list(opts) do
     dir = Path.join(workspace_path, @evidence_subpath)
 
     if File.dir?(dir) do
-      Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn -> publish(issue_id, dir) end)
+      Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+        publish(issue_id, dir, opts)
+      end)
     end
 
     :ok
   end
 
-  def maybe_publish(_issue_id, _workspace_path), do: :ok
+  def maybe_publish(_issue_id, _workspace_path, _opts), do: :ok
 
   @doc false
-  @spec publish(String.t(), Path.t()) :: :ok
-  def publish(issue_id, dir) do
+  @spec publish(String.t(), Path.t(), keyword()) :: :ok
+  def publish(issue_id, dir, opts \\ []) do
     images = dir |> list_files(@image_exts) |> Enum.take(@max_images)
     report = read_optional(Path.join(dir, "qa-report.md"))
 
@@ -55,7 +59,10 @@ defmodule SymphonyElixir.QaEvidence do
 
     video_url = maybe_upload_video(Path.join(dir, "session.webm"))
 
-    case Tracker.create_comment(issue_id, build_comment(report, uploaded, video_url)) do
+    parent_id = Keyword.get(opts, :parent_id)
+    body = build_comment(report, uploaded, video_url)
+
+    case Tracker.create_comment(issue_id, body, parent_id: parent_id) do
       {:ok, _id} ->
         Logger.info("QA evidence published issue_id=#{issue_id} images=#{length(uploaded)} video=#{video_url != nil}")
         :ok

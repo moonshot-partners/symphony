@@ -83,6 +83,25 @@ defmodule SymphonyElixir.QaEvidenceTest do
       assert_receive {:memory_tracker_comment, "issue-7", body}, 2_000
       assert body =~ "_(no screenshots uploaded)_"
     end
+
+    test "threads parent_id to tracker.create_comment when provided" do
+      base = evidence_dir([{"01-collapsed.png", "fake-png"}])
+
+      assert :ok ==
+               QaEvidence.maybe_publish("issue-pp", base, parent_id: "workpad-comment-77")
+
+      assert_receive {:memory_tracker_comment, "issue-pp", _body}, 2_000
+      assert_receive {:memory_tracker_comment_parent, "issue-pp", "workpad-comment-77"}, 1_000
+    end
+
+    test "omits parent linkage when no parent_id is provided" do
+      base = evidence_dir([{"01-collapsed.png", "fake-png"}])
+
+      assert :ok == QaEvidence.maybe_publish("issue-np", base)
+
+      assert_receive {:memory_tracker_comment, "issue-np", _body}, 2_000
+      refute_receive {:memory_tracker_comment_parent, "issue-np", _}, 200
+    end
   end
 
   describe "build_comment/3" do

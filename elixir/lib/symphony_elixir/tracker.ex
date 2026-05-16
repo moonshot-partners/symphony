@@ -8,7 +8,7 @@ defmodule SymphonyElixir.Tracker do
   @callback fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
   @callback fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  @callback create_comment(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback create_comment(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   @callback update_comment(String.t(), String.t()) :: :ok | {:error, term()}
   @callback update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
 
@@ -28,8 +28,11 @@ defmodule SymphonyElixir.Tracker do
   end
 
   @spec create_comment(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def create_comment(issue_id, body) do
-    adapter().create_comment(issue_id, body)
+  def create_comment(issue_id, body), do: create_comment(issue_id, body, [])
+
+  @spec create_comment(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def create_comment(issue_id, body, opts) when is_list(opts) do
+    adapter().create_comment(issue_id, body, opts)
   end
 
   @spec update_comment(String.t(), String.t()) :: :ok | {:error, term()}
