@@ -48,9 +48,10 @@ def _iter_tests(suites: list[dict]):
                 yield spec, t
 
 
-def _pick_attachments(attachments: list[dict]) -> tuple[str | None, str | None]:
+def _pick_attachments(attachments: list[dict]) -> tuple[str | None, str | None, str | None]:
     shot = None
     video = None
+    trace = None
     for a in attachments or []:
         path = a.get("path")
         if not path:
@@ -61,7 +62,9 @@ def _pick_attachments(attachments: list[dict]) -> tuple[str | None, str | None]:
             shot = path
         elif name == "video" or ctype.startswith("video/"):
             video = path
-    return shot, video
+        elif name == "trace" or ctype == "application/zip":
+            trace = path
+    return shot, video, trace
 
 
 def _collect_checks(results_json: dict, evidence_dir: str) -> list[dict]:
@@ -83,7 +86,7 @@ def _collect_checks(results_json: dict, evidence_dir: str) -> list[dict]:
             msg = (errors[0].get("message") or "").splitlines()[0][:240]
             detail = f"{status}: {msg}"
 
-        shot_src, video_src = _pick_attachments(last.get("attachments") or [])
+        shot_src, video_src, trace_src = _pick_attachments(last.get("attachments") or [])
         n += 1
         stem = f"{n:02d}-{'pass' if ok else 'FAIL'}-{_slug(title) or f'test{n}'}"
         shots: list[str] = []
@@ -97,6 +100,11 @@ def _collect_checks(results_json: dict, evidence_dir: str) -> list[dict]:
             session = os.path.join(evidence_dir, "session.webm")
             if not os.path.exists(session):
                 shutil.copyfile(video_src, session)
+        if trace_src and os.path.isfile(trace_src):
+            # First trace wins as session.zip — open in https://trace.playwright.dev
+            session_trace = os.path.join(evidence_dir, "session.zip")
+            if not os.path.exists(session_trace):
+                shutil.copyfile(trace_src, session_trace)
         checks.append({"name": title, "pass": ok, "detail": detail, "screenshots": shots})
     return checks
 
@@ -130,6 +138,8 @@ def _write_report(evidence_dir: str, ticket: str, checks: list[dict], *, blocked
     lines += [f"- `{s}`" for s in pngs] or ["- (none captured)"]
     if os.path.exists(os.path.join(evidence_dir, "session.webm")):
         lines.append("- `session.webm` — full session recording")
+    if os.path.exists(os.path.join(evidence_dir, "session.zip")):
+        lines.append("- `session.zip` — Playwright trace (open at https://trace.playwright.dev)")
     if blocked:
         lines += ["", "## Notes", "", f"BLOCKED: {blocked_reason}"]
 
