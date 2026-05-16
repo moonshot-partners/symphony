@@ -21,6 +21,7 @@ defmodule SymphonyElixir.Orchestrator do
     RetryAttempts,
     RetryDispatch,
     RetryPlan,
+    RunLedgerHook,
     RunningEntry,
     SlotPolicy,
     Snapshot,
@@ -187,6 +188,7 @@ defmodule SymphonyElixir.Orchestrator do
       issue_id ->
         {running_entry, state} = RunningEntry.pop(state, issue_id)
         state = AgentTotals.record_session_completion(state, running_entry)
+        RunLedgerHook.record(running_entry, issue_id)
         session_id = RunningEntry.session_id(running_entry)
 
         state =
@@ -520,6 +522,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
         state = AgentTotals.record_session_completion(state, running_entry)
+        RunLedgerHook.record(running_entry, issue_id)
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
