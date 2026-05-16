@@ -410,7 +410,8 @@ defmodule SymphonyElixir.CoreTest do
 
       assert_receive {:memory_tracker_comment_update, "wp-comment-pr-attached", body}, 1_000
       assert body =~ "PR aberto"
-      assert body =~ "ready for review"
+      assert body =~ "PR enviado para revisão"
+      refute body =~ "ready for review"
 
       refute Map.has_key?(updated_state.running, issue_id)
       assert Map.get(updated_state.workpads, issue_id) == "wp-comment-pr-attached"
