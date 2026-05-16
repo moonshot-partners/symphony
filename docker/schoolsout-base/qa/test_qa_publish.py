@@ -37,15 +37,19 @@ def _video_bytes() -> bytes:
 def _playwright_results(tmpdir: str, *, status: str = "passed", with_attachments: bool = True) -> str:
     shot = os.path.join(tmpdir, "shot.png")
     video = os.path.join(tmpdir, "video.webm")
+    trace = os.path.join(tmpdir, "trace.zip")
     attachments = []
     if with_attachments:
         with open(shot, "wb") as fh:
             fh.write(_shot_bytes())
         with open(video, "wb") as fh:
             fh.write(_video_bytes())
+        with open(trace, "wb") as fh:
+            fh.write(b"PK\x03\x04fake-trace")
         attachments = [
             {"name": "screenshot", "contentType": "image/png", "path": shot},
             {"name": "video", "contentType": "video/webm", "path": video},
+            {"name": "trace", "contentType": "application/zip", "path": trace},
         ]
     return os.path.join(tmpdir, "results.json"), {
         "suites": [
@@ -94,13 +98,19 @@ class QaPublishTest(unittest.TestCase):
 
         self.assertEqual(rc, 0, "exit 0 on PASS")
         files = sorted(os.listdir(evidence))
-        # one screenshot + session.webm + qa-report.md + verdict.json
         self.assertIn("session.webm", files, f"video promoted as session.webm: {files}")
+        self.assertIn("session.zip", files, f"trace promoted as session.zip: {files}")
         self.assertIn("qa-report.md", files)
         self.assertIn("verdict.json", files)
         pngs = [f for f in files if f.endswith(".png")]
         self.assertEqual(len(pngs), 1, f"exactly one screenshot promoted: {pngs}")
         self.assertTrue(pngs[0].startswith("01-pass-"), f"slug stem present: {pngs[0]}")
+
+        with open(os.path.join(evidence, "qa-report.md")) as fh:
+            report = fh.read()
+        self.assertIn("session.webm", report)
+        self.assertIn("session.zip", report)
+        self.assertIn("trace.playwright.dev", report)
 
         with open(os.path.join(evidence, "verdict.json")) as fh:
             verdict = json.load(fh)

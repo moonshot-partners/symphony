@@ -60,7 +60,8 @@ defmodule SymphonyElixir.QaEvidenceTest do
           {"01-collapsed.png", "fake-png"},
           {"02-expanded.png", "fake-png"},
           {"qa-report.md", "| Check | Result |\n| --- | --- |\n| toggle | PASS |\n"},
-          {"session.webm", "fake-webm"}
+          {"session.webm", "fake-webm"},
+          {"session.zip", "fake-trace"}
         ])
 
       assert :ok == QaEvidence.maybe_publish("issue-42", base)
@@ -71,6 +72,8 @@ defmodule SymphonyElixir.QaEvidenceTest do
       assert body =~ "![01-collapsed.png](https://uploads.example/01-collapsed.png)"
       assert body =~ "![02-expanded.png](https://uploads.example/02-expanded.png)"
       assert body =~ "[session.webm](https://uploads.example/session.webm)"
+      assert body =~ "[session.zip](https://uploads.example/session.zip)"
+      assert body =~ "trace.playwright.dev"
     end
 
     test "still posts a comment when every upload fails" do
@@ -104,13 +107,14 @@ defmodule SymphonyElixir.QaEvidenceTest do
     end
   end
 
-  describe "build_comment/3" do
-    test "renders report, screenshots and video sections" do
+  describe "build_comment/4" do
+    test "renders report, screenshots, video and trace sections" do
       body =
         QaEvidence.build_comment(
           "| Check | Result |\n| --- | --- |\n| x | PASS |",
           [{"a.png", "https://u/a.png"}],
-          "https://u/session.webm"
+          "https://u/session.webm",
+          "https://u/session.zip"
         )
 
       assert body =~ "## QA self-review evidence"
@@ -118,14 +122,24 @@ defmodule SymphonyElixir.QaEvidenceTest do
       assert body =~ "### Screenshots"
       assert body =~ "![a.png](https://u/a.png)"
       assert body =~ "[session.webm](https://u/session.webm)"
+      assert body =~ "[session.zip](https://u/session.zip)"
+      assert body =~ "trace.playwright.dev"
     end
 
-    test "handles missing report and video" do
-      body = QaEvidence.build_comment(nil, [], nil)
+    test "handles missing report, video and trace" do
+      body = QaEvidence.build_comment(nil, [], nil, nil)
 
       assert body =~ "## QA self-review evidence"
       assert body =~ "_(no screenshots uploaded)_"
       refute body =~ "session.webm"
+      refute body =~ "session.zip"
+    end
+
+    test "defaults trace_url to nil (back-compat /3 arity)" do
+      body = QaEvidence.build_comment(nil, [], "https://u/session.webm")
+
+      assert body =~ "[session.webm](https://u/session.webm)"
+      refute body =~ "session.zip"
     end
   end
 end

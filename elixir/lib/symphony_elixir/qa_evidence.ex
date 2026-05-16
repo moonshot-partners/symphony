@@ -57,14 +57,19 @@ defmodule SymphonyElixir.QaEvidence do
         end
       end)
 
-    video_url = maybe_upload_video(Path.join(dir, "session.webm"))
+    video_url = maybe_upload_artifact(Path.join(dir, "session.webm"), "video")
+    trace_url = maybe_upload_artifact(Path.join(dir, "session.zip"), "trace")
 
     parent_id = Keyword.get(opts, :parent_id)
-    body = build_comment(report, uploaded, video_url)
+    body = build_comment(report, uploaded, video_url, trace_url)
 
     case Tracker.create_comment(issue_id, body, parent_id: parent_id) do
       {:ok, _id} ->
-        Logger.info("QA evidence published issue_id=#{issue_id} images=#{length(uploaded)} video=#{video_url != nil}")
+        Logger.info(
+          "QA evidence published issue_id=#{issue_id} images=#{length(uploaded)} " <>
+            "video=#{video_url != nil} trace=#{trace_url != nil}"
+        )
+
         :ok
 
       {:error, reason} ->
@@ -74,28 +79,36 @@ defmodule SymphonyElixir.QaEvidence do
   end
 
   @doc false
-  @spec build_comment(String.t() | nil, [{String.t(), String.t()}], String.t() | nil) :: String.t()
-  def build_comment(report, uploaded, video_url) do
+  @spec build_comment(
+          String.t() | nil,
+          [{String.t(), String.t()}],
+          String.t() | nil,
+          String.t() | nil
+        ) :: String.t()
+  def build_comment(report, uploaded, video_url, trace_url \\ nil) do
     [
       "## QA self-review evidence",
       if(report, do: "\n" <> String.trim_trailing(report)),
       "\n### Screenshots\n",
       screenshots_block(uploaded),
-      if(video_url, do: "\n[session.webm](#{video_url}) — full session recording")
+      if(video_url, do: "\n[session.webm](#{video_url}) — full session recording"),
+      if(trace_url,
+        do: "\n[session.zip](#{trace_url}) — Playwright trace (drag into https://trace.playwright.dev)"
+      )
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
     |> Kernel.<>("\n")
   end
 
-  defp maybe_upload_video(path) do
+  defp maybe_upload_artifact(path, label) do
     if File.regular?(path) do
       case upload_module().upload(path) do
         {:ok, url} ->
           url
 
         {:error, reason} ->
-          Logger.warning("QA evidence video upload failed reason=#{inspect(reason)}")
+          Logger.warning("QA evidence #{label} upload failed reason=#{inspect(reason)}")
           nil
       end
     end

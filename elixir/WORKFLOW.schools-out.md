@@ -359,37 +359,39 @@ Skipping this artifact is a hard stop, not a style preference.
       helpers in `e2e/fixtures/staging-api.ts` if the AC needs the
       staging API directly.
 
-   b'. **Capture a visual screenshot per test, on PASS too** — this is the
-      audience-facing artifact. The PM reading the Linear ticket needs to
-      SEE what "PASS" looks like rendered, not just `passed in 2078ms`.
-      `playwright.config.ts` is `screenshot: "only-on-failure"` (by design
-      — kept that way for the whole-suite/dev workflow), so the per-test
-      shot must be explicit inside the spec. After your last assertion,
-      always write a viewport screenshot into `qa-evidence/`:
+   b'. **Capture PM-facing visual evidence per test, on PASS too** — this is
+      the audience-facing artifact. The PM reading the Linear ticket needs to
+      SEE what "PASS" looks like rendered, not just `passed in 2078ms`. The
+      project ships a `captureEvidence(page, target, testInfo)` helper at
+      `fe-next-app/e2e/helpers/captureEvidence.ts` that does the right thing
+      (scroll the target into view, outline it in magenta, write both a
+      viewport shot and an element close-up into `qa-evidence/<slug>-…png`).
+      Call it after your last assertion — once per Playwright test. The
+      session video (`session.webm`) and the Playwright trace (`session.zip`,
+      openable at https://trace.playwright.dev) come from
+      `playwright.config.ts` (`video: "on"`, `trace: "on"`) — no per-spec
+      call needed.
 
       ```ts
       import { test, expect } from "@playwright/test";
+      import { captureEvidence } from "../helpers/captureEvidence";
 
       test("geographic-sibling header — Summer Camps prefix when filter is set", async ({ page }, testInfo) => {
         await page.goto("/summer-camps/austin?filter=soccer");
         const heading = page.getByTestId("geographic-sibling-header");
         await expect(heading).toHaveText("Soccer Summer Camps in Nearby Cities");
-
-        // visual evidence for PM — viewport-scoped so the asserted element
-        // shows in its on-page context, not full-page (full-page is bulky
-        // and dilutes the eye-line to the change).
-        const slug = testInfo.title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        await page.screenshot({ path: `qa-evidence/${slug}.png` });
+        await captureEvidence(page, heading, testInfo);
       });
       ```
 
       Symphony's QaEvidence uploader (Elixir-side, no agent code needed)
       scans `qa-evidence/*.png` after the agent finishes, uploads each shot
-      as a Linear file attachment, and embeds it inline in the QA
-      self-review comment under `### Screenshots`. This is mandatory for
-      every Playwright Test the agent writes — a passing test with no
-      screenshot defeats the PM-visibility contract that makes Symphony
-      worth running.
+      as a Linear file attachment, embeds them inline in the QA
+      self-review comment under `### Screenshots`, and uploads
+      `session.webm` + `session.zip` as separate links in the same comment.
+      This is mandatory for every Playwright Test the agent writes — a
+      passing test with no scrolled+highlighted screenshots defeats the
+      PM-visibility contract that makes Symphony worth running.
 
    c. **Run from `fe-next-app/`** (cwd):
       `CI=1 npm run e2e -- --project=<parents|anon>` (`CI=1` blocks
