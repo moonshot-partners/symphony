@@ -93,8 +93,7 @@ defmodule SymphonyElixir.QaEvidence do
       screenshots_block(uploaded),
       if(video_url, do: "\n[session.webm](#{video_url}) — full session recording"),
       if(trace_url,
-        do:
-          "\n[session.zip](#{trace_url}) — Playwright trace (drag into https://trace.playwright.dev)"
+        do: "\n[session.zip](#{trace_url}) — Playwright trace (drag into https://trace.playwright.dev)"
       )
     ]
     |> Enum.reject(&is_nil/1)
