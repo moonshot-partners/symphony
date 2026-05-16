@@ -16,12 +16,11 @@ defmodule SymphonyElixir.RunLedger.Forensics do
     dir = Keyword.get(opts, :dir, @default_dir)
     path = Path.join(dir, "#{ticket}.md")
 
-    with :ok <- File.mkdir_p(dir),
-         attempt_num = next_attempt_number(path),
-         header = file_header(path, ticket),
-         body = render(run, attempt_num),
-         :ok <- File.write(path, header <> body, [:append]) do
-      :ok
+    with :ok <- File.mkdir_p(dir) do
+      attempt_num = next_attempt_number(path)
+      header = file_header(path, ticket)
+      body = render(run, attempt_num)
+      File.write(path, header <> body, [:append])
     end
   end
 

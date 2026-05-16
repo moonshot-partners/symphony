@@ -27,17 +27,15 @@ defmodule SymphonyElixir.RunLedger.Report do
   def render(runs) when is_list(runs) do
     valid = Enum.filter(runs, &is_map/1)
 
-    cond do
-      valid == [] ->
-        empty_report()
-
-      true ->
-        IO.iodata_to_binary([
-          header(length(valid)),
-          outcome_summary(valid),
-          top_tickets(valid),
-          recent_runs(valid)
-        ])
+    if valid == [] do
+      empty_report()
+    else
+      IO.iodata_to_binary([
+        header(length(valid)),
+        outcome_summary(valid),
+        top_tickets(valid),
+        recent_runs(valid)
+      ])
     end
   end
 

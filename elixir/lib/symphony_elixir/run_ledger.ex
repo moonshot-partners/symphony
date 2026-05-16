@@ -22,9 +22,8 @@ defmodule SymphonyElixir.RunLedger do
     enriched = Map.put_new(run, :recorded_at, DateTime.utc_now() |> DateTime.to_iso8601())
 
     with :ok <- File.mkdir_p(Path.dirname(path)),
-         {:ok, json} <- Jason.encode(enriched),
-         :ok <- File.write(path, json <> "\n", [:append]) do
-      :ok
+         {:ok, json} <- Jason.encode(enriched) do
+      File.write(path, json <> "\n", [:append])
     end
   end
 
