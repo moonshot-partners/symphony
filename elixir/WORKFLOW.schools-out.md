@@ -397,6 +397,23 @@ Skipping this artifact is a hard stop, not a style preference.
       against a regex over whole-page text (a bare `v[a-z]+` happily matches
       "vorites" inside "favorites").
 
+      **Every new `data-testid` MUST have at least one committed consumer in
+      the same PR.** `qa_check.py` is workspace-local (rule 5d) and never
+      lands in the diff, so a `data-testid` whose only consumer is
+      `qa_check.py` looks orphaned to anyone reviewing the merged PR —
+      including `claude-pr-review`'s `pr-test-analyzer`, which flags it as
+      dead test infrastructure. Pair the `data-testid` with either:
+      - **(preferred)** a Jest test in the same PR that queries it
+        (`getByTestId("build-badge")` inside the adjacent `*.test.tsx`).
+        Light to add; runs on every CI; gives the testid a permanent
+        consumer reviewers can see.
+      - Or, when a Jest test is not justified for the change, switch the
+        `qa_check.py` selector to a semantic one (`text=`,
+        `role=`, `getByRole("heading", { name: "Pricing" })`) and remove
+        the `data-testid` from the diff entirely.
+      Adding a `data-testid` whose only mention in the PR is the markup
+      itself is forbidden — pick one of the two paths above.
+
    b. Write `state/{{ issue.identifier | downcase }}/qa_check.py` using the declarative harness. You do
       NOT write Playwright — you declare assertions and the harness owns the
       browser (it starts `next dev` on port 3001, which the staging API's

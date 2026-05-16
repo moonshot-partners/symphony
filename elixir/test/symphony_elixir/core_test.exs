@@ -336,8 +336,8 @@ defmodule SymphonyElixir.CoreTest do
       refute MapSet.member?(updated_state.claimed, issue_id)
       refute Map.has_key?(updated_state.retry_attempts, issue_id)
       refute Process.alive?(agent_pid)
-      assert File.exists?(workspace)
-      assert Map.get(updated_state.workpads, issue_id) == "wp-comment-1"
+      refute File.exists?(workspace)
+      refute Map.has_key?(updated_state.workpads, issue_id)
     after
       File.rm_rf(test_root)
       Application.delete_env(:symphony_elixir, :pr_ready_fn)
@@ -414,7 +414,7 @@ defmodule SymphonyElixir.CoreTest do
       refute body =~ "ready for review"
 
       refute Map.has_key?(updated_state.running, issue_id)
-      assert Map.get(updated_state.workpads, issue_id) == "wp-comment-pr-attached"
+      refute Map.has_key?(updated_state.workpads, issue_id)
     after
       File.rm_rf(test_root)
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
@@ -427,7 +427,7 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "non-active issue state stops running agent without cleaning workspace" do
+  test "non-active issue state stops running agent and cleans workspace" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -484,7 +484,7 @@ defmodule SymphonyElixir.CoreTest do
       refute Map.has_key?(updated_state.running, issue_id)
       refute MapSet.member?(updated_state.claimed, issue_id)
       refute Process.alive?(agent_pid)
-      assert File.exists?(workspace)
+      refute File.exists?(workspace)
     after
       File.rm_rf(test_root)
     end

@@ -106,7 +106,7 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
 
         state
         |> pr_sync_fn.(issue.id)
-        |> terminate_fn.(issue.id, false)
+        |> terminate_fn.(issue.id, true)
 
       DispatchGate.has_pr_attachment?(issue) ->
         Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
@@ -115,13 +115,13 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
           refresh_running_issue_state(state, issue)
         else
           Logger.info("Issue moved to non-active state with stale PR: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
-          terminate_fn.(state, issue.id, false)
+          terminate_fn.(state, issue.id, true)
         end
 
       !DispatchGate.routable_to_worker?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{RunningEntry.format_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
-        terminate_fn.(state, issue.id, false)
+        terminate_fn.(state, issue.id, true)
 
       DispatchGate.active_state?(issue.state, active) ->
         refresh_running_issue_state(state, issue)
@@ -129,7 +129,7 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
       true ->
         Logger.info("Issue moved to non-active state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
 
-        terminate_fn.(state, issue.id, false)
+        terminate_fn.(state, issue.id, true)
     end
   end
 
