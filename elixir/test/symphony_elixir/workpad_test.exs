@@ -648,4 +648,79 @@ defmodule SymphonyElixir.WorkpadTest do
       refute body =~ "| Tokens | — |"
     end
   end
+
+  describe "run-ledger outcome line (SYMPHONY_RUN_LEDGER flag)" do
+    setup do
+      previous = System.get_env("SYMPHONY_RUN_LEDGER")
+      System.delete_env("SYMPHONY_RUN_LEDGER")
+
+      on_exit(fn ->
+        case previous do
+          nil -> System.delete_env("SYMPHONY_RUN_LEDGER")
+          value -> System.put_env("SYMPHONY_RUN_LEDGER", value)
+        end
+      end)
+
+      :ok
+    end
+
+    test "pr_attached body shows outcome line when flag is on" do
+      System.put_env("SYMPHONY_RUN_LEDGER", "1")
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :pr_attached,
+          agent_total_tokens: 4200,
+          turn_count: 7,
+          retry_attempt: 1,
+          issue: %Issue{
+            id: "issue-wp",
+            identifier: "MT-WP",
+            repos: [%{name: "x", pr: %{url: "https://github.com/o/r/pull/9", merged: false, review: nil}}]
+          }
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Run outcome"
+      assert body =~ "pr_open"
+      assert body =~ "tokens 4200"
+      assert body =~ "turns 7"
+      assert body =~ "retries 1"
+    end
+
+    test "pr_attached body has no outcome line when flag is off" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :pr_attached
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      refute body =~ "Run outcome"
+    end
+
+    test "non-pr_attached events never get the outcome line even with flag on" do
+      System.put_env("SYMPHONY_RUN_LEDGER", "1")
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_completed
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      refute body =~ "Run outcome"
+    end
+  end
 end

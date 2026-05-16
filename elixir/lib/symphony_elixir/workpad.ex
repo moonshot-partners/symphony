@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Workpad do
   """
 
   require Logger
+  alias SymphonyElixir.RunLedger
   alias SymphonyElixir.Tracker
 
   @sync_events MapSet.new([
@@ -228,6 +229,7 @@ defmodule SymphonyElixir.Workpad do
     total_tok = Map.get(running_entry, :agent_total_tokens, 0)
     error_reason = Map.get(running_entry, :last_error_reason)
     pr_suffix = format_pr_link(issue)
+    outcome_line = format_outcome_line(last_event, issue, total_tok, turn, retry)
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
     """
@@ -253,8 +255,31 @@ defmodule SymphonyElixir.Workpad do
     | Atualizado | #{now} |
 
     </details>
+    #{outcome_line}
     """
   end
+
+  defp format_outcome_line(:pr_attached, issue, total_tok, turn, retry) do
+    if RunLedger.enabled?() do
+      pr_url = pr_url_from_issue(issue)
+      outcome = RunLedger.classify_outcome(%{pr_url: pr_url})
+
+      "\n**Run outcome:** #{outcome} · tokens #{total_tok} · turns #{turn} · retries #{retry}\n"
+    else
+      ""
+    end
+  end
+
+  defp format_outcome_line(_event, _issue, _tok, _turn, _retry), do: ""
+
+  defp pr_url_from_issue(%{repos: repos}) when is_list(repos) do
+    Enum.find_value(repos, fn
+      %{pr: %{url: url}} when is_binary(url) -> url
+      _ -> nil
+    end)
+  end
+
+  defp pr_url_from_issue(_), do: nil
 
   defp format_primary_text(:pr_attached, _last_text), do: "_PR enviado para revisão._"
   defp format_primary_text(_event, last_text), do: format_last_text(last_text)
