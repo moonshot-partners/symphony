@@ -183,7 +183,8 @@ defmodule SymphonyElixir.WorkpadTest do
     assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
     assert body =~ "PR aberto"
     refute body =~ "**Last event**: pr_attached"
-    assert body =~ "ready for review"
+    assert body =~ "PR enviado para revisão"
+    refute body =~ "ready for review"
     refute_received {:memory_tracker_comment, _, _}
   end
 
@@ -556,6 +557,95 @@ defmodule SymphonyElixir.WorkpadTest do
 
       assert String.starts_with?(body, "## Symphony Workpad") or
                String.starts_with?(body, "\n## Symphony Workpad")
+    end
+  end
+
+  describe "Sprint 2: closing message + tokens=0 polish" do
+    test "pr_attached body shows closing message and hides last_agent_text" do
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :pr_attached,
+          last_agent_text: "thinking about implementation..."
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "PR enviado para revisão"
+      refute body =~ "thinking about implementation"
+    end
+
+    test "turn_completed keeps showing last_agent_text (not closing message)" do
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_completed,
+          last_agent_text: "deep in the middle of work"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "deep in the middle of work"
+      refute body =~ "PR enviado para revisão"
+    end
+
+    test "session_started keeps showing last_agent_text" do
+      update = %{event: :session_started, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          last_agent_event: :session_started,
+          last_agent_text: "spinning up agent"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment, "issue-wp", body}, 1_000
+      assert body =~ "spinning up agent"
+      refute body =~ "PR enviado para revisão"
+    end
+
+    test "tokens row renders em-dash when input/output/total are all zero" do
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          agent_input_tokens: 0,
+          agent_output_tokens: 0,
+          agent_total_tokens: 0
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "| Tokens | — |"
+      refute body =~ "in=0"
+    end
+
+    test "tokens row renders normal counts when any token is non-zero" do
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          agent_input_tokens: 55,
+          agent_output_tokens: 0,
+          agent_total_tokens: 55
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "in=55"
+      assert body =~ "total=55"
+      refute body =~ "| Tokens | — |"
     end
   end
 end
