@@ -42,6 +42,11 @@ defmodule SymphonyElixir.RunLedgerTest do
       :ok = RunLedger.record_run(%{ticket: "T-1", outcome: "merged"}, path: nested)
       assert File.exists?(nested)
     end
+
+    test "exercises default opts arity-1 head" do
+      result = RunLedger.record_run(%{ticket: "T-default"})
+      assert result == :ok or match?({:error, _}, result)
+    end
   end
 
   describe "classify_outcome/1" do

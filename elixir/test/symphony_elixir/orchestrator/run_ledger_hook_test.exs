@@ -80,6 +80,25 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHookTest do
       assert run.retries == 0
       assert run.pr_url == nil
     end
+
+    test "reads identifier from issue when running entry has none" do
+      issue = %Issue{id: "lin-id", identifier: "SODEV-555", repos: []}
+      running_entry = %{issue: issue}
+
+      run = RunLedgerHook.build_run_map(running_entry, "lin-id")
+
+      assert run.ticket == "SODEV-555"
+    end
+
+    test "returns nil pr_url when repos entries have no :pr key" do
+      issue = %Issue{id: "lin-y", identifier: "SODEV-77", repos: [%{name: "x"}]}
+      running_entry = %{issue: issue}
+
+      run = RunLedgerHook.build_run_map(running_entry, "lin-y")
+
+      assert run.pr_url == nil
+      assert run.outcome == "no_pr"
+    end
   end
 
   describe "record/2 with flag disabled" do
@@ -156,6 +175,18 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHookTest do
                  ledger_path: bogus,
                  forensics_dir: bogus_dir
                )
+    end
+
+    test "swallows raised exception in rescue branch and returns :ok" do
+      assert :ok =
+               RunLedgerHook.record(%{identifier: "T-Y", issue: nil}, "id-y",
+                 ledger_path: 123,
+                 forensics_dir: 456
+               )
+    end
+
+    test "uses default paths when opts omitted", %{tmp: _tmp} do
+      assert :ok = RunLedgerHook.record(%{identifier: "T-Z", issue: nil}, "id-z")
     end
   end
 end

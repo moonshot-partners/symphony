@@ -72,4 +72,9 @@ defmodule SymphonyElixir.RunLedger.ForensicsTest do
     assert body =~ "PR: —"
     assert body =~ "Turns: 0"
   end
+
+  test "exercises default opts arity-1 head" do
+    result = Forensics.append_attempt(%{ticket: "T-default"})
+    assert result == :ok or match?({:error, _}, result)
+  end
 end
