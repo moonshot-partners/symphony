@@ -27,7 +27,6 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Linear.FileUpload,
           SymphonyElixir.LogFile,
           SymphonyElixir.Orchestrator,
-          SymphonyElixir.Orchestrator.CodexTelemetry,
           SymphonyElixir.Orchestrator.Dispatch,
           SymphonyElixir.Orchestrator.GithubLabel,
           SymphonyElixir.Orchestrator.IssueFilter,
