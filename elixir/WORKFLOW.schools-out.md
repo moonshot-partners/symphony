@@ -331,6 +331,64 @@ Skipping this artifact is a hard stop, not a style preference.
    ticket to "In QA / Review" off your final message, so the browser proof
    has to exist by then.
 
+   **Pick your QA path based on the project layout (check ONCE up front):**
+
+   - If `fe-next-app/playwright.config.ts` exists → use the
+     **project-owned Playwright Test path** (rule 5-PT below). The
+     project owns its specs, fixtures and locators; you add/edit a spec
+     in the same PR as the feature.
+   - Otherwise → use the **Symphony harness path** (`qa_helpers` — rule
+     5-LH below; this is the legacy path).
+
+   The downstream evidence step is identical for both: `fe-next-app/
+   qa-evidence/qa-report.md` + screenshots + `session.webm`. Symphony
+   reads that dir and posts the proof to the Linear ticket automatically.
+
+   ### 5-PT — Project-owned Playwright Test path
+
+   a. **Stable selector for every visual AC** (same rule as 5-LH-a).
+
+   b. **Add a spec to `fe-next-app/e2e/`** next to the existing ones:
+      - `e2e/parents/<feature>.spec.ts` for authenticated parents flows
+        — the project's `parents` Playwright project reuses
+        `playwright/.auth/parents.json` (provisioned once by the
+        `setup-parents` project) so the spec opens already
+        authenticated, no per-spec login.
+      - `e2e/anon/<feature>.spec.ts` for anonymous flows.
+      Specs assert against the `data-testid` you added; reuse the
+      helpers in `e2e/fixtures/staging-api.ts` if the AC needs the
+      staging API directly.
+
+   c. **Run from `fe-next-app/`** (cwd):
+      `CI=1 npm run e2e -- --project=<parents|anon>` (`CI=1` blocks
+      `reuseExistingServer` so the build runs cleanly per attempt).
+      Three outcomes (same as 5-LH):
+      - **PASS** — proceed.
+      - **FAIL** — assertion failed. Fix the implementation from the
+        existing diff (do not start over). Cap 2 fix attempts. Stop and
+        report after 2 — do not open the PR with a failing browser
+        check.
+      - **BLOCKED** — webServer or staging API never comes up. Confirm
+        pre-existing with `git stash` (same logic as 5-LH-c). Document
+        BLOCKED via `qa_publish.py --blocked "<reason>"`.
+
+   d. **Promote evidence into `qa-evidence/`** so Symphony's uploader
+      finds it. After the test run, from `fe-next-app/`:
+      `python /opt/qa/qa_publish.py`. That adapter reads
+      `test-results/results.json` + trace dirs, copies probative
+      screenshots + the video per test, and writes
+      `fe-next-app/qa-evidence/qa-report.md` + `verdict.json` in the
+      shape Symphony already understands.
+
+   e. **Do NOT commit `qa-evidence/`, `test-results/`,
+      `playwright-report/`, or `playwright/.auth/`** — all four are
+      workspace-local. The scaffold already ships those entries in
+      `fe-next-app/.gitignore`; verify your PR diff has nothing from
+      them. Paste the `qa-report.md` table into the PR body under
+      `## QA self-review` (same as 5-LH-d).
+
+   ### 5-LH — Legacy Symphony harness path (when no playwright.config.ts)
+
    a. **Pick a stable selector for every visual AC.** For each AC that says
       "renders / displays / shows / visible", find the element in your diff.
       If it has no stable `data-testid`, add one in this PR (e.g.

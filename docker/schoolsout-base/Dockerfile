@@ -64,6 +64,16 @@ RUN pip install --break-system-packages --no-cache-dir playwright \
     && playwright install --with-deps chromium \
     && chmod -R a+rX /opt/ms-playwright
 
+# JS Playwright Test runtime — matches `@playwright/test` declared in
+# fe-next-app `devDependencies`. Pre-installs chromium into the shared
+# PLAYWRIGHT_BROWSERS_PATH so a fresh per-ticket workspace running
+# `npm ci && npm run e2e` doesn't pay a 30s+ chromium download. The
+# pip `playwright` install above remains for the legacy `qa_helpers.py`
+# path; the two playwright versions coexist via per-version subdirs.
+RUN npm install -g @playwright/test@latest \
+    && npx playwright install chromium \
+    && chmod -R a+rX /opt/ms-playwright
+
 # QA self-review helper library (stdlib-only). On PYTHONPATH so the agent's
 # `qa_check.py` can `from qa_helpers import ...` — see WORKFLOW.schools-out.md.
 COPY docker/schoolsout-base/qa /opt/qa
