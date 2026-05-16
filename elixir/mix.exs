@@ -29,7 +29,6 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Orchestrator,
           SymphonyElixir.Orchestrator.Dispatch,
           SymphonyElixir.Orchestrator.GithubLabel,
-          SymphonyElixir.Orchestrator.IssueFilter,
           SymphonyElixir.Orchestrator.PrMerge,
           SymphonyElixir.Orchestrator.StateTransition,
           SymphonyElixir.Orchestrator.TokenMetrics,
