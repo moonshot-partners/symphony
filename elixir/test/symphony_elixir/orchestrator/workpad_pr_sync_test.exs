@@ -105,4 +105,37 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
     refute_receive {:memory_tracker_state_update, _, _}, 100
   end
+
+  test "passes the workpad comment id to QaEvidence as parent_id" do
+    issue_id = "issue-pr-sync-4"
+
+    base = Path.join(System.tmp_dir!(), "wp-prsync-#{System.unique_integer([:positive])}")
+    qa_dir = Path.join(base, "fe-next-app/qa-evidence")
+    File.mkdir_p!(qa_dir)
+    File.write!(Path.join(qa_dir, "01.png"), "fake-png")
+    on_exit(fn -> File.rm_rf!(base) end)
+
+    Application.put_env(:symphony_elixir, :qa_evidence_upload_module, __MODULE__.FakeUpload)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :qa_evidence_upload_module) end)
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{id: issue_id, identifier: "WP-4", state: "Scheduled"},
+        identifier: "WP-4",
+        workpad_comment_id: "wp-comment-pr-sync-4",
+        workspace_path: base
+      }
+    }
+
+    state = build_state(running)
+
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-pr-sync-4"}, 2_000
+  end
+
+  defmodule FakeUpload do
+    @moduledoc false
+    def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}
+  end
 end

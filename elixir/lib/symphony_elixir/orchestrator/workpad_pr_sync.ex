@@ -42,21 +42,22 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
         _ = Workpad.maybe_sync(entry, update, recipient)
 
-        run_side_effects(Map.get(running_entry, :issue), running_entry)
+        run_side_effects(Map.get(running_entry, :issue), running_entry, comment_id)
 
         state
     end
   end
 
-  defp run_side_effects(nil, _running_entry), do: :ok
+  defp run_side_effects(nil, _running_entry, _parent_comment_id), do: :ok
 
-  defp run_side_effects(issue, running_entry) do
+  defp run_side_effects(issue, running_entry, parent_comment_id) do
     StateTransition.apply(issue, Config.settings!().tracker.on_complete_state)
     Task.start(fn -> GithubLabel.apply(issue) end)
 
     QaEvidence.maybe_publish(
       Map.get(issue, :id),
-      Map.get(running_entry, :workspace_path)
+      Map.get(running_entry, :workspace_path),
+      parent_id: parent_comment_id
     )
 
     :ok

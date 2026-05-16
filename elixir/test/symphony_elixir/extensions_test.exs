@@ -177,8 +177,21 @@ defmodule SymphonyElixir.ExtensionsTest do
     )
 
     assert {:ok, "c-1"} = Adapter.create_comment("issue-1", "hello")
-    assert_receive {:graphql_called, create_comment_query, %{body: "hello", issueId: "issue-1"}}
+    assert_receive {:graphql_called, create_comment_query, no_parent_vars}
     assert create_comment_query =~ "commentCreate"
+    assert create_comment_query =~ "parentId"
+    assert no_parent_vars == %{body: "hello", issueId: "issue-1", parentId: nil}
+
+    Process.put(
+      {FakeLinearClient, :graphql_result},
+      {:ok, %{"data" => %{"commentCreate" => %{"success" => true, "comment" => %{"id" => "c-2"}}}}}
+    )
+
+    assert {:ok, "c-2"} =
+             Adapter.create_comment("issue-1", "reply", parent_id: "parent-comment-9")
+
+    assert_receive {:graphql_called, _, parent_vars}
+    assert parent_vars == %{body: "reply", issueId: "issue-1", parentId: "parent-comment-9"}
 
     Process.put(
       {FakeLinearClient, :graphql_result},

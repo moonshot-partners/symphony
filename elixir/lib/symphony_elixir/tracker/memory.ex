@@ -35,9 +35,18 @@ defmodule SymphonyElixir.Tracker.Memory do
      end)}
   end
 
-  @spec create_comment(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def create_comment(issue_id, body) do
+  @spec create_comment(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def create_comment(issue_id, body, opts \\ []) when is_list(opts) do
     send_event({:memory_tracker_comment, issue_id, body})
+
+    case Keyword.get(opts, :parent_id) do
+      parent_id when is_binary(parent_id) ->
+        send_event({:memory_tracker_comment_parent, issue_id, parent_id})
+
+      _ ->
+        :ok
+    end
+
     {:ok, "memory-comment-#{issue_id}"}
   end
 
