@@ -163,5 +163,106 @@ class QaPublishTest(unittest.TestCase):
         self.assertEqual(rc, 2, "exit 2 = configuration error (missing JSON, no --blocked)")
 
 
+def _results_with_setup_and_feature(tmpdir: str) -> tuple[str, dict]:
+    """Simulates `--project=parents` output: setup-parents runs first, then the feature spec."""
+    setup_video = os.path.join(tmpdir, "setup_video.webm")
+    feature_video = os.path.join(tmpdir, "feature_video.webm")
+    with open(setup_video, "wb") as fh:
+        fh.write(b"SETUP-VIDEO")
+    with open(feature_video, "wb") as fh:
+        fh.write(b"FEATURE-VIDEO")
+
+    data = {
+        "suites": [
+            {
+                "title": "auth-parents.setup.ts",
+                "file": "e2e/auth-parents.setup.ts",
+                "suites": [],
+                "specs": [
+                    {
+                        "title": "provision parents account",
+                        "tests": [
+                            {
+                                "results": [
+                                    {
+                                        "status": "passed",
+                                        "duration": 5000,
+                                        "errors": [],
+                                        "attachments": [
+                                            {"name": "video", "contentType": "video/webm", "path": setup_video}
+                                        ],
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "title": "parents/search.spec.ts",
+                "file": "e2e/parents/search.spec.ts",
+                "suites": [],
+                "specs": [
+                    {
+                        "title": "search results render",
+                        "tests": [
+                            {
+                                "results": [
+                                    {
+                                        "status": "passed",
+                                        "duration": 2000,
+                                        "errors": [],
+                                        "attachments": [
+                                            {"name": "video", "contentType": "video/webm", "path": feature_video}
+                                        ],
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+    }
+    results_path = os.path.join(tmpdir, "results.json")
+    with open(results_path, "w") as fh:
+        json.dump(data, fh)
+    return results_path, data
+
+
+class SetupSuiteFilterTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmpdir = self._tmp.name
+
+    def _run(self, results_path: str, evidence_dir: str) -> int:
+        return qa_publish.main(["--evidence-dir", evidence_dir, "--ticket", "SODEV-TEST", "--results", results_path])
+
+    def test_setup_suite_video_does_not_win(self):
+        """session.webm must come from the feature spec, not setup-parents."""
+        results_path, _ = _results_with_setup_and_feature(self.tmpdir)
+        evidence = os.path.join(self.tmpdir, "qa-evidence")
+
+        self._run(results_path, evidence)
+
+        with open(os.path.join(evidence, "session.webm"), "rb") as fh:
+            content = fh.read()
+        self.assertEqual(content, b"FEATURE-VIDEO", "session.webm must contain feature video, not setup video")
+
+    def test_setup_suite_excluded_from_checks(self):
+        """Setup spec must not appear in verdict checks — only feature specs count."""
+        results_path, _ = _results_with_setup_and_feature(self.tmpdir)
+        evidence = os.path.join(self.tmpdir, "qa-evidence")
+
+        self._run(results_path, evidence)
+
+        with open(os.path.join(evidence, "verdict.json")) as fh:
+            verdict = json.load(fh)
+        names = [c["name"] for c in verdict["checks"]]
+        self.assertNotIn("provision parents account", names, f"setup check must be excluded: {names}")
+        self.assertIn("search results render", names, f"feature check must be present: {names}")
+
+
 if __name__ == "__main__":
     unittest.main()

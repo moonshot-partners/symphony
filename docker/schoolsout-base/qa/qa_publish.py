@@ -67,14 +67,23 @@ def _pick_attachments(attachments: list[dict]) -> tuple[str | None, str | None, 
     return shot, video, trace
 
 
+def _is_setup_suite(suite: dict) -> bool:
+    # Playwright setup projects (e.g. setup-parents) produce suites whose
+    # file field matches *.setup.ts. Exclude them so their video doesn't
+    # beat the feature spec as session.webm and they don't pollute checks.
+    path = suite.get("file", "") or suite.get("title", "")
+    return ".setup." in path
+
+
 def _collect_checks(results_json: dict, evidence_dir: str) -> list[dict]:
+    suites = [s for s in (results_json.get("suites") or []) if not _is_setup_suite(s)]
     checks: list[dict] = []
     n = 0
-    for spec, test in _iter_tests(results_json.get("suites") or []):
+    for spec, test in _iter_tests(suites):
         title = spec.get("title") or test.get("title") or "unnamed"
         results = test.get("results") or []
         if not results:
-            checks.append({"name": title, "pass": False, "detail": "no result recorded", "screenshots": []})
+            checks.append({"name": title, "pass": False, "detail": "no result recorded"})
             continue
         last = results[-1]
         status = last.get("status") or "unknown"
@@ -89,23 +98,18 @@ def _collect_checks(results_json: dict, evidence_dir: str) -> list[dict]:
         shot_src, video_src, trace_src = _pick_attachments(last.get("attachments") or [])
         n += 1
         stem = f"{n:02d}-{'pass' if ok else 'FAIL'}-{_slug(title) or f'test{n}'}"
-        shots: list[str] = []
         if shot_src and os.path.isfile(shot_src):
             dest = os.path.join(evidence_dir, f"{stem}.png")
             shutil.copyfile(shot_src, dest)
-            shots.append(os.path.basename(dest))
         if video_src and os.path.isfile(video_src):
-            # First video wins as session.webm — same convention as
-            # qa_helpers.qa_run (record_video_dir + rename on close).
             session = os.path.join(evidence_dir, "session.webm")
             if not os.path.exists(session):
                 shutil.copyfile(video_src, session)
         if trace_src and os.path.isfile(trace_src):
-            # First trace wins as session.zip — open in https://trace.playwright.dev
             session_trace = os.path.join(evidence_dir, "session.zip")
             if not os.path.exists(session_trace):
                 shutil.copyfile(trace_src, session_trace)
-        checks.append({"name": title, "pass": ok, "detail": detail, "screenshots": shots})
+        checks.append({"name": title, "pass": ok, "detail": detail})
     return checks
 
 
