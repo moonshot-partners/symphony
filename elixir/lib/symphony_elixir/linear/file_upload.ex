@@ -39,15 +39,16 @@ defmodule SymphonyElixir.Linear.FileUpload do
 
   @spec upload(Path.t()) :: {:ok, String.t()} | {:error, term()}
   def upload(path) when is_binary(path) do
-    with {:ok, bytes} <- File.read(path),
+    with {:ok, %File.Stat{size: size}} <- File.stat(path),
          content_type <- content_type_for(path),
          {:ok, body} <-
            Client.graphql(@mutation, %{
              contentType: content_type,
              filename: Path.basename(path),
-             size: byte_size(bytes)
+             size: size
            }),
          {:ok, upload_url, asset_url, headers} <- extract_target(body),
+         {:ok, bytes} <- File.read(path),
          :ok <- put_bytes(upload_url, content_type, headers, bytes) do
       {:ok, asset_url}
     end
@@ -80,7 +81,7 @@ defmodule SymphonyElixir.Linear.FileUpload do
   defp put_bytes(url, content_type, headers, bytes) do
     req_headers = [{"Content-Type", content_type} | headers]
 
-    case Req.put(url, headers: req_headers, body: bytes, connect_options: [timeout: 30_000]) do
+    case Req.put(url, headers: req_headers, body: bytes, connect_options: [timeout: 30_000], receive_timeout: 120_000) do
       {:ok, %{status: status}} when status in 200..299 -> :ok
       {:ok, response} -> {:error, {:storage_put_status, response.status}}
       {:error, reason} -> {:error, {:storage_put_request, reason}}
