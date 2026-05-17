@@ -72,11 +72,16 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec qa_evidence_subpaths() :: [String.t(), ...]
+  @spec qa_evidence_subpaths() :: [String.t()]
   def qa_evidence_subpaths, do: settings!().qa.evidence_subpaths
 
-  @spec qa_evidence_subpath() :: String.t()
-  def qa_evidence_subpath, do: hd(qa_evidence_subpaths())
+  @spec qa_evidence_subpath() :: String.t() | nil
+  def qa_evidence_subpath do
+    case qa_evidence_subpaths() do
+      [] -> nil
+      [first | _] -> first
+    end
+  end
 
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do

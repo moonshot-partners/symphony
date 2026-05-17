@@ -13,7 +13,8 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatchTest do
       max_concurrent_agents: 5,
       max_concurrent_agents_by_state: %{},
       worker_ssh_hosts: [],
-      worker_max_concurrent_agents_per_host: nil
+      worker_max_concurrent_agents_per_host: nil,
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
     )
 
     :ok

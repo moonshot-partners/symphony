@@ -1422,9 +1422,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().worker.max_concurrent_agents_per_host == 2
   end
 
-  test "schema parse — qa.evidence_subpaths defaults to [fe-next-app/qa-evidence] when the qa block is omitted" do
+  test "schema parse — qa.evidence_subpaths defaults to [] when the qa block is omitted" do
     assert {:ok, settings} = Schema.parse(%{})
-    assert settings.qa.evidence_subpaths == ["fe-next-app/qa-evidence"]
+    assert settings.qa.evidence_subpaths == []
   end
 
   test "schema parse — qa.evidence_subpath string YAML coerces to single-element list (backward-compat)" do
@@ -1454,7 +1454,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
   test "Config.qa_evidence_subpaths/0 returns the configured list, defaulting when omitted" do
     File.write!(Workflow.workflow_file_path(), "---\n---\n")
-    assert Config.qa_evidence_subpaths() == ["fe-next-app/qa-evidence"]
+    assert Config.qa_evidence_subpaths() == []
 
     workflow = """
     ---
@@ -1478,12 +1478,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     # `drop_nil_values/1` strips the nil before reaching Qa.changeset, so the
     # qa block effectively becomes empty and the default list applies.
     assert {:ok, settings} = Schema.parse(%{"qa" => %{"evidence_subpath" => nil}})
-    assert settings.qa.evidence_subpaths == ["fe-next-app/qa-evidence"]
+    assert settings.qa.evidence_subpaths == []
   end
 
-  test "Config.qa_evidence_subpath/0 stays backward-compat, returns first subpath" do
+  test "Config.qa_evidence_subpath/0 returns nil when no qa block set, first path when set" do
     File.write!(Workflow.workflow_file_path(), "---\n---\n")
-    assert Config.qa_evidence_subpath() == "fe-next-app/qa-evidence"
+    assert Config.qa_evidence_subpath() == nil
 
     workflow = """
     ---

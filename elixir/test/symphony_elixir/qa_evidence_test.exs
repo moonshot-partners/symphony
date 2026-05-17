@@ -16,7 +16,10 @@ defmodule SymphonyElixir.QaEvidenceTest do
   setup do
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
     Application.put_env(:symphony_elixir, :qa_evidence_upload_module, FakeUpload)
-    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
 
     on_exit(fn ->
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
