@@ -13,7 +13,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
       tracker_active_states: ["Scheduled", "In Progress"],
-      tracker_terminal_states: ["Closed", "Done", "Cancelled"]
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
     )
 
     on_exit(fn ->

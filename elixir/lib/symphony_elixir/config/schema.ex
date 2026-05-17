@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Config.Schema do
   alias SymphonyElixir.Config.Schema.Observability
   alias SymphonyElixir.Config.Schema.Polling
   alias SymphonyElixir.Config.Schema.Qa
+  alias SymphonyElixir.Config.Schema.Repo
   alias SymphonyElixir.Config.Schema.Tracker
   alias SymphonyElixir.Config.Schema.Worker
   alias SymphonyElixir.Config.Schema.Workspace
@@ -32,6 +33,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:qa, Qa, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
+    embeds_many(:repos, Repo, on_replace: :delete)
   end
 
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
@@ -125,6 +127,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:qa, with: &Qa.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
+    |> cast_embed(:repos, with: &Repo.changeset/2)
   end
 
   defp finalize_settings(settings) do
@@ -323,7 +326,10 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp flatten_errors(errors, prefix) when is_list(errors) do
-    Enum.map(errors, &(prefix <> " " <> &1))
+    Enum.flat_map(errors, fn
+      item when is_map(item) -> flatten_errors(item, prefix)
+      item when is_binary(item) -> [prefix <> " " <> item]
+    end)
   end
 
   defp translate_error({message, options}) do
