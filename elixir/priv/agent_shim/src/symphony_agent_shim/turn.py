@@ -118,12 +118,10 @@ async def _emit_message(
                 await _emit_synthetic_approval(block, turn_id, writer)
         text_parts = [block.text for block in message.content if isinstance(block, TextBlock)]
         if text_parts:
-            await writer(
-                protocol.notification(
-                    "item/agent_message",
-                    {"turn_id": turn_id, "text": "\n".join(text_parts)},
-                )
-            )
+            params: dict[str, Any] = {"turn_id": turn_id, "text": "\n".join(text_parts)}
+            if accumulated:
+                params["usage"] = dict(accumulated)
+            await writer(protocol.notification("item/agent_message", params))
         return
     if isinstance(message, ResultMessage):
         # ResultMessage.usage is None in practice (Claude CLI doesn't emit cumulative
