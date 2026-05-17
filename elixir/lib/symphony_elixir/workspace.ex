@@ -177,22 +177,23 @@ defmodule SymphonyElixir.Workspace do
 
   defp maybe_run_repos_hook(workspace, issue_context) do
     case Config.repos() do
-      [] ->
+      [] -> :ok
+      repos -> run_repos_hook(workspace, issue_context, repos)
+    end
+  end
+
+  defp run_repos_hook(workspace, issue_context, repos) do
+    command = generate_repos_bash(repos)
+    repos_marker = Path.join(workspace, @repos_marker_relpath)
+
+    if File.exists?(repos_marker) do
+      :ok
+    else
+      with :ok <- run_hook(command, workspace, issue_context, "repos") do
+        File.mkdir_p!(Path.dirname(repos_marker))
+        File.write!(repos_marker, "ok\n")
         :ok
-
-      repos ->
-        command = generate_repos_bash(repos)
-        repos_marker = Path.join(workspace, @repos_marker_relpath)
-
-        if File.exists?(repos_marker) do
-          :ok
-        else
-          with :ok <- run_hook(command, workspace, issue_context, "repos") do
-            File.mkdir_p!(Path.dirname(repos_marker))
-            File.write!(repos_marker, "ok\n")
-            :ok
-          end
-        end
+      end
     end
   end
 
