@@ -47,7 +47,10 @@ defmodule SymphonyElixir.Tracker.Memory do
         :ok
     end
 
-    {:ok, "memory-comment-#{issue_id}"}
+    case Application.get_env(:symphony_elixir, :memory_tracker_create_comment_result) do
+      {:error, _reason} = error -> error
+      _ -> {:ok, "memory-comment-#{issue_id}"}
+    end
   end
 
   @spec update_comment(String.t(), String.t()) :: :ok | {:error, term()}

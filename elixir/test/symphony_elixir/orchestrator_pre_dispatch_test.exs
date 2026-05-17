@@ -1,6 +1,8 @@
 defmodule SymphonyElixir.OrchestratorPreDispatchTest do
   use SymphonyElixir.TestSupport
 
+  import ExUnit.CaptureLog
+
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.PreDispatch
 
@@ -67,6 +69,30 @@ defmodule SymphonyElixir.OrchestratorPreDispatchTest do
 
       assert_receive {:memory_tracker_comment, "issue-pdr-2", _}, 500
       refute_receive {:memory_tracker_state_update, _, _}, 100
+    end
+  end
+
+  describe "PreDispatch.apply_reject/3 — comment failure" do
+    test "logs warning when tracker.create_comment returns {:error, _}" do
+      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+      Application.put_env(:symphony_elixir, :memory_tracker_create_comment_result, {:error, :boom})
+
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :memory_tracker_create_comment_result)
+      end)
+
+      set_memory_tracker_recipient()
+      issue = make_issue(id: "issue-pdr-3", identifier: "SODEV-300")
+
+      log =
+        capture_log(fn ->
+          :ok = PreDispatch.apply_reject(issue, :empty_description, "description is empty.")
+          # Wait for the async Task.Supervisor child to flush its log.
+          Process.sleep(50)
+        end)
+
+      assert log =~ "Pre-dispatch reject comment failed"
+      assert log =~ "issue-pdr-3"
     end
   end
 end
