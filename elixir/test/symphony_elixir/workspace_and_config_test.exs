@@ -1422,6 +1422,33 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().worker.max_concurrent_agents_per_host == 2
   end
 
+  test "schema parse — qa.evidence_subpath defaults to fe-next-app/qa-evidence when the qa block is omitted" do
+    assert {:ok, settings} = Schema.parse(%{})
+    assert settings.qa.evidence_subpath == "fe-next-app/qa-evidence"
+  end
+
+  test "schema parse — qa.evidence_subpath uses the YAML-provided value when set" do
+    assert {:ok, settings} =
+             Schema.parse(%{"qa" => %{"evidence_subpath" => "frontend/qa-evidence"}})
+
+    assert settings.qa.evidence_subpath == "frontend/qa-evidence"
+  end
+
+  test "Config.qa_evidence_subpath/0 returns the configured subpath, defaulting when omitted" do
+    File.write!(Workflow.workflow_file_path(), "---\n---\n")
+    assert Config.qa_evidence_subpath() == "fe-next-app/qa-evidence"
+
+    workflow = """
+    ---
+    qa:
+      evidence_subpath: custom/qa-evidence
+    ---
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    assert Config.qa_evidence_subpath() == "custom/qa-evidence"
+  end
+
   test "schema helpers cover custom type and state limit validation" do
     assert StringOrMap.type() == :map
     assert StringOrMap.embed_as(:json) == :self

@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.GateC do
   @moduledoc """
   Gate C — validates that the agent's first turn-end message conforms to the
-  AC Extraction contract in `WORKFLOW.schools-out.md`.
+  AC Extraction contract in the active workflow.
 
   Pure boundary so the orchestrator stays workflow-agnostic and the rule can
   be exercised in isolation. The orchestrator calls `validate_first_turn/1`

@@ -1,23 +1,23 @@
 defmodule SymphonyElixir.QaEvidence do
   @moduledoc """
-  Publishes a UI-QA-self-review evidence bundle to a Linear ticket.
+  Publishes a UI-QA-self-review evidence bundle to the tracker ticket.
 
-  The `schools-out` workflow's "UI QA self-review" step (see
-  `WORKFLOW.schools-out.md` rule 5) leaves a `fe-next-app/qa-evidence/`
-  directory in the agent's workspace — screenshots, a session `.webm`, a
-  `qa-report.md` table. When the agent attaches its PR, the orchestrator calls
-  `maybe_publish/2`: if that directory exists, the screenshots are uploaded to
-  Linear and posted as a comment on the ticket (with the report table inline) so
-  the proof lives on the ticket the PM looks at, not only inside the PR.
+  Reads `qa.evidence_subpath` from the active workflow config (defaults to
+  `fe-next-app/qa-evidence`) and looks inside the agent's workspace for that
+  directory — screenshots, a session `.webm`, a `qa-report.md` table. When the
+  agent attaches its PR, the orchestrator calls `maybe_publish/2`: if the
+  directory exists, the screenshots are uploaded and posted as a comment on
+  the ticket (with the report table inline) so the proof lives on the ticket
+  the PM looks at, not only inside the PR.
 
   Fire-and-forget — any failure is logged, never fatal to the completion path.
   """
 
   require Logger
 
+  alias SymphonyElixir.Config
   alias SymphonyElixir.Tracker
 
-  @evidence_subpath "fe-next-app/qa-evidence"
   @image_exts ~w(.png .jpg .jpeg .gif)
   @max_images 20
 
@@ -26,7 +26,7 @@ defmodule SymphonyElixir.QaEvidence do
 
   def maybe_publish(issue_id, workspace_path, opts)
       when is_binary(issue_id) and is_binary(workspace_path) and is_list(opts) do
-    source_dir = Path.join(workspace_path, @evidence_subpath)
+    source_dir = Path.join(workspace_path, Config.qa_evidence_subpath())
 
     case stage_evidence(source_dir) do
       {:ok, staging_dir} ->
