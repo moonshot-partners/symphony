@@ -143,6 +143,7 @@ defmodule SymphonyElixir.TestSupport do
           observability_render_interval_ms: 16,
           qa_evidence_subpath: nil,
           qa_evidence_subpaths: nil,
+          repos: [],
           prompt: @workflow_prompt
         ],
         overrides
@@ -187,6 +188,7 @@ defmodule SymphonyElixir.TestSupport do
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
     qa_evidence_subpath = Keyword.get(config, :qa_evidence_subpath)
     qa_evidence_subpaths = Keyword.get(config, :qa_evidence_subpaths)
+    repos = Keyword.get(config, :repos)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -228,6 +230,7 @@ defmodule SymphonyElixir.TestSupport do
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         qa_yaml(qa_evidence_subpath, qa_evidence_subpaths),
+        repos_yaml(repos),
         "---",
         prompt
       ]
@@ -317,5 +320,30 @@ defmodule SymphonyElixir.TestSupport do
       |> Enum.map_join("\n", &("    " <> &1))
 
     "  #{name}: |\n#{indented}"
+  end
+
+  defp repos_yaml(nil), do: nil
+  defp repos_yaml([]), do: nil
+
+  defp repos_yaml(repos) when is_list(repos) do
+    entries =
+      Enum.map_join(repos, "\n", fn repo ->
+        get = fn key -> repo[key] || repo[to_string(key)] end
+
+        lines = ["  - url: #{yaml_value(get.(:url))}"]
+        lines = if get.(:branch), do: lines ++ ["    branch: #{yaml_value(get.(:branch))}"], else: lines
+        lines = if get.(:path), do: lines ++ ["    path: #{yaml_value(get.(:path))}"], else: lines
+        lines = if get.(:install), do: lines ++ ["    install: |\n#{indent_block(get.(:install), "      ")}"], else: lines
+        lines = if get.(:verify), do: lines ++ ["    verify: |\n#{indent_block(get.(:verify), "      ")}"], else: lines
+        Enum.join(lines, "\n")
+      end)
+
+    "repos:\n" <> entries
+  end
+
+  defp indent_block(text, prefix) do
+    text
+    |> String.split("\n")
+    |> Enum.map_join("\n", &(prefix <> &1))
   end
 end

@@ -83,6 +83,9 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @spec repos() :: [SymphonyElixir.Config.Schema.Repo.t()]
+  def repos, do: settings!().repos
+
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
     case Workflow.current() do
