@@ -60,19 +60,15 @@ defmodule SymphonyElixir.QaEvidence do
   end
 
   defp copy_dir(source_dir, staging_dir) do
-    case File.ls(source_dir) do
-      {:ok, names} ->
-        Enum.each(names, fn name ->
-          src = Path.join(source_dir, name)
-          dst = Path.join(staging_dir, name)
-          if File.regular?(src), do: File.cp!(src, dst)
-        end)
-
-        {:ok, names}
-
-      err ->
-        err
+    with {:ok, names} <- File.ls(source_dir) do
+      Enum.each(names, &copy_file(&1, source_dir, staging_dir))
+      {:ok, names}
     end
+  end
+
+  defp copy_file(name, source_dir, staging_dir) do
+    src = Path.join(source_dir, name)
+    if File.regular?(src), do: File.cp!(src, Path.join(staging_dir, name))
   end
 
   @doc false
