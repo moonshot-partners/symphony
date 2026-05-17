@@ -113,35 +113,27 @@ def _write_report(evidence_dir: str, ticket: str, checks: list[dict], *, blocked
     blocked = blocked_reason is not None
     all_pass = bool(checks) and all(c["pass"] for c in checks) and not blocked
     if blocked:
-        result = "BLOCKED — Playwright run could not produce evidence"
+        result = "BLOCKED"
     elif all_pass:
-        result = "PASS — all checks green"
+        result = "PASS"
     else:
-        result = "FAIL — see below"
+        result = "FAIL"
 
-    pngs = sorted(f for f in os.listdir(evidence_dir) if f.lower().endswith(".png"))
     lines = [
-        f"# QA self-review — {ticket}",
-        "",
         f"- Run: {datetime.now(timezone.utc).isoformat()}",
         f"- Result: {result}",
-        "",
-        "| Check | Result | Detail | Evidence |",
-        "| --- | --- | --- | --- |",
     ]
     if blocked:
-        lines.append(f"| (blocked) | FAIL | {blocked_reason} | — |")
-    for c in checks:
-        ev = ", ".join(f"`{s}`" for s in c.get("screenshots") or []) or "—"
-        lines.append(f"| {c['name']} | {'PASS' if c['pass'] else 'FAIL'} | {c.get('detail', '')} | {ev} |")
-    lines += ["", "## Evidence", ""]
-    lines += [f"- `{s}`" for s in pngs] or ["- (none captured)"]
-    if os.path.exists(os.path.join(evidence_dir, "session.webm")):
-        lines.append("- `session.webm` — full session recording")
-    if os.path.exists(os.path.join(evidence_dir, "session.zip")):
-        lines.append("- `session.zip` — Playwright trace (open at https://trace.playwright.dev)")
+        lines.append(f"- Reason: {blocked_reason}")
+    lines += [
+        "",
+        "| Check | Result | Detail |",
+        "| --- | --- | --- |",
+    ]
     if blocked:
-        lines += ["", "## Notes", "", f"BLOCKED: {blocked_reason}"]
+        lines.append(f"| (blocked) | FAIL | {blocked_reason} |")
+    for c in checks:
+        lines.append(f"| {c['name']} | {'PASS' if c['pass'] else 'FAIL'} | {c.get('detail', '')} |")
 
     with open(os.path.join(evidence_dir, "qa-report.md"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
