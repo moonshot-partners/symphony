@@ -32,15 +32,15 @@ defmodule SymphonyElixir.QaEvidence do
     # PR-attach exit and the reconcile loop's pr_sync_fn → maybe_publish call.
     # If `stage_pending_publish/2` ran before the wipe, the staged copy at
     # `pending_dir` survives and is the authoritative source. Otherwise fall
-    # back to the live workspace path.
-    source_dir =
+    # back to live workspace paths (Phase D: one path per configured subpath).
+    source_dirs =
       cond do
-        File.dir?(pending_dir) -> pending_dir
-        is_binary(workspace_path) -> Path.join(workspace_path, Config.qa_evidence_subpath())
-        true -> nil
+        File.dir?(pending_dir) -> [pending_dir]
+        is_binary(workspace_path) -> evidence_source_dirs(workspace_path)
+        true -> []
       end
 
-    case maybe_stage(source_dir) do
+    case stage_evidence(source_dirs) do
       {:ok, staging_dir} ->
         Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
           try do
@@ -72,25 +72,34 @@ defmodule SymphonyElixir.QaEvidence do
   @spec stage_pending_publish(String.t() | nil, String.t() | nil) :: :ok
   def stage_pending_publish(issue_id, workspace_path)
       when is_binary(issue_id) and is_binary(workspace_path) do
-    source_dir = Path.join(workspace_path, Config.qa_evidence_subpath())
-    if File.dir?(source_dir), do: snapshot_to_pending(issue_id, source_dir)
+    sources = evidence_source_dirs(workspace_path) |> Enum.filter(&File.dir?/1)
+    if sources != [], do: snapshot_to_pending(issue_id, sources)
     :ok
   end
 
   def stage_pending_publish(_issue_id, _workspace_path), do: :ok
 
-  defp snapshot_to_pending(issue_id, source_dir) do
+  defp snapshot_to_pending(issue_id, source_dirs) do
     target = pending_publish_path(issue_id)
     File.rm_rf(target)
     File.mkdir_p!(target)
 
-    case File.ls(source_dir) do
-      {:ok, names} ->
-        Enum.each(names, &copy_pending(&1, source_dir, target))
-        Logger.info("QA evidence staged for pending publish issue_id=#{issue_id} target=#{target}")
+    copied_any =
+      Enum.reduce(source_dirs, false, fn source_dir, copied? ->
+        case File.ls(source_dir) do
+          {:ok, names} ->
+            Enum.each(names, &copy_pending(&1, source_dir, target))
+            copied? or names != []
 
-      _ ->
-        File.rm_rf(target)
+          _ ->
+            copied?
+        end
+      end)
+
+    if copied_any do
+      Logger.info("QA evidence staged for pending publish issue_id=#{issue_id} target=#{target}")
+    else
+      File.rm_rf(target)
     end
   end
 
@@ -99,30 +108,50 @@ defmodule SymphonyElixir.QaEvidence do
     if File.regular?(src), do: File.cp!(src, Path.join(target, name))
   end
 
+  defp evidence_source_dirs(workspace_path) do
+    Config.qa_evidence_subpaths()
+    |> Enum.map(&Path.join(workspace_path, &1))
+  end
+
   defp pending_publish_path(issue_id) do
     Path.join(System.tmp_dir!(), "symphony-qa-staged-#{issue_id}")
   end
 
-  defp maybe_stage(nil), do: :no_evidence
-  defp maybe_stage(source_dir), do: stage_evidence(source_dir)
-
-  defp stage_evidence(source_dir) do
-    with true <- File.dir?(source_dir),
-         staging_dir =
-           Path.join(System.tmp_dir!(), "symphony-qa-evidence-#{System.unique_integer([:positive])}"),
-         :ok <- File.mkdir_p(staging_dir),
-         {:ok, _names} <- copy_dir(source_dir, staging_dir) do
-      {:ok, staging_dir}
-    else
-      _ -> :no_evidence
+  defp stage_evidence(source_dirs) when is_list(source_dirs) do
+    case Enum.filter(source_dirs, &File.dir?/1) do
+      [] -> :no_evidence
+      dirs -> do_stage(dirs)
     end
   end
 
-  defp copy_dir(source_dir, staging_dir) do
-    with {:ok, names} <- File.ls(source_dir) do
-      Enum.each(names, &copy_file(&1, source_dir, staging_dir))
-      {:ok, names}
+  defp do_stage(dirs) do
+    staging_dir =
+      Path.join(System.tmp_dir!(), "symphony-qa-evidence-#{System.unique_integer([:positive])}")
+
+    with :ok <- File.mkdir_p(staging_dir),
+         {:ok, total} when total > 0 <- copy_all(dirs, staging_dir) do
+      {:ok, staging_dir}
+    else
+      _ ->
+        File.rm_rf(staging_dir)
+        :no_evidence
     end
+  end
+
+  defp copy_all(dirs, staging_dir) do
+    total =
+      Enum.reduce(dirs, 0, fn dir, acc ->
+        case File.ls(dir) do
+          {:ok, names} ->
+            Enum.each(names, &copy_file(&1, dir, staging_dir))
+            acc + length(names)
+
+          _ ->
+            acc
+        end
+      end)
+
+    {:ok, total}
   end
 
   defp copy_file(name, source_dir, staging_dir) do

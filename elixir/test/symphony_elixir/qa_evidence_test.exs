@@ -191,6 +191,77 @@ defmodule SymphonyElixir.QaEvidenceTest do
     end
   end
 
+  describe "Phase D — multi-path evidence collection" do
+    defp multi_path_workspace(fe_files, be_files) do
+      base = Path.join(System.tmp_dir!(), "qa-mp-#{System.unique_integer([:positive])}")
+      fe_dir = Path.join(base, "fe-next-app/qa-evidence")
+      be_dir = Path.join(base, "qa-evidence")
+      File.mkdir_p!(fe_dir)
+      File.mkdir_p!(be_dir)
+
+      Enum.each(fe_files, fn {name, content} ->
+        File.write!(Path.join(fe_dir, name), content)
+      end)
+
+      Enum.each(be_files, fn {name, content} ->
+        File.write!(Path.join(be_dir, name), content)
+      end)
+
+      on_exit(fn -> File.rm_rf!(base) end)
+      base
+    end
+
+    test "maybe_publish collects files from every configured subpath" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        qa_evidence_subpaths: ["fe-next-app/qa-evidence", "qa-evidence"]
+      )
+
+      base =
+        multi_path_workspace(
+          [
+            {"fe-shot.png", "FE-PNG"},
+            {"qa-report.md", "- Result: PASS\n"},
+            {"session.webm", "FE-WEBM"}
+          ],
+          [
+            {"be-rspec.txt", "rspec output here"}
+          ]
+        )
+
+      assert :ok == QaEvidence.maybe_publish("issue-mp-1", base)
+
+      assert_receive {:memory_tracker_comment, "issue-mp-1", body}, 5_000
+      assert body =~ "fe-shot.png"
+      assert body =~ "## QA self-review · PASS"
+      assert body =~ "[session video](https://uploads.example/session.webm)"
+    end
+
+    test "stage_pending_publish snapshots every configured subpath before workspace wipe" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        qa_evidence_subpaths: ["fe-next-app/qa-evidence", "qa-evidence"]
+      )
+
+      base =
+        multi_path_workspace(
+          [{"fe-shot.png", "FE"}, {"qa-report.md", "- Result: PASS\n"}],
+          [{"be-rspec.txt", "BE-output"}]
+        )
+
+      assert :ok == QaEvidence.stage_pending_publish("issue-mp-2", base)
+
+      # Workspace wiped (continuation retry simulation)
+      File.rm_rf!(base)
+
+      assert :ok == QaEvidence.maybe_publish("issue-mp-2", base)
+
+      assert_receive {:memory_tracker_comment, "issue-mp-2", body}, 5_000
+      assert body =~ "fe-shot.png"
+      assert body =~ "## QA self-review · PASS"
+    end
+  end
+
   describe "build_comment/4" do
     test "renders compact header with status, screenshots, single-line video+trace" do
       body =

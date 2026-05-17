@@ -140,6 +140,8 @@ defmodule SymphonyElixir.TestSupport do
           observability_enabled: true,
           observability_refresh_ms: 1_000,
           observability_render_interval_ms: 16,
+          qa_evidence_subpath: nil,
+          qa_evidence_subpaths: nil,
           prompt: @workflow_prompt
         ],
         overrides
@@ -182,6 +184,8 @@ defmodule SymphonyElixir.TestSupport do
     observability_enabled = Keyword.get(config, :observability_enabled)
     observability_refresh_ms = Keyword.get(config, :observability_refresh_ms)
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
+    qa_evidence_subpath = Keyword.get(config, :qa_evidence_subpath)
+    qa_evidence_subpaths = Keyword.get(config, :qa_evidence_subpaths)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -222,6 +226,7 @@ defmodule SymphonyElixir.TestSupport do
         "  stall_timeout_ms: #{yaml_value(agent_runtime_stall_timeout_ms)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
+        qa_yaml(qa_evidence_subpath, qa_evidence_subpaths),
         "---",
         prompt
       ]
@@ -280,6 +285,16 @@ defmodule SymphonyElixir.TestSupport do
     ]
     |> Enum.reject(&(&1 in [nil, false]))
     |> Enum.join("\n")
+  end
+
+  defp qa_yaml(nil, nil), do: nil
+
+  defp qa_yaml(subpath, nil) when not is_nil(subpath) do
+    "qa:\n  evidence_subpath: #{yaml_value(subpath)}"
+  end
+
+  defp qa_yaml(nil, subpaths) when is_list(subpaths) do
+    "qa:\n  evidence_subpaths: #{yaml_value(subpaths)}"
   end
 
   defp observability_yaml(enabled, refresh_ms, render_interval_ms) do

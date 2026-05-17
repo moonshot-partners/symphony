@@ -88,11 +88,16 @@ agent_runtime:
     - SYMPHONY_GITHUB_APP_INSTALLATION_ID
     - SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH
 qa:
-  # Path inside the workspace where view-layer tests drop the QA evidence
-  # bundle (screenshots, session.webm, qa-report.md). Symphony reads this dir
-  # post-PR and posts the bundle to the Linear ticket. Schools-out keeps its
-  # frontend in ./fe-next-app, so evidence lands at fe-next-app/qa-evidence/.
-  evidence_subpath: fe-next-app/qa-evidence
+  # Paths inside the workspace where tests drop QA evidence bundles
+  # (screenshots, session.webm, qa-report.md). Symphony reads each dir
+  # post-PR, merges the files, and posts a single bundle to the Linear
+  # ticket. Frontend tickets emit at fe-next-app/qa-evidence/; backend-only
+  # tickets emit at qa-evidence/ at the repo root (rspec output + curl
+  # transcripts). When a ticket touches both layers, both dirs are merged.
+  # String form (single path) and list form (multi-path) both accepted.
+  evidence_subpath:
+    - fe-next-app/qa-evidence
+    - qa-evidence
 ---
 
 # Schools Out — Symphony Workflow
