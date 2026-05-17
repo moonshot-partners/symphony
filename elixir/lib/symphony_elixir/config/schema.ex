@@ -329,7 +329,6 @@ defmodule SymphonyElixir.Config.Schema do
     Enum.flat_map(errors, fn
       item when is_map(item) -> flatten_errors(item, prefix)
       item when is_binary(item) -> [prefix <> " " <> item]
-      _ -> []
     end)
   end
 
