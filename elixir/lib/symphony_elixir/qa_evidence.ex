@@ -26,18 +26,54 @@ defmodule SymphonyElixir.QaEvidence do
 
   def maybe_publish(issue_id, workspace_path, opts)
       when is_binary(issue_id) and is_binary(workspace_path) and is_list(opts) do
-    dir = Path.join(workspace_path, @evidence_subpath)
+    source_dir = Path.join(workspace_path, @evidence_subpath)
 
-    if File.dir?(dir) do
-      Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-        publish(issue_id, dir, opts)
-      end)
+    case stage_evidence(source_dir) do
+      {:ok, staging_dir} ->
+        Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+          try do
+            publish(issue_id, staging_dir, opts)
+          after
+            File.rm_rf(staging_dir)
+          end
+        end)
+
+      :no_evidence ->
+        :ok
     end
 
     :ok
   end
 
   def maybe_publish(_issue_id, _workspace_path, _opts), do: :ok
+
+  defp stage_evidence(source_dir) do
+    with true <- File.dir?(source_dir),
+         staging_dir =
+           Path.join(System.tmp_dir!(), "symphony-qa-evidence-#{System.unique_integer([:positive])}"),
+         :ok <- File.mkdir_p(staging_dir),
+         {:ok, _names} <- copy_dir(source_dir, staging_dir) do
+      {:ok, staging_dir}
+    else
+      _ -> :no_evidence
+    end
+  end
+
+  defp copy_dir(source_dir, staging_dir) do
+    case File.ls(source_dir) do
+      {:ok, names} ->
+        Enum.each(names, fn name ->
+          src = Path.join(source_dir, name)
+          dst = Path.join(staging_dir, name)
+          if File.regular?(src), do: File.cp!(src, dst)
+        end)
+
+        {:ok, names}
+
+      err ->
+        err
+    end
+  end
 
   @doc false
   @spec publish(String.t(), Path.t(), keyword()) :: :ok

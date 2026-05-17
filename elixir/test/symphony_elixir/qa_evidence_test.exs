@@ -105,6 +105,26 @@ defmodule SymphonyElixir.QaEvidenceTest do
       assert_receive {:memory_tracker_comment, "issue-np", _body}, 2_000
       refute_receive {:memory_tracker_comment_parent, "issue-np", _}, 200
     end
+
+    test "uploads all artifacts even when the workspace dir is removed before the async upload runs" do
+      base =
+        evidence_dir([
+          {"01-shot.png", "PNG-BYTES"},
+          {"qa-report.md", "| Check | Result |\n| --- | --- |\n| ok | PASS |\n"},
+          {"session.webm", "WEBM-BYTES"},
+          {"session.zip", "ZIP-BYTES"}
+        ])
+
+      assert :ok == QaEvidence.maybe_publish("issue-race", base)
+
+      File.rm_rf!(base)
+
+      assert_receive {:memory_tracker_comment, "issue-race", body}, 5_000
+      assert body =~ "![01-shot.png](https://uploads.example/"
+      assert body =~ "[session.webm](https://uploads.example/"
+      assert body =~ "[session.zip](https://uploads.example/"
+      assert body =~ "trace.playwright.dev"
+    end
   end
 
   describe "build_comment/4" do
