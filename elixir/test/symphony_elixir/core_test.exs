@@ -907,7 +907,7 @@ defmodule SymphonyElixir.CoreTest do
     assert {:noreply, ^coalesced_state} = Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
   end
 
-  test "select_worker_host_for_test skips full ssh hosts under the shared per-host cap" do
+  test "TestHooks.select_worker_host skips full ssh hosts under the shared per-host cap" do
     write_workflow_file!(Workflow.workflow_file_path(),
       worker_ssh_hosts: ["worker-a", "worker-b"],
       worker_max_concurrent_agents_per_host: 1
@@ -919,10 +919,10 @@ defmodule SymphonyElixir.CoreTest do
       }
     }
 
-    assert Orchestrator.select_worker_host_for_test(state, nil) == "worker-b"
+    assert TestHooks.select_worker_host(state, nil) == "worker-b"
   end
 
-  test "select_worker_host_for_test returns no_worker_capacity when every ssh host is full" do
+  test "TestHooks.select_worker_host returns no_worker_capacity when every ssh host is full" do
     write_workflow_file!(Workflow.workflow_file_path(),
       worker_ssh_hosts: ["worker-a", "worker-b"],
       worker_max_concurrent_agents_per_host: 1
@@ -935,10 +935,10 @@ defmodule SymphonyElixir.CoreTest do
       }
     }
 
-    assert Orchestrator.select_worker_host_for_test(state, nil) == :no_worker_capacity
+    assert TestHooks.select_worker_host(state, nil) == :no_worker_capacity
   end
 
-  test "select_worker_host_for_test keeps the preferred ssh host when it still has capacity" do
+  test "TestHooks.select_worker_host keeps the preferred ssh host when it still has capacity" do
     write_workflow_file!(Workflow.workflow_file_path(),
       worker_ssh_hosts: ["worker-a", "worker-b"],
       worker_max_concurrent_agents_per_host: 2
@@ -951,7 +951,7 @@ defmodule SymphonyElixir.CoreTest do
       }
     }
 
-    assert Orchestrator.select_worker_host_for_test(state, "worker-a") == "worker-a"
+    assert TestHooks.select_worker_host(state, "worker-a") == "worker-a"
   end
 
   @scheduling_slop_ms 200

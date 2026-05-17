@@ -24,7 +24,7 @@ defmodule SymphonyElixir.OrchestratorStateTransitionTest do
     end)
   end
 
-  describe "apply_state_transition_for_test/2 — on_pickup_state configured" do
+  describe "TestHooks.apply_state_transition/2 — on_pickup_state configured" do
     test "sends state update to tracker with configured state name" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
@@ -35,26 +35,26 @@ defmodule SymphonyElixir.OrchestratorStateTransitionTest do
       issue = make_issue()
       state_name = Config.settings!().tracker.on_pickup_state
 
-      Orchestrator.apply_state_transition_for_test(issue, state_name)
+      TestHooks.apply_state_transition(issue, state_name)
 
       assert_receive {:memory_tracker_state_update, "issue-123", "In Development"}, 500
     end
   end
 
-  describe "apply_state_transition_for_test/2 — on_pickup_state absent" do
+  describe "TestHooks.apply_state_transition/2 — on_pickup_state absent" do
     test "sends no state update when state_name is nil" do
       write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
       set_memory_tracker_recipient()
       issue = make_issue()
       state_name = Config.settings!().tracker.on_pickup_state
 
-      Orchestrator.apply_state_transition_for_test(issue, state_name)
+      TestHooks.apply_state_transition(issue, state_name)
 
       refute_receive {:memory_tracker_state_update, _, _}, 100
     end
   end
 
-  describe "apply_state_transition_for_test/2 — on_complete_state configured" do
+  describe "TestHooks.apply_state_transition/2 — on_complete_state configured" do
     test "sends state update to tracker with configured state name" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
@@ -65,20 +65,20 @@ defmodule SymphonyElixir.OrchestratorStateTransitionTest do
       issue = make_issue()
       state_name = Config.settings!().tracker.on_complete_state
 
-      Orchestrator.apply_state_transition_for_test(issue, state_name)
+      TestHooks.apply_state_transition(issue, state_name)
 
       assert_receive {:memory_tracker_state_update, "issue-123", "In QA / Review"}, 500
     end
   end
 
-  describe "apply_state_transition_for_test/2 — on_complete_state absent" do
+  describe "TestHooks.apply_state_transition/2 — on_complete_state absent" do
     test "sends no state update when state_name is nil" do
       write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
       set_memory_tracker_recipient()
       issue = make_issue()
       state_name = Config.settings!().tracker.on_complete_state
 
-      Orchestrator.apply_state_transition_for_test(issue, state_name)
+      TestHooks.apply_state_transition(issue, state_name)
 
       refute_receive {:memory_tracker_state_update, _, _}, 100
     end
