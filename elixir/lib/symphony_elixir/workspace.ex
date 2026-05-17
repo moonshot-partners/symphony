@@ -186,14 +186,24 @@ defmodule SymphonyElixir.Workspace do
     command = generate_repos_bash(repos)
     repos_marker = Path.join(workspace, @repos_marker_relpath)
 
-    if File.exists?(repos_marker) do
-      :ok
-    else
-      with :ok <- run_hook(command, workspace, issue_context, "repos") do
+    cond do
+      File.exists?(repos_marker) ->
+        :ok
+
+      # Workspace was bootstrapped by the legacy after_create hook before repos:
+      # was introduced. Treat it as already set up to avoid re-cloning into a
+      # non-empty directory.
+      File.exists?(marker_path(workspace)) ->
         File.mkdir_p!(Path.dirname(repos_marker))
         File.write!(repos_marker, "ok\n")
         :ok
-      end
+
+      true ->
+        with :ok <- run_hook(command, workspace, issue_context, "repos") do
+          File.mkdir_p!(Path.dirname(repos_marker))
+          File.write!(repos_marker, "ok\n")
+          :ok
+        end
     end
   end
 

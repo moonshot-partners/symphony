@@ -1976,6 +1976,50 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       end
     end
 
+    test "repos hook skips clone when workspace was bootstrapped by legacy after_create hook", %{workspace_root: workspace_root} do
+      test_root = Path.join(System.tmp_dir!(), "symphony-repos-legacy-#{System.unique_integer([:positive])}")
+
+      try do
+        source_repo = Path.join(test_root, "source")
+        File.mkdir_p!(source_repo)
+        File.write!(Path.join(source_repo, "README.md"), "legacy test\n")
+        System.cmd("git", ["-C", source_repo, "init", "-b", "main"])
+        System.cmd("git", ["-C", source_repo, "config", "user.name", "Test"])
+        System.cmd("git", ["-C", source_repo, "config", "user.email", "test@test.com"])
+        System.cmd("git", ["-C", source_repo, "add", "README.md"])
+        System.cmd("git", ["-C", source_repo, "commit", "-m", "init"])
+
+        probe = Path.join(test_root, "probe.txt")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          repos: [
+            %{url: "file://#{source_repo}", branch: "main", path: ".", install: "touch #{probe}", verify: nil}
+          ]
+        )
+
+        # Simulate a workspace that was set up by the old after_create hook:
+        # has after_create_ok marker but no repos_hook_ok marker.
+        issue_id = "REPO-LEGACY-#{System.unique_integer([:positive])}"
+        safe_id = String.replace(issue_id, ~r/[^a-zA-Z0-9._-]/, "_")
+        workspace_unresolved = Path.join([workspace_root, safe_id])
+        File.mkdir_p!(workspace_unresolved)
+        File.mkdir_p!(Path.join(workspace_unresolved, ".symphony"))
+        File.write!(Path.join(workspace_unresolved, ".symphony/after_create_ok"), "legacy\n")
+        File.write!(Path.join(workspace_unresolved, "README.md"), "pre-existing\n")
+
+        assert {:ok, workspace} = Workspace.create_for_issue(issue_id)
+
+        # repos hook must NOT have run the install (probe absent) because the
+        # legacy marker signals the workspace is already bootstrapped.
+        refute File.exists?(probe), "repos install must not re-run on legacy workspace"
+        assert File.exists?(Path.join(workspace, ".symphony/repos_hook_ok")), "repos marker must be written for future idempotency"
+        assert File.read!(Path.join(workspace, "README.md")) == "pre-existing\n", "existing files must be preserved"
+      after
+        File.rm_rf(test_root)
+      end
+    end
+
     test "repos hook is skipped on second create_for_issue (idempotent)", %{workspace_root: workspace_root} do
       test_root = Path.join(System.tmp_dir!(), "symphony-repos-idempotent-#{System.unique_integer([:positive])}")
 
