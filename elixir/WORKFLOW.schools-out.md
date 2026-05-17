@@ -86,6 +86,12 @@ agent_runtime:
     - SYMPHONY_GITHUB_APP_ID
     - SYMPHONY_GITHUB_APP_INSTALLATION_ID
     - SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH
+qa:
+  # Path inside the workspace where view-layer tests drop the QA evidence
+  # bundle (screenshots, session.webm, qa-report.md). Symphony reads this dir
+  # post-PR and posts the bundle to the Linear ticket. Schools-out keeps its
+  # frontend in ./fe-next-app, so evidence lands at fe-next-app/qa-evidence/.
+  evidence_subpath: fe-next-app/qa-evidence
 ---
 
 # Schools Out — Symphony Workflow
