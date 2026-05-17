@@ -481,32 +481,6 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
-  @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
-  def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    SlotPolicy.should_dispatch?(issue, state, DispatchGate.active_state_set(), DispatchGate.terminal_state_set())
-  end
-
-  @doc false
-  @spec revalidate_issue_for_dispatch_for_test(Issue.t(), ([String.t()] -> term())) ::
-          {:ok, Issue.t()} | {:skip, Issue.t() | :missing} | {:error, term()}
-  def revalidate_issue_for_dispatch_for_test(%Issue{} = issue, issue_fetcher)
-      when is_function(issue_fetcher, 1) do
-    DispatchGate.revalidate(issue, issue_fetcher, DispatchGate.terminal_state_set())
-  end
-
-  @doc false
-  @spec apply_state_transition_for_test(Issue.t(), String.t() | nil) :: :ok
-  def apply_state_transition_for_test(%Issue{} = issue, state_name) do
-    StateTransition.apply(issue, state_name)
-  end
-
-  @doc false
-  @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
-  def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
-    WorkerSelector.select(state, preferred_worker_host)
-  end
-
-  @doc false
   @spec sync_drain_status_for_test(term(), Path.t(), Path.t()) :: term()
   def sync_drain_status_for_test(%State{} = state, status_path, drain_flag_path) do
     sync_drain_status(state, status_path, drain_flag_path)

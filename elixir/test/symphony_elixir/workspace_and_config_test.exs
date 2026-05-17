@@ -935,7 +935,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       blocked_by: [%{id: "blocker-1", identifier: "MT-1002", state: "In Progress"}]
     }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+    refute TestHooks.should_dispatch_issue(issue, state)
   end
 
   test "issue assigned to another worker is not dispatch-eligible" do
@@ -957,7 +957,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assigned_to_worker: false
     }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+    refute TestHooks.should_dispatch_issue(issue, state)
   end
 
   test "issue with an attached pull request is still dispatch-eligible" do
@@ -980,7 +980,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     # PR attachment alone no longer blocks dispatch — the state machine (active_states)
     # is the authoritative guard. When a ticket is requeued to an active state after
     # a merged PR, it must be dispatchable again (fixes the SODEV-851 class of bug).
-    assert Orchestrator.should_dispatch_issue_for_test(issue, state)
+    assert TestHooks.should_dispatch_issue(issue, state)
   end
 
   test "todo issue with terminal blockers remains dispatch-eligible" do
@@ -1000,7 +1000,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       blocked_by: [%{id: "blocker-2", identifier: "MT-1004", state: "Closed"}]
     }
 
-    assert Orchestrator.should_dispatch_issue_for_test(issue, state)
+    assert TestHooks.should_dispatch_issue(issue, state)
   end
 
   test "dispatch revalidation skips stale todo issue once a non-terminal blocker appears" do
@@ -1023,7 +1023,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     fetcher = fn ["blocked-2"] -> {:ok, [refreshed_issue]} end
 
     assert {:skip, %Issue{} = skipped_issue} =
-             Orchestrator.revalidate_issue_for_dispatch_for_test(stale_issue, fetcher)
+             TestHooks.revalidate_issue_for_dispatch(stale_issue, fetcher)
 
     assert skipped_issue.identifier == "MT-1005"
     assert skipped_issue.blocked_by == [%{id: "blocker-3", identifier: "MT-1006", state: "In Progress"}]

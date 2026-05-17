@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.OrchestratorPrMergeTest do
   use SymphonyElixir.TestSupport
 
-  alias SymphonyElixir.{Linear.Issue, Orchestrator}
+  alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.PrMerge
 
   defp make_issue(opts \\ []) do
@@ -30,7 +30,7 @@ defmodule SymphonyElixir.OrchestratorPrMergeTest do
   end
 
   defp apply_transition(issue, state_name),
-    do: Orchestrator.apply_state_transition_for_test(issue, state_name)
+    do: TestHooks.apply_state_transition(issue, state_name)
 
   describe "PrMerge.reconcile/1" do
     test "transitions every PR-attached completed issue whose PR is merged" do
