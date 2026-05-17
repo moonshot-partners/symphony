@@ -216,10 +216,6 @@ defmodule SymphonyElixir.Workpad do
 
   defp build_body(running_entry) do
     issue = Map.get(running_entry, :issue) || %{}
-    identifier = Map.get(running_entry, :identifier) || Map.get(issue, :identifier)
-    state = Map.get(issue, :state) || "(unknown)"
-    workspace = Map.get(running_entry, :workspace_path) || "(pending)"
-    worker_host = Map.get(running_entry, :worker_host) || "local"
     turn = Map.get(running_entry, :turn_count, 0)
     retry = Map.get(running_entry, :retry_attempt, 0)
     last_event = Map.get(running_entry, :last_agent_event)
@@ -228,49 +224,61 @@ defmodule SymphonyElixir.Workpad do
     out_tok = Map.get(running_entry, :agent_output_tokens, 0)
     total_tok = Map.get(running_entry, :agent_total_tokens, 0)
     error_reason = Map.get(running_entry, :last_error_reason)
-    pr_suffix = format_pr_link(issue)
-    outcome_line = format_outcome_line(last_event, issue, total_tok, turn, retry)
-    now = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    """
-    ## Symphony Workpad
+    tokens = format_tokens(in_tok, out_tok, total_tok)
+    pr_link = format_pr_link(issue)
+    outcome = format_outcome(last_event, issue)
 
-    **Symphony — #{format_event(last_event)}**#{pr_suffix}
+    header =
+      format_header(last_event, %{
+        turn: turn,
+        retry: retry,
+        tokens: tokens,
+        pr_link: pr_link,
+        outcome: outcome
+      })
 
-    #{format_primary_text(last_event, last_text)}
-    #{format_error_section(error_reason)}
-    <details>
-    <summary>Detalhes técnicos</summary>
+    sections =
+      [header, format_error_section(error_reason), format_primary_text(last_event, last_text)]
+      |> Enum.reject(fn s -> s == "" or s == nil end)
 
-    | | |
-    |---|---|
-    | Issue | #{identifier} |
-    | State | #{state} |
-    | Workspace | `#{workspace}` |
-    | Worker host | #{worker_host} |
-    | Tentativa | #{retry} |
-    | Turno | #{turn} |
-    | Último evento | `#{format_raw_event(last_event)}` |
-    | Tokens | #{format_tokens(in_tok, out_tok, total_tok)} |
-    | Atualizado | #{now} |
-
-    </details>
-    #{outcome_line}
-    """
+    Enum.join(sections, "\n\n") <> "\n"
   end
 
-  defp format_outcome_line(:pr_attached, issue, total_tok, turn, retry) do
+  defp format_header(:pr_attached, %{tokens: tok, turn: t, retry: r, pr_link: link, outcome: outcome}) do
+    parts = ["PR opened" <> link, tok, "#{t} turns"]
+    parts = if r > 0, do: parts ++ ["#{r} retries"], else: parts
+    parts = if outcome != "", do: parts ++ [outcome], else: parts
+    Enum.join(parts, " · ")
+  end
+
+  defp format_header(nil, _meta), do: "Starting…"
+  defp format_header(:session_started, _meta), do: "Starting…"
+
+  defp format_header(event, meta) do
+    "#{status_label(event)} — turn #{meta.turn} · #{meta.tokens}"
+  end
+
+  defp status_label(:turn_completed), do: "Working"
+  defp status_label(:notification), do: "Working"
+  defp status_label(:turn_input_required), do: "Needs human reply"
+  defp status_label(:approval_required), do: "Needs approval"
+  defp status_label(:turn_failed), do: "Failed"
+  defp status_label(:turn_ended_with_error), do: "Failed"
+  defp status_label(:turn_cancelled), do: "Cancelled"
+  defp status_label(event) when is_atom(event), do: Atom.to_string(event)
+  defp status_label(event), do: inspect(event)
+
+  defp format_outcome(:pr_attached, issue) do
     if RunLedger.enabled?() do
       pr_url = pr_url_from_issue(issue)
-      outcome = RunLedger.classify_outcome(%{pr_url: pr_url})
-
-      "\n**Run outcome:** #{outcome} · tokens #{total_tok} · turns #{turn} · retries #{retry}\n"
+      RunLedger.classify_outcome(%{pr_url: pr_url})
     else
       ""
     end
   end
 
-  defp format_outcome_line(_event, _issue, _tok, _turn, _retry), do: ""
+  defp format_outcome(_event, _issue), do: ""
 
   defp pr_url_from_issue(%{repos: repos}) when is_list(repos) do
     Enum.find_value(repos, fn
@@ -281,30 +289,24 @@ defmodule SymphonyElixir.Workpad do
 
   defp pr_url_from_issue(_), do: nil
 
-  defp format_primary_text(:pr_attached, _last_text), do: "_PR enviado para revisão._"
+  defp format_primary_text(:pr_attached, _last_text), do: ""
   defp format_primary_text(_event, last_text), do: format_last_text(last_text)
 
   defp format_tokens(0, 0, 0), do: "—"
 
-  defp format_tokens(in_tok, out_tok, total_tok),
-    do: "in=#{in_tok} · out=#{out_tok} · total=#{total_tok}"
+  defp format_tokens(_in, _out, total) when is_integer(total) and total < 1000,
+    do: "#{total} tok"
 
-  defp format_event(:session_started), do: "Iniciando"
-  defp format_event(:turn_completed), do: "Trabalhando"
-  defp format_event(:pr_attached), do: "PR aberto"
-  defp format_event(:turn_input_required), do: "Aguarda resposta humana"
-  defp format_event(:approval_required), do: "Aguarda aprovação"
-  defp format_event(:turn_failed), do: "Falhou"
-  defp format_event(:turn_ended_with_error), do: "Erro"
-  defp format_event(:turn_cancelled), do: "Cancelado"
-  defp format_event(:notification), do: "Trabalhando"
-  defp format_event(nil), do: "Iniciando"
-  defp format_event(event) when is_atom(event), do: Atom.to_string(event)
-  defp format_event(event), do: inspect(event)
+  defp format_tokens(_in, _out, total) when is_integer(total) do
+    rounded = Float.round(total / 1000, 1)
 
-  defp format_raw_event(nil), do: "—"
-  defp format_raw_event(event) when is_atom(event), do: Atom.to_string(event)
-  defp format_raw_event(event), do: inspect(event)
+    num =
+      rounded
+      |> :erlang.float_to_binary(decimals: 1)
+      |> String.replace_suffix(".0", "")
+
+    "#{num}k tok"
+  end
 
   defp format_pr_link(%{repos: repos}) when is_list(repos) do
     Enum.find_value(repos, "", fn
@@ -340,11 +342,11 @@ defmodule SymphonyElixir.Workpad do
   defp format_error_section(""), do: ""
 
   defp format_error_section(reason) when is_binary(reason) do
-    "\n### Error\n\n> #{reason}\n"
+    "### Error\n\n> #{reason}"
   end
 
-  defp format_last_text(nil), do: "_(no agent text yet)_"
-  defp format_last_text(""), do: "_(no agent text yet)_"
+  defp format_last_text(nil), do: ""
+  defp format_last_text(""), do: ""
 
   defp format_last_text(text) when is_binary(text) do
     text

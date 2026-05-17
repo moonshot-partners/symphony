@@ -75,9 +75,11 @@ defmodule SymphonyElixir.WorkpadTest do
     Workpad.maybe_sync(running_entry(%{last_agent_text: "kicking off"}), update, self())
 
     assert_receive {:memory_tracker_comment, "issue-wp", body}, 1_000
-    assert body =~ "## Symphony Workpad"
-    assert body =~ "MT-WP"
+    assert body =~ "Starting"
     assert body =~ "kicking off"
+    refute body =~ "## Symphony Workpad"
+    refute body =~ "**Symphony —"
+    refute body =~ "<details>"
 
     assert_receive {:workpad_comment_created, "issue-wp", "memory-comment-issue-wp"}, 1_000
   end
@@ -181,9 +183,9 @@ defmodule SymphonyElixir.WorkpadTest do
     Workpad.maybe_sync(entry, update, self())
 
     assert_receive {:memory_tracker_comment_update, "memory-comment-issue-wp", body}, 1_000
-    assert body =~ "PR aberto"
-    refute body =~ "**Last event**: pr_attached"
-    assert body =~ "PR enviado para revisão"
+    assert body =~ "PR opened"
+    refute body =~ "Last event"
+    refute body =~ "<details>"
     refute body =~ "ready for review"
     refute_received {:memory_tracker_comment, _, _}
   end
@@ -352,16 +354,16 @@ defmodule SymphonyElixir.WorkpadTest do
       }
     end
 
-    test "status line maps :pr_attached to friendly text" do
+    test "status line maps :pr_attached to 'PR opened'" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
       Workpad.maybe_sync(pr_running_entry("https://github.com/schoolsoutapp/fe-next-app/pull/511"), update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "PR aberto"
-      refute body =~ "Last event**: pr_attached"
+      assert body =~ "PR opened"
+      refute body =~ "Last event"
     end
 
-    test "status line maps turn_completed to 'Trabalhando'" do
+    test "status line maps turn_completed to 'Working'" do
       update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
 
       entry =
@@ -374,10 +376,10 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Trabalhando"
+      assert body =~ "Working"
     end
 
-    test "status line maps session_started to 'Iniciando'" do
+    test "status line maps session_started to 'Starting'" do
       update = %{event: :session_started, timestamp: DateTime.utc_now()}
 
       entry =
@@ -389,10 +391,10 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment, _, body}, 1_000
-      assert body =~ "Iniciando"
+      assert body =~ "Starting"
     end
 
-    test "status line maps turn_input_required to 'Aguarda resposta humana'" do
+    test "status line maps turn_input_required to 'Needs human reply'" do
       update = %{event: :turn_input_required, timestamp: DateTime.utc_now()}
 
       entry =
@@ -405,10 +407,10 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Aguarda resposta humana"
+      assert body =~ "Needs human reply"
     end
 
-    test "status line maps turn_failed to 'Falhou'" do
+    test "status line maps turn_failed to 'Failed'" do
       update = %{
         event: :turn_failed,
         details: %{"error" => "boom"},
@@ -425,7 +427,7 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Falhou"
+      assert body =~ "Failed"
     end
 
     test "PR url renders as markdown link when issue.repos carries pr.url" do
@@ -473,7 +475,7 @@ defmodule SymphonyElixir.WorkpadTest do
       refute body =~ "[#]"
     end
 
-    test "status line maps approval_required to friendly text" do
+    test "status line maps approval_required to 'Needs approval'" do
       update = %{event: :approval_required, timestamp: DateTime.utc_now()}
 
       entry =
@@ -486,10 +488,10 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Aguarda aprovação"
+      assert body =~ "Needs approval"
     end
 
-    test "status line maps turn_ended_with_error to 'Erro'" do
+    test "status line maps turn_ended_with_error to 'Failed'" do
       update = %{event: :turn_ended_with_error, timestamp: DateTime.utc_now()}
 
       entry =
@@ -502,10 +504,10 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Erro"
+      assert body =~ "Failed"
     end
 
-    test "status line maps turn_cancelled to 'Cancelado'" do
+    test "status line maps turn_cancelled to 'Cancelled'" do
       update = %{event: :turn_cancelled, timestamp: DateTime.utc_now()}
 
       entry =
@@ -518,67 +520,69 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Cancelado"
+      assert body =~ "Cancelled"
     end
 
-    test "details block wraps technical metadata" do
+    test "no <details> collapsible block in body" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
       Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "<details>"
-      assert body =~ "<summary>Detalhes técnicos</summary>"
-      assert body =~ "</details>"
+      refute body =~ "<details>"
+      refute body =~ "<summary>"
+      refute body =~ "</details>"
     end
 
-    test "workspace path renders only inside details block" do
+    test "workspace path is not rendered" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
       Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      [main, _details] = String.split(body, "<details>", parts: 2)
-      refute main =~ "/home/ubuntu/code/ws"
+      refute body =~ "/home/ubuntu/code/ws"
     end
 
-    test "no ISO timestamp in primary view above details block" do
+    test "no ISO timestamp anywhere in body" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
       Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      [main, _details] = String.split(body, "<details>", parts: 2)
-      refute main =~ ~r/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
+      refute body =~ ~r/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/
     end
 
-    test "header literal '## Symphony Workpad' persists (regression)" do
+    test "no '## Symphony Workpad' h2 header" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
       Workpad.maybe_sync(pr_running_entry("https://github.com/x/y/pull/1"), update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-
-      assert String.starts_with?(body, "## Symphony Workpad") or
-               String.starts_with?(body, "\n## Symphony Workpad")
+      refute body =~ "## Symphony Workpad"
+      refute body =~ "**Symphony —"
     end
   end
 
-  describe "Sprint 2: closing message + tokens=0 polish" do
-    test "pr_attached body shows closing message and hides last_agent_text" do
+  describe "Sprint 2: closing message + tokens polish" do
+    test "pr_attached body hides last_agent_text (PR description has it)" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
 
       entry =
         running_entry(%{
           workpad_comment_id: "memory-comment-issue-wp",
           last_agent_event: :pr_attached,
-          last_agent_text: "thinking about implementation..."
+          last_agent_text: "thinking about implementation...",
+          issue: %Issue{
+            id: "issue-wp",
+            identifier: "MT-WP",
+            repos: [%{name: "schoolsoutapp/fe-next-app", pr: %{url: "https://github.com/schoolsoutapp/fe-next-app/pull/9"}}]
+          }
         })
 
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "PR enviado para revisão"
+      assert body =~ "PR opened"
       refute body =~ "thinking about implementation"
     end
 
-    test "turn_completed keeps showing last_agent_text (not closing message)" do
+    test "turn_completed keeps showing last_agent_text" do
       update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
 
       entry =
@@ -592,7 +596,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
       assert body =~ "deep in the middle of work"
-      refute body =~ "PR enviado para revisão"
+      refute body =~ "PR opened"
     end
 
     test "session_started keeps showing last_agent_text" do
@@ -608,15 +612,16 @@ defmodule SymphonyElixir.WorkpadTest do
 
       assert_receive {:memory_tracker_comment, "issue-wp", body}, 1_000
       assert body =~ "spinning up agent"
-      refute body =~ "PR enviado para revisão"
+      refute body =~ "PR opened"
     end
 
-    test "tokens row renders em-dash when input/output/total are all zero" do
+    test "tokens render em-dash when input/output/total are all zero" do
       update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
 
       entry =
         running_entry(%{
           workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_completed,
           agent_input_tokens: 0,
           agent_output_tokens: 0,
           agent_total_tokens: 0
@@ -625,27 +630,48 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "| Tokens | — |"
+      assert body =~ "—"
       refute body =~ "in=0"
+      refute body =~ "0 tok"
     end
 
-    test "tokens row renders normal counts when any token is non-zero" do
+    test "tokens render compact 'k' suffix when >= 1000" do
       update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
 
       entry =
         running_entry(%{
           workpad_comment_id: "memory-comment-issue-wp",
-          agent_input_tokens: 55,
-          agent_output_tokens: 0,
-          agent_total_tokens: 55
+          last_agent_event: :turn_completed,
+          agent_input_tokens: 100,
+          agent_output_tokens: 15_400,
+          agent_total_tokens: 15_500
         })
 
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "in=55"
-      assert body =~ "total=55"
-      refute body =~ "| Tokens | — |"
+      assert body =~ "15.5k tok"
+      refute body =~ "in=100"
+      refute body =~ "total=15500"
+    end
+
+    test "tokens render raw count when < 1000" do
+      update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
+
+      entry =
+        running_entry(%{
+          workpad_comment_id: "memory-comment-issue-wp",
+          last_agent_event: :turn_completed,
+          agent_input_tokens: 200,
+          agent_output_tokens: 700,
+          agent_total_tokens: 900
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "900 tok"
+      refute body =~ "0.9k"
     end
   end
 
@@ -664,7 +690,7 @@ defmodule SymphonyElixir.WorkpadTest do
       :ok
     end
 
-    test "pr_attached body shows outcome line when flag is on" do
+    test "pr_attached body folds outcome into header when flag is on" do
       System.put_env("SYMPHONY_RUN_LEDGER", "1")
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
 
@@ -685,29 +711,42 @@ defmodule SymphonyElixir.WorkpadTest do
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
-      assert body =~ "Run outcome"
+      assert body =~ "PR opened"
       assert body =~ "pr_open"
-      assert body =~ "tokens 4200"
-      assert body =~ "turns 7"
-      assert body =~ "retries 1"
+      assert body =~ "4.2k tok"
+      assert body =~ "7 turns"
+      assert body =~ "1 retries"
+      refute body =~ "Run outcome"
     end
 
-    test "pr_attached body has no outcome line when flag is off" do
+    test "pr_attached body omits outcome label when flag is off but still shows tok/turns" do
       update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
 
       entry =
         running_entry(%{
           workpad_comment_id: "memory-comment-issue-wp",
-          last_agent_event: :pr_attached
+          last_agent_event: :pr_attached,
+          agent_total_tokens: 4200,
+          turn_count: 7,
+          retry_attempt: 0,
+          issue: %Issue{
+            id: "issue-wp",
+            identifier: "MT-WP",
+            repos: [%{name: "x", pr: %{url: "https://github.com/o/r/pull/9"}}]
+          }
         })
 
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
       refute body =~ "Run outcome"
+      refute body =~ "pr_open"
+      assert body =~ "PR opened"
+      assert body =~ "4.2k tok"
+      assert body =~ "7 turns"
     end
 
-    test "non-pr_attached events never get the outcome line even with flag on" do
+    test "non-pr_attached events never get the outcome marker even with flag on" do
       System.put_env("SYMPHONY_RUN_LEDGER", "1")
       update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
 
@@ -721,6 +760,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
       refute body =~ "Run outcome"
+      refute body =~ "pr_open"
     end
   end
 end

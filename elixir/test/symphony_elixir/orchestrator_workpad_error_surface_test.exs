@@ -99,7 +99,6 @@ defmodule SymphonyElixir.OrchestratorWorkpadErrorSurfaceTest do
     assert_receive {:memory_tracker_comment_update, ^comment_id, body}, 1_000
     assert body =~ "### Error", "Expected ### Error section in workpad body"
     assert body =~ error_msg, "Expected error message in workpad body"
-    assert body =~ "MT-ERR", "Expected issue identifier in body"
   end
 
   test "turn_failed error reason surfaces again on subsequent turn_completed sync" do
