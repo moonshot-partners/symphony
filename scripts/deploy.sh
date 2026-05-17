@@ -75,12 +75,22 @@ if git -C "$SYMPHONY_DIR" diff --name-only "$old_sha" "$new_sha" | grep -q '^doc
   log "rebuild schoolsout-base image (source changed)"
   cd "$SYMPHONY_DIR"
   docker build --quiet -t schoolsout-base:latest -f docker/schoolsout-base/Dockerfile . >/dev/null
+  # Build cache grows ~1GB per rebuild and is never reused on the next build
+  # (image tag is overwritten). Left alone it filled /var/lib/docker to 10.93GB
+  # within a month and starved sshd preauth on 2026-05-17, requiring NMI reboot.
+  log "prune build cache"
+  docker builder prune -af --filter 'until=1h' >/dev/null
 else
   log "schoolsout-base image unchanged; skip rebuild"
 fi
 
 log "restart symphony"
 sudo systemctl restart symphony
+
+# Untagged image layers from the rebuild above plus orphans from killed agent
+# containers accumulate as dangling. Prune is no-op when nothing to reclaim.
+log "prune dangling images"
+docker image prune -f >/dev/null
 
 rm -f "$DRAIN_FLAG"
 
