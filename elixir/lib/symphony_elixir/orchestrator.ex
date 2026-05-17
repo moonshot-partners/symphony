@@ -15,6 +15,7 @@ defmodule SymphonyElixir.Orchestrator do
     Dispatch,
     DispatchGate,
     GateCTrigger,
+    PreDispatch,
     PrMerge,
     ProcessLiveness,
     Reconcile,
@@ -515,6 +516,12 @@ defmodule SymphonyElixir.Orchestrator do
   @spec maybe_dispatch_for_test(term()) :: term()
   def maybe_dispatch_for_test(%State{} = state), do: maybe_dispatch(state)
 
+  @doc false
+  @spec handle_pre_dispatch_reject_for_test(term(), Issue.t(), atom(), String.t()) :: term()
+  def handle_pre_dispatch_reject_for_test(%State{} = state, %Issue{} = issue, reason_code, reason_msg) do
+    handle_pre_dispatch_reject(state, issue, reason_code, reason_msg)
+  end
+
   defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace) do
     case Map.get(state.running, issue_id) do
       nil ->
@@ -627,7 +634,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case DispatchGate.revalidate(issue, &Tracker.fetch_issue_states_by_ids/1, DispatchGate.terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+        case PreDispatch.check(refreshed_issue) do
+          :ok ->
+            do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+
+          {:reject, reason_code, reason_msg} ->
+            handle_pre_dispatch_reject(state, refreshed_issue, reason_code, reason_msg)
+        end
 
       {:skip, :missing} ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{RunningEntry.format_context(issue)}")
@@ -644,6 +657,30 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.warning("Skipping dispatch; issue refresh failed for #{RunningEntry.format_context(issue)}: #{inspect(reason)}")
         state
     end
+  end
+
+  defp handle_pre_dispatch_reject(%State{} = state, %Issue{} = issue, reason_code, reason_msg) do
+    Logger.info("Pre-dispatch reject: #{RunningEntry.format_context(issue)} reason=#{reason_code}")
+
+    body = """
+    ## Pre-dispatch reject — #{reason_code}
+
+    #{reason_msg}
+    """
+
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      case Tracker.create_comment(issue.id, body) do
+        {:ok, _comment_id} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Pre-dispatch reject comment failed: #{RunningEntry.format_context(issue)} reason=#{inspect(reason)}")
+      end
+    end)
+
+    StateTransition.apply(issue, Config.settings!().tracker.on_reject_state)
+
+    %{state | completed: MapSet.put(state.completed, issue.id)}
   end
 
   defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host) do
