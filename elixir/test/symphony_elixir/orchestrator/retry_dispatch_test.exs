@@ -107,6 +107,43 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatchTest do
       refute_received {:release_claim, _}
     end
 
+    test "retry candidate with slots available -> stages qa-evidence before wiping workspace (SODEV-881)" do
+      issue = build_issue(state: "In Development", id: "issue-881", identifier: "ISS-881")
+      state = empty_state()
+
+      # Build a fake workspace containing fe-next-app/qa-evidence/*
+      ws_base = Path.join(System.tmp_dir!(), "ws-881-#{System.unique_integer([:positive])}")
+      ev_dir = Path.join(ws_base, "fe-next-app/qa-evidence")
+      File.mkdir_p!(ev_dir)
+      File.write!(Path.join(ev_dir, "01.png"), "PNG")
+      File.write!(Path.join(ev_dir, "qa-report.md"), "- Result: PASS\n")
+
+      on_exit(fn -> File.rm_rf!(ws_base) end)
+
+      staged = Path.join(System.tmp_dir!(), "symphony-qa-staged-issue-881")
+      File.rm_rf(staged)
+      on_exit(fn -> File.rm_rf!(staged) end)
+
+      opts =
+        base_opts(self())
+        |> Map.put(:fetch_fn, fn -> {:ok, [issue]} end)
+
+      RetryDispatch.handle_retry_issue(
+        state,
+        "issue-881",
+        1,
+        %{identifier: "ISS-881", worker_host: "host-a", workspace_path: ws_base},
+        opts
+      )
+
+      assert_received {:dispatch, "issue-881", 1, "host-a"}
+
+      # staged dir exists with the files snapshotted from the workspace
+      assert File.dir?(staged)
+      assert File.regular?(Path.join(staged, "01.png"))
+      assert File.regular?(Path.join(staged, "qa-report.md"))
+    end
+
     test "retry candidate with no global slot -> re-arms retry timer" do
       issue = build_issue(state: "In Development")
       # Saturate global slots: 5 max, fill 5 running with a different issue.

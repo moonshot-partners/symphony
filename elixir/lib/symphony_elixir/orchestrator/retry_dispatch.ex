@@ -29,7 +29,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
   require Logger
 
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Tracker
+  alias SymphonyElixir.{QaEvidence, Tracker}
 
   alias SymphonyElixir.Orchestrator.{
     DispatchGate,
@@ -141,6 +141,14 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
     if DispatchGate.retry_candidate?(issue, DispatchGate.terminal_state_set()) and
          SlotPolicy.dispatch_slots_available?(issue, state) and
          WorkerSelector.slots_available?(state, metadata[:worker_host]) do
+      # SODEV-881: the dying workspace contains `qa-evidence/` produced by
+      # the agent that just exited. The reconcile loop will fire
+      # `pr_sync_fn → QaEvidence.maybe_publish` after the new agent picks
+      # up, but by then the cleanup below has wiped the evidence. Snapshot
+      # it to a deterministic per-issue tmp path so the publish still finds
+      # it. No-op when no evidence dir exists.
+      QaEvidence.stage_pending_publish(issue.id, metadata[:workspace_path])
+
       # SODEV-765 lesson: the previous attempt left `state/<TICKET>/qa_check.py`
       # and `qa-evidence/` in the workspace. On retry the next agent inherits
       # those files and either re-uses a stale check or trips over a dirty
