@@ -68,6 +68,123 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
     end
   end
 
+  describe "integrate/2 — real-time token streaming via item/agent_message" do
+    test "absolute usage at params.usage propagates even when method is not turn/completed" do
+      # Shim emits accumulated usage inside item/agent_message params so the
+      # workpad heartbeat can render running totals mid-turn, before
+      # turn/completed arrives.
+      running_entry = %{
+        session_id: "sess-rt-1",
+        agent_input_tokens: 0,
+        agent_output_tokens: 0,
+        agent_total_tokens: 0,
+        agent_last_reported_input_tokens: 0,
+        agent_last_reported_output_tokens: 0,
+        agent_last_reported_total_tokens: 0,
+        turn_count: 1
+      }
+
+      payload = %{
+        "method" => "item/agent_message",
+        "params" => %{
+          "turn_id" => "turn-rt-1",
+          "text" => "thinking...",
+          "usage" => %{"input_tokens" => 120, "output_tokens" => 40, "total_tokens" => 160}
+        }
+      }
+
+      update = %{
+        event: :notification,
+        timestamp: ~U[2026-05-17 01:00:00Z],
+        payload: payload,
+        raw: ""
+      }
+
+      {updated, token_delta} = AgentUpdate.integrate(running_entry, update)
+
+      assert token_delta.input_tokens == 120
+      assert token_delta.output_tokens == 40
+      assert token_delta.total_tokens == 160
+      assert updated.agent_input_tokens == 120
+      assert updated.agent_output_tokens == 40
+      assert updated.agent_total_tokens == 160
+    end
+
+    test "consecutive item/agent_message events emit only the incremental delta" do
+      # First item: 120/40. Running entry already carries those as last_reported.
+      # Second item: 200/60 absolute. Delta must be 80/20, not 200/60.
+      running_entry = %{
+        session_id: "sess-rt-2",
+        agent_input_tokens: 120,
+        agent_output_tokens: 40,
+        agent_total_tokens: 160,
+        agent_last_reported_input_tokens: 120,
+        agent_last_reported_output_tokens: 40,
+        agent_last_reported_total_tokens: 160,
+        turn_count: 1
+      }
+
+      payload = %{
+        "method" => "item/agent_message",
+        "params" => %{
+          "turn_id" => "turn-rt-2",
+          "text" => "more...",
+          "usage" => %{"input_tokens" => 200, "output_tokens" => 60, "total_tokens" => 260}
+        }
+      }
+
+      update = %{
+        event: :notification,
+        timestamp: ~U[2026-05-17 01:00:01Z],
+        payload: payload,
+        raw: ""
+      }
+
+      {updated, token_delta} = AgentUpdate.integrate(running_entry, update)
+
+      assert token_delta.input_tokens == 80
+      assert token_delta.output_tokens == 20
+      assert token_delta.total_tokens == 100
+      assert updated.agent_input_tokens == 200
+      assert updated.agent_output_tokens == 60
+      assert updated.agent_total_tokens == 260
+    end
+
+    test "item/agent_message without usage does not touch token counters" do
+      running_entry = %{
+        session_id: "sess-rt-3",
+        agent_input_tokens: 500,
+        agent_output_tokens: 100,
+        agent_total_tokens: 600,
+        agent_last_reported_input_tokens: 500,
+        agent_last_reported_output_tokens: 100,
+        agent_last_reported_total_tokens: 600,
+        turn_count: 1
+      }
+
+      payload = %{
+        "method" => "item/agent_message",
+        "params" => %{"turn_id" => "turn-rt-3", "text" => "no usage in this one"}
+      }
+
+      update = %{
+        event: :notification,
+        timestamp: ~U[2026-05-17 01:00:02Z],
+        payload: payload,
+        raw: ""
+      }
+
+      {updated, token_delta} = AgentUpdate.integrate(running_entry, update)
+
+      assert token_delta.input_tokens == 0
+      assert token_delta.output_tokens == 0
+      assert token_delta.total_tokens == 0
+      assert updated.agent_input_tokens == 500
+      assert updated.agent_output_tokens == 100
+      assert updated.agent_total_tokens == 600
+    end
+  end
+
   describe "integrate/2 — agent_pid coercion" do
     test "binary pid passes through" do
       running_entry = base_entry()

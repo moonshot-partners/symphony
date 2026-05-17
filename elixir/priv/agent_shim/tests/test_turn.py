@@ -236,6 +236,143 @@ async def test_turn_completed_accumulates_usage_from_assistant_messages():
 
 
 @pytest.mark.asyncio
+async def test_item_agent_message_carries_running_usage_for_realtime_workpad():
+    """Each item/agent_message must include accumulated usage so the
+    orchestrator can refresh the workpad token counter mid-turn (heartbeat),
+    instead of waiting for turn/completed."""
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+
+        yield AssistantMessage(
+            content=[TextBlock(text="first")],
+            model="claude-sonnet-4-6",
+            usage={
+                "input_tokens": 120,
+                "output_tokens": 40,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        )
+        yield AssistantMessage(
+            content=[TextBlock(text="second")],
+            model="claude-sonnet-4-6",
+            usage={
+                "input_tokens": 80,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 5,
+                "cache_creation_input_tokens": 0,
+            },
+        )
+        yield ResultMessage(
+            subtype="end_turn",
+            duration_ms=10,
+            duration_api_ms=8,
+            is_error=False,
+            num_turns=1,
+            session_id="s5",
+            total_cost_usd=0.001,
+            usage=None,
+            result="ok",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="t5", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {"threadId": "t5", "input": [{"type": "text", "text": "go"}], "cwd": "/tmp"},
+        },
+        writer=writer,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    messages = [m for m in sent if m.get("method") == "item/agent_message"]
+    assert len(messages) == 2
+
+    # First item must carry running totals after the first AssistantMessage
+    first_usage = messages[0]["params"].get("usage")
+    assert first_usage is not None, "item/agent_message must include usage"
+    assert first_usage["input_tokens"] == 120
+    assert first_usage["output_tokens"] == 40
+
+    # Second item must carry the accumulated totals (per-call usage summed)
+    second_usage = messages[1]["params"].get("usage")
+    assert second_usage is not None
+    assert second_usage["input_tokens"] == 200  # 120 + 80
+    assert second_usage["output_tokens"] == 60  # 40 + 20
+    assert second_usage["cache_read_input_tokens"] == 5
+
+
+@pytest.mark.asyncio
+async def test_item_agent_message_omits_usage_when_assistant_message_has_no_usage():
+    """If the assistant message has no usage (accumulated still empty), the
+    notification must NOT carry a phantom empty usage dict — emit nothing so the
+    orchestrator extractor short-circuits cleanly."""
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+
+        yield AssistantMessage(content=[TextBlock(text="hi")], model="claude-sonnet-4-6")
+        yield ResultMessage(
+            subtype="end_turn",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s6",
+            total_cost_usd=0.0,
+            usage=None,
+            result="ok",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="t6", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {"threadId": "t6", "input": [{"type": "text", "text": "go"}], "cwd": "/tmp"},
+        },
+        writer=writer,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    messages = [m for m in sent if m.get("method") == "item/agent_message"]
+    assert len(messages) == 1
+    assert "usage" not in messages[0]["params"]
+
+
+@pytest.mark.asyncio
 async def test_cancel_emits_turn_cancelled():
     from symphony_agent_shim.turn import TurnTracker
 

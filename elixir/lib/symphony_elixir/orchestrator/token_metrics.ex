@@ -180,7 +180,12 @@ defmodule SymphonyElixir.Orchestrator.TokenMetrics do
       ["params", "tokenUsage", "total"],
       [:params, :tokenUsage, :total],
       ["tokenUsage", "total"],
-      [:tokenUsage, :total]
+      [:tokenUsage, :total],
+      # Real-time mid-turn streaming: shim emits accumulated usage inside
+      # item/agent_message params so workpad heartbeat can render running totals
+      # before turn/completed arrives.
+      ["params", "usage"],
+      [:params, :usage]
     ]
 
     explicit_map_at_paths(payload, absolute_paths)
