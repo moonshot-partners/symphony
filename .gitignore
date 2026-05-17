@@ -8,3 +8,4 @@ mvp-claude-sodev/
 __pycache__/
 *.pyc
 .DS_Store
+*.pre-agent-native.bak
