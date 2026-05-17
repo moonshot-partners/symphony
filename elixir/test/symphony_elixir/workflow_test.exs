@@ -125,6 +125,58 @@ defmodule SymphonyElixir.WorkflowTest do
     end
   end
 
+  describe "WORKFLOW.schools-out.md body delegates to AGENTS.md (Phase C)" do
+    setup do
+      original_app_env = Application.get_env(:symphony_elixir, :workflow_file_path)
+      original_os_env = System.get_env("SYMPHONY_WORKFLOW_FILE")
+
+      Application.delete_env(:symphony_elixir, :workflow_file_path)
+      System.put_env("SYMPHONY_WORKFLOW_FILE", "WORKFLOW.schools-out.md")
+
+      on_exit(fn ->
+        if original_app_env do
+          Application.put_env(:symphony_elixir, :workflow_file_path, original_app_env)
+        else
+          Application.delete_env(:symphony_elixir, :workflow_file_path)
+        end
+
+        if original_os_env do
+          System.put_env("SYMPHONY_WORKFLOW_FILE", original_os_env)
+        else
+          System.delete_env("SYMPHONY_WORKFLOW_FILE")
+        end
+      end)
+
+      :ok
+    end
+
+    test "body references AGENTS.md as the source of truth" do
+      {:ok, %{prompt: prompt}} = Workflow.load()
+
+      assert String.contains?(prompt, "AGENTS.md"),
+             "WORKFLOW.schools-out.md body must point at AGENTS.md after Phase C; " <>
+               "found prompt without that reference."
+    end
+
+    test "body stays under the regression line-count budget" do
+      {:ok, %{prompt: prompt}} = Workflow.load()
+      line_count = prompt |> String.split("\n", trim: false) |> length()
+
+      assert line_count <= 70,
+             "WORKFLOW.schools-out.md body must stay <= 70 lines so process " <>
+               "content keeps living in AGENTS.md (got #{line_count} lines)."
+    end
+
+    test "Liquid template variables for ticket prompt are preserved" do
+      {:ok, %{prompt: prompt}} = Workflow.load()
+
+      for variable <- ["{{ issue.identifier }}", "{{ issue.title }}", "{{ issue.url }}"] do
+        assert String.contains?(prompt, variable),
+               "Expected ticket prompt to retain Liquid variable #{variable}"
+      end
+    end
+  end
+
   defp extract_status_map_section(prompt) do
     case Regex.run(~r/## Status map\n(.*?)(?=\n## |\z)/s, prompt) do
       [_full, body] -> body
