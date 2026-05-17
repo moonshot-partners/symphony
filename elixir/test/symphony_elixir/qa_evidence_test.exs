@@ -74,9 +74,9 @@ defmodule SymphonyElixir.QaEvidenceTest do
       assert body =~ "![02-expanded.png](https://uploads.example/02-expanded.png)"
       refute body =~ "**01-collapsed.png**"
 
-      assert body =~
-               "[session video](https://uploads.example/session.webm) · [Playwright trace](https://uploads.example/session.zip)"
-
+      assert body =~ "\n[session video](https://uploads.example/session.webm)\n\n"
+      assert body =~ "\n[Playwright trace](https://uploads.example/session.zip)\n"
+      refute body =~ "session.webm) · ["
       refute body =~ "trace.playwright.dev"
     end
 
@@ -147,8 +147,24 @@ defmodule SymphonyElixir.QaEvidenceTest do
       assert body =~ "### Screenshots"
       assert body =~ "![a.png](https://u/a.png)"
       refute body =~ "**a.png**"
-      assert body =~ "[session video](https://u/session.webm) · [Playwright trace](https://u/session.zip)"
+      assert body =~ "\n[session video](https://u/session.webm)\n\n"
+      assert body =~ "\n[Playwright trace](https://u/session.zip)\n"
+      refute body =~ "session.webm) · ["
       refute body =~ "trace.playwright.dev"
+    end
+
+    test "video and trace each sit alone on their own paragraph so Linear renders them as inline players" do
+      body =
+        QaEvidence.build_comment(
+          nil,
+          [],
+          "https://u/session.webm",
+          "https://u/session.zip"
+        )
+
+      assert body =~ "\n[session video](https://u/session.webm)\n\n[Playwright trace](https://u/session.zip)\n"
+      refute body =~ "session.webm) "
+      refute body =~ ") · ["
     end
 
     test "handles missing report, video and trace" do

@@ -142,7 +142,7 @@ defmodule SymphonyElixir.QaEvidence do
   defp artifacts_line(nil, nil), do: nil
   defp artifacts_line(video, nil), do: "\n[session video](#{video})"
   defp artifacts_line(nil, trace), do: "\n[Playwright trace](#{trace})"
-  defp artifacts_line(video, trace), do: "\n[session video](#{video}) · [Playwright trace](#{trace})"
+  defp artifacts_line(video, trace), do: "\n[session video](#{video})\n\n[Playwright trace](#{trace})"
 
   defp maybe_upload_artifact(path, label) do
     if File.regular?(path) do
