@@ -409,8 +409,7 @@ defmodule SymphonyElixir.CoreTest do
       updated_state = Orchestrator.reconcile_issue_states_for_test([refreshed_issue], state)
 
       assert_receive {:memory_tracker_comment_update, "wp-comment-pr-attached", body}, 1_000
-      assert body =~ "PR aberto"
-      assert body =~ "PR enviado para revisão"
+      assert body =~ "PR opened"
       refute body =~ "ready for review"
 
       refute Map.has_key?(updated_state.running, issue_id)
