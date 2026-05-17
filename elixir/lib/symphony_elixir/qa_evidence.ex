@@ -119,19 +119,30 @@ defmodule SymphonyElixir.QaEvidence do
         ) :: String.t()
   def build_comment(report, uploaded, video_url, trace_url \\ nil) do
     [
-      "## QA self-review evidence",
+      "## QA self-review" <> status_suffix(report),
       if(report, do: "\n" <> String.trim_trailing(report)),
       "\n### Screenshots\n",
       screenshots_block(uploaded),
-      if(video_url, do: "\n[session.webm](#{video_url}) — full session recording"),
-      if(trace_url,
-        do: "\n[session.zip](#{trace_url}) — Playwright trace (drag into https://trace.playwright.dev)"
-      )
+      artifacts_line(video_url, trace_url)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
     |> Kernel.<>("\n")
   end
+
+  defp status_suffix(nil), do: ""
+
+  defp status_suffix(report) do
+    case Regex.run(~r/^- Result:\s*(PASS|FAIL|BLOCKED)\b/m, report) do
+      [_, status] -> " · " <> status
+      _ -> ""
+    end
+  end
+
+  defp artifacts_line(nil, nil), do: nil
+  defp artifacts_line(video, nil), do: "\n[session video](#{video})"
+  defp artifacts_line(nil, trace), do: "\n[Playwright trace](#{trace})"
+  defp artifacts_line(video, trace), do: "\n[session video](#{video})\n\n[Playwright trace](#{trace})"
 
   defp maybe_upload_artifact(path, label) do
     if File.regular?(path) do
@@ -149,7 +160,7 @@ defmodule SymphonyElixir.QaEvidence do
   defp screenshots_block([]), do: "_(no screenshots uploaded)_"
 
   defp screenshots_block(uploaded) do
-    Enum.map_join(uploaded, "\n\n", fn {name, url} -> "**#{name}**\n\n![#{name}](#{url})" end)
+    Enum.map_join(uploaded, "\n", fn {name, url} -> "![#{name}](#{url})" end)
   end
 
   defp list_files(dir, exts) do

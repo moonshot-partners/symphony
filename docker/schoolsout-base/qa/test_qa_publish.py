@@ -108,9 +108,16 @@ class QaPublishTest(unittest.TestCase):
 
         with open(os.path.join(evidence, "qa-report.md")) as fh:
             report = fh.read()
-        self.assertIn("session.webm", report)
-        self.assertIn("session.zip", report)
-        self.assertIn("trace.playwright.dev", report)
+        # Compact shape: no h1 title, no "## Evidence" filename list,
+        # no Evidence column (Elixir renders images directly + emits links).
+        self.assertNotIn("# QA self-review", report)
+        self.assertNotIn("## Evidence", report)
+        self.assertNotIn("session.webm", report)
+        self.assertNotIn("session.zip", report)
+        self.assertNotIn("trace.playwright.dev", report)
+        self.assertIn("- Result: PASS", report)
+        self.assertIn("| Check | Result | Detail |", report)
+        self.assertNotIn("| Evidence |", report)
 
         with open(os.path.join(evidence, "verdict.json")) as fh:
             verdict = json.load(fh)
@@ -145,8 +152,10 @@ class QaPublishTest(unittest.TestCase):
         self.assertTrue(verdict["blocked"])
         with open(os.path.join(evidence, "qa-report.md")) as fh:
             report = fh.read()
-        self.assertIn("BLOCKED — Playwright run could not produce evidence", report)
+        self.assertIn("- Result: BLOCKED", report)
         self.assertIn("dev server failed", report)
+        self.assertNotIn("# QA self-review", report)
+        self.assertNotIn("## Evidence", report)
 
     def test_missing_results_without_blocked_returns_2(self):
         evidence = os.path.join(self.tmpdir, "qa-evidence")
