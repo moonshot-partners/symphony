@@ -59,6 +59,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:on_pickup_state, :string)
       field(:on_complete_state, :string)
       field(:on_pr_merge_state, :string)
+      field(:on_reject_state, :string)
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -78,7 +79,8 @@ defmodule SymphonyElixir.Config.Schema do
           :terminal_states,
           :on_pickup_state,
           :on_complete_state,
-          :on_pr_merge_state
+          :on_pr_merge_state,
+          :on_reject_state
         ],
         empty_values: []
       )

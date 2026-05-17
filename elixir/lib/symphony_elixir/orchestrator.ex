@@ -15,6 +15,7 @@ defmodule SymphonyElixir.Orchestrator do
     Dispatch,
     DispatchGate,
     GateCTrigger,
+    PreDispatch,
     PrMerge,
     ProcessLiveness,
     Reconcile,
@@ -627,7 +628,14 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case DispatchGate.revalidate(issue, &Tracker.fetch_issue_states_by_ids/1, DispatchGate.terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+        case PreDispatch.check(refreshed_issue) do
+          :ok ->
+            do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+
+          {:reject, code, msg} ->
+            PreDispatch.apply_reject(refreshed_issue, code, msg)
+            %{state | completed: MapSet.put(state.completed, refreshed_issue.id)}
+        end
 
       {:skip, :missing} ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{RunningEntry.format_context(issue)}")

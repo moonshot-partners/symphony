@@ -14,6 +14,7 @@ tracker:
   on_pickup_state: "In Development"
   on_complete_state: "In Code Review"
   on_pr_merge_state: "Ready for QA"
+  on_reject_state: "On Hold / Blocked"
 polling:
   interval_ms: 5000
 workspace:
