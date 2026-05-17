@@ -273,9 +273,9 @@ defmodule SymphonyElixir.Config.Schema do
       |> validate_length(:evidence_subpaths, min: 1)
     end
 
-    defp normalize_attrs(attrs) when is_map(attrs) do
+    defp normalize_attrs(%{} = attrs) do
       cond do
-        Map.has_key?(attrs, "evidence_subpaths") or Map.has_key?(attrs, :evidence_subpaths) ->
+        Map.has_key?(attrs, "evidence_subpaths") ->
           attrs
 
         Map.has_key?(attrs, "evidence_subpath") ->
@@ -283,17 +283,10 @@ defmodule SymphonyElixir.Config.Schema do
           |> Map.put("evidence_subpaths", coerce_subpaths(Map.get(attrs, "evidence_subpath")))
           |> Map.delete("evidence_subpath")
 
-        Map.has_key?(attrs, :evidence_subpath) ->
-          attrs
-          |> Map.put(:evidence_subpaths, coerce_subpaths(Map.get(attrs, :evidence_subpath)))
-          |> Map.delete(:evidence_subpath)
-
         true ->
           attrs
       end
     end
-
-    defp normalize_attrs(attrs), do: attrs
 
     defp coerce_subpaths(value) when is_binary(value), do: [value]
     defp coerce_subpaths(value) when is_list(value), do: value

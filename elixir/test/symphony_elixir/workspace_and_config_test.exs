@@ -1467,6 +1467,20 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.qa_evidence_subpaths() == ["fe-next-app/qa-evidence", "qa-evidence"]
   end
 
+  test "schema parse — qa.evidence_subpath with non-string non-list value is rejected" do
+    assert {:error, {:invalid_workflow_config, message}} =
+             Schema.parse(%{"qa" => %{"evidence_subpath" => 123}})
+
+    assert message =~ "evidence_subpaths"
+  end
+
+  test "schema parse — qa.evidence_subpath with nil value falls back to default" do
+    # `drop_nil_values/1` strips the nil before reaching Qa.changeset, so the
+    # qa block effectively becomes empty and the default list applies.
+    assert {:ok, settings} = Schema.parse(%{"qa" => %{"evidence_subpath" => nil}})
+    assert settings.qa.evidence_subpaths == ["fe-next-app/qa-evidence"]
+  end
+
   test "Config.qa_evidence_subpath/0 stays backward-compat, returns first subpath" do
     File.write!(Workflow.workflow_file_path(), "---\n---\n")
     assert Config.qa_evidence_subpath() == "fe-next-app/qa-evidence"
