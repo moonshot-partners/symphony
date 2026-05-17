@@ -3,6 +3,8 @@ defmodule SymphonyElixir.Config.Schema.Repo do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @primary_key false
   embedded_schema do
     field(:url, :string)
