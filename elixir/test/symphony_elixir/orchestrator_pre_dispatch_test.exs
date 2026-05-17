@@ -2,7 +2,7 @@ defmodule SymphonyElixir.OrchestratorPreDispatchTest do
   use SymphonyElixir.TestSupport
 
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.Orchestrator.State
+  alias SymphonyElixir.Orchestrator.PreDispatch
 
   defp make_issue(opts \\ []) do
     %Issue{
@@ -25,8 +25,8 @@ defmodule SymphonyElixir.OrchestratorPreDispatchTest do
     end)
   end
 
-  describe "handle_pre_dispatch_reject_for_test/4 — on_reject_state configured" do
-    test "posts comment + moves issue state + marks issue completed" do
+  describe "PreDispatch.apply_reject/3 — on_reject_state configured" do
+    test "posts comment + moves issue state" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
         tracker_on_reject_state: "On Hold / Blocked"
@@ -34,11 +34,9 @@ defmodule SymphonyElixir.OrchestratorPreDispatchTest do
 
       set_memory_tracker_recipient()
       issue = make_issue()
-      state = %State{}
 
-      next =
-        Orchestrator.handle_pre_dispatch_reject_for_test(
-          state,
+      :ok =
+        PreDispatch.apply_reject(
           issue,
           :empty_description,
           "description is empty — agent cannot extract acceptance criteria."
@@ -50,21 +48,18 @@ defmodule SymphonyElixir.OrchestratorPreDispatchTest do
       assert body =~ "description is empty"
 
       assert_receive {:memory_tracker_state_update, "issue-pdr-1", "On Hold / Blocked"}, 500
-      assert MapSet.member?(next.completed, "issue-pdr-1")
     end
   end
 
-  describe "handle_pre_dispatch_reject_for_test/4 — on_reject_state absent" do
-    test "still posts comment + marks completed, skips state update" do
+  describe "PreDispatch.apply_reject/3 — on_reject_state absent" do
+    test "posts comment, skips state update" do
       write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
       set_memory_tracker_recipient()
       issue = make_issue(id: "issue-pdr-2", identifier: "SODEV-200")
-      state = %State{}
 
-      next =
-        Orchestrator.handle_pre_dispatch_reject_for_test(
-          state,
+      :ok =
+        PreDispatch.apply_reject(
           issue,
           :empty_description,
           "description is empty."
@@ -72,7 +67,6 @@ defmodule SymphonyElixir.OrchestratorPreDispatchTest do
 
       assert_receive {:memory_tracker_comment, "issue-pdr-2", _}, 500
       refute_receive {:memory_tracker_state_update, _, _}, 100
-      assert MapSet.member?(next.completed, "issue-pdr-2")
     end
   end
 end
