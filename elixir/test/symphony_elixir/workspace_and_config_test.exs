@@ -1434,6 +1434,21 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.qa.evidence_subpath == "frontend/qa-evidence"
   end
 
+  test "Config.qa_evidence_subpath/0 returns the configured subpath, defaulting when omitted" do
+    File.write!(Workflow.workflow_file_path(), "---\n---\n")
+    assert Config.qa_evidence_subpath() == "fe-next-app/qa-evidence"
+
+    workflow = """
+    ---
+    qa:
+      evidence_subpath: custom/qa-evidence
+    ---
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    assert Config.qa_evidence_subpath() == "custom/qa-evidence"
+  end
+
   test "schema helpers cover custom type and state limit validation" do
     assert StringOrMap.type() == :map
     assert StringOrMap.embed_as(:json) == :self

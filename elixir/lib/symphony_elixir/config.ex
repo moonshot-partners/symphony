@@ -72,6 +72,9 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @spec qa_evidence_subpath() :: String.t()
+  def qa_evidence_subpath, do: settings!().qa.evidence_subpath
+
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
     case Workflow.current() do
