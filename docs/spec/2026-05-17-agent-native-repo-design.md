@@ -41,6 +41,10 @@ After this migration:
 - **Write-back** (agent updating `AGENTS.md`). Experimental at Anthropic. Not in scope.
 - **Phase 2** — Docker image agnostic, removal of `qa_helpers.py`, `qa_vendor.py`,
   `qa_session.py`, `qa_devserver.py`. Prereq: 5-LH path removed from WORKFLOW.
+- **`allowed_repos` config field** — defer until `after_create` hook is generalized to
+  consume it (Phase 3 territory). Adding the field with no consumer is YAGNI. The
+  hook still does literal `git clone https://github.com/schoolsoutapp/schools-out`
+  this phase; that line moves to a generic loop when Phase 3 lands.
 - **Phase 3** — generic `after_create` hook. Per-tenant bash hook stays until 3+ clients
   feel real pain.
 - **Symphony self-loop body shrink** — `WORKFLOW.md` (Symphony's own ticket loop) keeps
@@ -54,9 +58,8 @@ After this migration:
 ```
 Orchestrator-side (Symphony repo, this branch):
   elixir/WORKFLOW.schools-out.md
-    YAML frontmatter (infra, grows ~10L):
+    YAML frontmatter (infra, grows ~3L):
       tracker, polling, workspace, hooks, agent, agent_runtime
-      + allowed_repos: ["schoolsoutapp/schools-out", "schoolsoutapp/fe-next-app"]
       + qa.evidence_subpath: "fe-next-app/qa-evidence"
     Markdown body (shrinks ~557L -> ~25L):
       "Read AGENTS.md + CLAUDE.md in workspace root and every subdir you touch.
@@ -97,8 +100,8 @@ Engine refactor (Symphony repo, this branch):
 
 | File | Change | Risk |
 |---|---|---|
-| `elixir/lib/symphony_elixir/config.ex` | Add `qa_evidence_subpath/0`, `allowed_repos/0`. Read from settings; default to current hardcoded values. | Low |
-| `elixir/lib/symphony_elixir/config/schema.ex` | Extend `Schema.t()` struct with `qa` + `allowed_repos`. Validation: `allowed_repos` non-empty list of strings. | Low |
+| `elixir/lib/symphony_elixir/config.ex` | Add `qa_evidence_subpath/0`. Reads from settings; defaults to current hardcoded value. | Low |
+| `elixir/lib/symphony_elixir/config/schema.ex` | Extend `Schema.t()` struct with `qa` embedded schema (`evidence_subpath` field). | Low |
 | `elixir/lib/symphony_elixir/qa_evidence.ex` | Replace `@evidence_subpath` constant with `Config.qa_evidence_subpath/0` call site. | Medium — runs on every view-layer ticket. |
 | `elixir/lib/symphony_elixir/gate_c.ex` | Drop literal `WORKFLOW.schools-out.md` reference from moduledoc. | Trivial (docs only). |
 | `elixir/WORKFLOW.schools-out.md` | Body shrinks ~557L -> ~25L. YAML grows ~10L (new fields). | High — agent prompt change. |
@@ -181,11 +184,9 @@ Default = current hardcoded value -> zero behavior change at deploy.
 
 **Unit (TDD, RED -> GREEN -> REFACTOR):**
 
-1. `config_test.exs`:
-   - parses `allowed_repos` from YAML as list of strings
+1. `workspace_and_config_test.exs` (extend existing):
    - parses `qa.evidence_subpath` from YAML as string
-   - defaults to current hardcoded values when omitted
-   - validates `allowed_repos` non-empty
+   - defaults to `"fe-next-app/qa-evidence"` when `qa` block omitted (no behavior change)
 2. `qa_evidence_test.exs`:
    - resolves subpath from `Config.qa_evidence_subpath/0`
    - existing tests stay green (no public API change)
