@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Workspace do
   alias SymphonyElixir.{Config, PathSafety}
 
   @marker_relpath ".symphony/after_create_ok"
+  @repos_marker_relpath ".symphony/repos_hook_ok"
 
   @spec create_for_issue(map() | String.t() | nil, term()) ::
           {:ok, Path.t()} | {:error, term()}
@@ -19,7 +20,8 @@ defmodule SymphonyElixir.Workspace do
       with {:ok, workspace} <- workspace_path_for_issue(safe_id),
            :ok <- validate_workspace_path(workspace),
            {:ok, workspace} <- ensure_workspace(workspace),
-           :ok <- maybe_run_after_create_hook(workspace, issue_context) do
+           :ok <- maybe_run_after_create_hook(workspace, issue_context),
+           :ok <- maybe_run_repos_hook(workspace, issue_context) do
         {:ok, workspace}
       end
     rescue
@@ -27,6 +29,32 @@ defmodule SymphonyElixir.Workspace do
         Logger.error("Workspace creation failed #{issue_log_context(issue_context)} error=#{Exception.message(error)}")
         {:error, error}
     end
+  end
+
+  @doc false
+  @spec generate_repos_bash([Config.Schema.Repo.t()]) :: String.t()
+  def generate_repos_bash(repos) when is_list(repos) do
+    clone_commands =
+      Enum.map_join(repos, "\n", fn repo ->
+        "git clone --depth 1 --branch #{repo.branch} #{repo.url} #{repo.path}"
+      end)
+
+    setup_commands =
+      repos
+      |> Enum.filter(fn repo -> repo.install || repo.verify end)
+      |> Enum.map_join("\n", fn repo ->
+        steps = [repo.install, repo.verify] |> Enum.reject(&is_nil/1) |> Enum.join("\n")
+
+        if repo.path == "." do
+          steps
+        else
+          "(\n  cd #{repo.path}\n  #{String.replace(steps, "\n", "\n  ")}\n)"
+        end
+      end)
+
+    parts = ["set -euo pipefail", clone_commands]
+    parts = if setup_commands != "", do: parts ++ [setup_commands], else: parts
+    Enum.join(parts, "\n")
   end
 
   defp ensure_workspace(workspace) do
@@ -49,7 +77,11 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp zombie?(workspace) do
-    not File.exists?(marker_path(workspace)) and not empty_workspace?(workspace)
+    no_setup_marker =
+      not File.exists?(marker_path(workspace)) and
+        not File.exists?(Path.join(workspace, @repos_marker_relpath))
+
+    no_setup_marker and not empty_workspace?(workspace)
   end
 
   defp empty_workspace?(workspace) do
@@ -140,6 +172,27 @@ defmodule SymphonyElixir.Workspace do
     case Config.settings!().hooks.after_create do
       nil -> :ok
       command -> run_after_create_hook(workspace, issue_context, command)
+    end
+  end
+
+  defp maybe_run_repos_hook(workspace, issue_context) do
+    case Config.repos() do
+      [] ->
+        :ok
+
+      repos ->
+        command = generate_repos_bash(repos)
+        repos_marker = Path.join(workspace, @repos_marker_relpath)
+
+        if File.exists?(repos_marker) do
+          :ok
+        else
+          with :ok <- run_hook(command, workspace, issue_context, "repos") do
+            File.mkdir_p!(Path.dirname(repos_marker))
+            File.write!(repos_marker, "ok\n")
+            :ok
+          end
+        end
     end
   end
 

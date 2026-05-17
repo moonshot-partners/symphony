@@ -1860,4 +1860,152 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert msg =~ "url"
     end
   end
+
+  describe "generate_repos_bash/1" do
+    test "generates clone + install + verify for root-path repo" do
+      repos = [
+        %SymphonyElixir.Config.Schema.Repo{
+          url: "https://github.com/org/app",
+          branch: "main",
+          path: ".",
+          install: "npm ci",
+          verify: "npm test"
+        }
+      ]
+
+      script = Workspace.generate_repos_bash(repos)
+
+      assert script =~ "set -euo pipefail"
+      assert script =~ "git clone --depth 1 --branch main https://github.com/org/app ."
+      assert script =~ "npm ci"
+      assert script =~ "npm test"
+    end
+
+    test "wraps install and verify in subshell when path is a subdirectory" do
+      repos = [
+        %SymphonyElixir.Config.Schema.Repo{
+          url: "https://github.com/org/fe",
+          branch: "dev",
+          path: "frontend",
+          install: "npm ci",
+          verify: nil
+        }
+      ]
+
+      script = Workspace.generate_repos_bash(repos)
+
+      assert script =~ "git clone --depth 1 --branch dev https://github.com/org/fe frontend"
+      assert script =~ "cd frontend"
+      assert script =~ "npm ci"
+    end
+
+    test "omits install/verify block when both are nil" do
+      repos = [
+        %SymphonyElixir.Config.Schema.Repo{
+          url: "https://github.com/org/bare",
+          branch: "main",
+          path: ".",
+          install: nil,
+          verify: nil
+        }
+      ]
+
+      script = Workspace.generate_repos_bash(repos)
+
+      assert script =~ "git clone"
+      refute script =~ "cd "
+    end
+
+    test "generates commands for multiple repos" do
+      repos = [
+        %SymphonyElixir.Config.Schema.Repo{url: "https://a.com/one", branch: "main", path: ".", install: nil, verify: nil},
+        %SymphonyElixir.Config.Schema.Repo{url: "https://b.com/two", branch: "main", path: "two", install: "make install", verify: nil}
+      ]
+
+      script = Workspace.generate_repos_bash(repos)
+
+      assert script =~ "https://a.com/one"
+      assert script =~ "https://b.com/two"
+      assert script =~ "make install"
+    end
+  end
+
+  describe "repos hook integration" do
+    setup do
+      workspace_root = Path.join(System.tmp_dir!(), "repos-hook-ws-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(workspace_root)
+      on_exit(fn -> File.rm_rf(workspace_root) end)
+      {:ok, workspace_root: workspace_root}
+    end
+
+    test "create_for_issue no-ops when repos is []", %{workspace_root: workspace_root} do
+      write_workflow_file!(Workflow.workflow_file_path(), repos: [], workspace_root: workspace_root)
+      assert {:ok, _workspace} = Workspace.create_for_issue("REPO-NOOP-#{System.unique_integer([:positive])}")
+    end
+
+    test "repos hook clones repo, runs install, and writes marker", %{workspace_root: workspace_root} do
+      test_root = Path.join(System.tmp_dir!(), "symphony-repos-hook-#{System.unique_integer([:positive])}")
+
+      try do
+        source_repo = Path.join(test_root, "source")
+        File.mkdir_p!(source_repo)
+        File.write!(Path.join(source_repo, "README.md"), "repos hook test\n")
+        System.cmd("git", ["-C", source_repo, "init", "-b", "main"])
+        System.cmd("git", ["-C", source_repo, "config", "user.name", "Test"])
+        System.cmd("git", ["-C", source_repo, "config", "user.email", "test@test.com"])
+        System.cmd("git", ["-C", source_repo, "add", "README.md"])
+        System.cmd("git", ["-C", source_repo, "commit", "-m", "init"])
+
+        probe = Path.join(test_root, "probe.txt")
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          repos: [
+            %{url: "file://#{source_repo}", branch: "main", path: ".", install: "touch #{probe}", verify: nil}
+          ]
+        )
+
+        issue_id = "REPO-RUN-#{System.unique_integer([:positive])}"
+        assert {:ok, workspace} = Workspace.create_for_issue(issue_id)
+
+        assert File.exists?(Path.join(workspace, "README.md")), "repo must have been cloned"
+        assert File.exists?(probe), "install command from repos hook must have run"
+        assert File.exists?(Path.join(workspace, ".symphony/repos_hook_ok")), "repos marker must be written"
+      after
+        File.rm_rf(test_root)
+      end
+    end
+
+    test "repos hook is skipped on second create_for_issue (idempotent)", %{workspace_root: workspace_root} do
+      test_root = Path.join(System.tmp_dir!(), "symphony-repos-idempotent-#{System.unique_integer([:positive])}")
+
+      try do
+        source_repo = Path.join(test_root, "source")
+        File.mkdir_p!(source_repo)
+        File.write!(Path.join(source_repo, "README.md"), "idempotent test\n")
+        System.cmd("git", ["-C", source_repo, "init", "-b", "main"])
+        System.cmd("git", ["-C", source_repo, "config", "user.name", "Test"])
+        System.cmd("git", ["-C", source_repo, "config", "user.email", "test@test.com"])
+        System.cmd("git", ["-C", source_repo, "add", "README.md"])
+        System.cmd("git", ["-C", source_repo, "commit", "-m", "init"])
+
+        counter_path = Path.join(test_root, "counter.txt")
+        issue_id = "REPO-IDEMPOTENT-#{System.unique_integer([:positive])}"
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          repos: [
+            %{url: "file://#{source_repo}", branch: "main", path: ".", install: "printf x >> #{counter_path}", verify: nil}
+          ]
+        )
+
+        assert {:ok, _workspace} = Workspace.create_for_issue(issue_id)
+        assert {:ok, _workspace} = Workspace.create_for_issue(issue_id)
+
+        assert File.read!(counter_path) == "x", "repos hook must run only once"
+      after
+        File.rm_rf(test_root)
+      end
+    end
+  end
 end
