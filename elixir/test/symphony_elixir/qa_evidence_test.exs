@@ -131,6 +131,66 @@ defmodule SymphonyElixir.QaEvidenceTest do
     end
   end
 
+  describe "stage_pending_publish/2 + maybe_publish/3 — SODEV-881" do
+    test "stages evidence to a deterministic path that survives workspace removal" do
+      base = evidence_dir([{"01.png", "PNG"}, {"qa-report.md", "- Result: PASS\n"}])
+
+      assert :ok == QaEvidence.stage_pending_publish("issue-881", base)
+
+      File.rm_rf!(base)
+
+      # workspace gone, but maybe_publish must still pick up the staged copy
+      assert :ok == QaEvidence.maybe_publish("issue-881", base)
+
+      assert_receive {:memory_tracker_comment, "issue-881", body}, 5_000
+      assert body =~ "## QA self-review · PASS"
+      assert body =~ "![01.png](https://uploads.example/"
+
+      # staged dir cleaned up after publish (task `after` clause runs async)
+      staged = Path.join(System.tmp_dir!(), "symphony-qa-staged-issue-881")
+
+      eventually_gone? =
+        Enum.reduce_while(1..40, false, fn _, _ ->
+          if File.dir?(staged) do
+            Process.sleep(25)
+            {:cont, false}
+          else
+            {:halt, true}
+          end
+        end)
+
+      assert eventually_gone?, "expected staged dir to be cleaned up after publish: #{staged}"
+    end
+
+    test "stage_pending_publish is a no-op when evidence dir absent" do
+      base = Path.join(System.tmp_dir!(), "qa-empty-stage-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(base)
+      on_exit(fn -> File.rm_rf!(base) end)
+
+      assert :ok == QaEvidence.stage_pending_publish("issue-empty", base)
+      refute File.dir?(Path.join(System.tmp_dir!(), "symphony-qa-staged-issue-empty"))
+    end
+
+    test "stage_pending_publish handles nil workspace_path silently" do
+      assert :ok == QaEvidence.stage_pending_publish("issue-nil", nil)
+    end
+
+    test "maybe_publish prefers staged dir over workspace when both present" do
+      # Stage with one set of files
+      staged_src = evidence_dir([{"staged.png", "STAGED"}])
+      assert :ok == QaEvidence.stage_pending_publish("issue-prefer", staged_src)
+
+      # New workspace has different files; staged should win
+      live_ws = evidence_dir([{"live.png", "LIVE"}])
+
+      assert :ok == QaEvidence.maybe_publish("issue-prefer", live_ws)
+
+      assert_receive {:memory_tracker_comment, "issue-prefer", body}, 5_000
+      assert body =~ "staged.png"
+      refute body =~ "live.png"
+    end
+  end
+
   describe "build_comment/4" do
     test "renders compact header with status, screenshots, single-line video+trace" do
       body =
