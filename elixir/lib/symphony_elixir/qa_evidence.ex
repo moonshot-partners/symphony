@@ -73,30 +73,31 @@ defmodule SymphonyElixir.QaEvidence do
   def stage_pending_publish(issue_id, workspace_path)
       when is_binary(issue_id) and is_binary(workspace_path) do
     source_dir = Path.join(workspace_path, Config.qa_evidence_subpath())
-
-    if File.dir?(source_dir) do
-      target = pending_publish_path(issue_id)
-      File.rm_rf(target)
-      File.mkdir_p!(target)
-
-      case File.ls(source_dir) do
-        {:ok, names} ->
-          Enum.each(names, fn name ->
-            src = Path.join(source_dir, name)
-            if File.regular?(src), do: File.cp!(src, Path.join(target, name))
-          end)
-
-          Logger.info("QA evidence staged for pending publish issue_id=#{issue_id} target=#{target}")
-
-        _ ->
-          File.rm_rf(target)
-      end
-    end
-
+    if File.dir?(source_dir), do: snapshot_to_pending(issue_id, source_dir)
     :ok
   end
 
   def stage_pending_publish(_issue_id, _workspace_path), do: :ok
+
+  defp snapshot_to_pending(issue_id, source_dir) do
+    target = pending_publish_path(issue_id)
+    File.rm_rf(target)
+    File.mkdir_p!(target)
+
+    case File.ls(source_dir) do
+      {:ok, names} ->
+        Enum.each(names, &copy_pending(&1, source_dir, target))
+        Logger.info("QA evidence staged for pending publish issue_id=#{issue_id} target=#{target}")
+
+      _ ->
+        File.rm_rf(target)
+    end
+  end
+
+  defp copy_pending(name, source_dir, target) do
+    src = Path.join(source_dir, name)
+    if File.regular?(src), do: File.cp!(src, Path.join(target, name))
+  end
 
   defp pending_publish_path(issue_id) do
     Path.join(System.tmp_dir!(), "symphony-qa-staged-#{issue_id}")
