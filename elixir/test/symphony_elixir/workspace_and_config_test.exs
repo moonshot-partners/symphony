@@ -1789,4 +1789,75 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
     assert Config.workflow_prompt() == workflow_prompt
   end
+
+  describe "repos schema" do
+    test "defaults to [] when repos block is omitted" do
+      assert {:ok, settings} = Schema.parse(%{})
+      assert settings.repos == []
+    end
+
+    test "parses a single repo with all fields" do
+      assert {:ok, settings} =
+               Schema.parse(%{
+                 "repos" => [
+                   %{
+                     "url" => "https://github.com/org/repo",
+                     "branch" => "dev",
+                     "path" => ".",
+                     "install" => "bundle install",
+                     "verify" => "bundle exec rspec --dry-run"
+                   }
+                 ]
+               })
+
+      [repo] = settings.repos
+      assert repo.url == "https://github.com/org/repo"
+      assert repo.branch == "dev"
+      assert repo.path == "."
+      assert repo.install == "bundle install"
+      assert repo.verify == "bundle exec rspec --dry-run"
+    end
+
+    test "parses multiple repos" do
+      assert {:ok, settings} =
+               Schema.parse(%{
+                 "repos" => [
+                   %{"url" => "https://github.com/org/backend", "branch" => "dev", "path" => "."},
+                   %{
+                     "url" => "https://github.com/org/frontend",
+                     "branch" => "dev",
+                     "path" => "frontend",
+                     "install" => "npm ci --no-audit --no-fund",
+                     "verify" => "npx --no-install jest --listTests > /dev/null"
+                   }
+                 ]
+               })
+
+      assert length(settings.repos) == 2
+      [backend, frontend] = settings.repos
+      assert backend.url == "https://github.com/org/backend"
+      assert backend.path == "."
+      assert frontend.url == "https://github.com/org/frontend"
+      assert frontend.path == "frontend"
+      assert frontend.install == "npm ci --no-audit --no-fund"
+    end
+
+    test "repo defaults branch to main and path to . when omitted" do
+      assert {:ok, settings} =
+               Schema.parse(%{"repos" => [%{"url" => "https://github.com/org/repo"}]})
+
+      [repo] = settings.repos
+      assert repo.branch == "main"
+      assert repo.path == "."
+      assert is_nil(repo.install)
+      assert is_nil(repo.verify)
+    end
+
+    test "repo without url is rejected" do
+      assert {:error, {:invalid_workflow_config, msg}} =
+               Schema.parse(%{"repos" => [%{"branch" => "dev", "path" => "."}]})
+
+      assert msg =~ "url"
+    end
+  end
 end
