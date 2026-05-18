@@ -15,6 +15,7 @@ defmodule SymphonyElixir.Orchestrator do
     Dispatch,
     DispatchGate,
     GateCTrigger,
+    GateDTrigger,
     PreDispatch,
     PrMerge,
     ProcessLiveness,
@@ -197,6 +198,9 @@ defmodule SymphonyElixir.Orchestrator do
             :normal ->
               Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
 
+              gate_d_result = GateDTrigger.maybe_run(running_entry)
+              handle_gate_d_result(gate_d_result, issue_id, running_entry)
+
               state
               |> complete_issue(issue_id)
               |> RetryDispatch.maybe_schedule_continuation_retry(
@@ -209,6 +213,7 @@ defmodule SymphonyElixir.Orchestrator do
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
 
               next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+
               failure_metadata = %{
                 identifier: running_entry.identifier,
                 error: "agent exited: #{inspect(reason)}",
@@ -446,6 +451,7 @@ defmodule SymphonyElixir.Orchestrator do
         )
 
         next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+
         dead_metadata = %{
           identifier: identifier,
           error: "worker pid dead without :DOWN message",
@@ -723,6 +729,27 @@ defmodule SymphonyElixir.Orchestrator do
       Issue: #{identifier}
 
       The agent will continue running. Review the first-turn output and consider whether the AC extraction contract needs to be reinforced in the workflow prompt.
+      """
+
+      Tracker.create_comment(issue_id, body)
+    end)
+  end
+
+  defp handle_gate_d_result(:ok, _issue_id, _running_entry), do: :ok
+
+  defp handle_gate_d_result({:violation, reason}, issue_id, running_entry) do
+    identifier = Map.get(running_entry, :identifier, issue_id)
+
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      body = """
+      ## Gate D — AC Evidence missing
+
+      The agent's final turn did not include the required `## AC Evidence` section mapping each acceptance criterion to the specific code or test that satisfies it.
+
+      Reason: #{reason}
+      Issue: #{identifier}
+
+      Add an `## AC Evidence` section to the final-turn summary in future runs. See AGENTS.md for the expected format.
       """
 
       Tracker.create_comment(issue_id, body)
