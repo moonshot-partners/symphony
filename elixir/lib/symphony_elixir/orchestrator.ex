@@ -213,6 +213,7 @@ defmodule SymphonyElixir.Orchestrator do
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
 
               next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+
               failure_metadata = %{
                 identifier: running_entry.identifier,
                 error: "agent exited: #{inspect(reason)}",
@@ -450,6 +451,7 @@ defmodule SymphonyElixir.Orchestrator do
         )
 
         next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+
         dead_metadata = %{
           identifier: identifier,
           error: "worker pid dead without :DOWN message",
