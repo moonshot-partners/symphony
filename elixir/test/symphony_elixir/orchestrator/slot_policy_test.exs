@@ -70,7 +70,8 @@ defmodule SymphonyElixir.Orchestrator.SlotPolicyTest do
   end
 
   describe "should_dispatch?/4" do
-    # active/terminal sets must be normalized (lowercase) — DispatchGate.active_state? lowercases the issue state before lookup
+    # active/terminal sets must be normalized (lowercase) —
+    # DispatchGate.active_state? lowercases the issue state before lookup
     @active MapSet.new(["in development"])
     @terminal MapSet.new(["done"])
 
