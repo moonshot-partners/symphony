@@ -71,6 +71,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
       {:error, reason} ->
         Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
 
+        # halt side-effects handled by the orchestrator's :DOWN handler on eventual failure
         RetryAttempts.schedule(
           state,
           issue_id,
@@ -78,6 +79,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
           Map.merge(metadata, %{error: "retry poll failed: #{inspect(reason)}"}),
           Map.fetch!(opts, :recipient)
         )
+        |> elem(1)
     end
   end
 
@@ -96,6 +98,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
       Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR attached and attempt=#{current_attempt} >= 1; agent cannot resolve infra CI failures")
       state
     else
+      # attempt is always 1 here — never reaches max_retries cap; elem(1) is safe
       RetryAttempts.schedule(
         state,
         issue_id,
@@ -108,6 +111,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
         },
         Map.fetch!(opts, :recipient)
       )
+      |> elem(1)
     end
   end
 
@@ -159,6 +163,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
     else
       Logger.debug("No available slots for retrying #{RunningEntry.format_context(issue)}; retrying again")
 
+      # halt side-effects handled by the orchestrator's :DOWN handler on eventual failure
       RetryAttempts.schedule(
         state,
         issue.id,
@@ -169,6 +174,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
         }),
         Map.fetch!(opts, :recipient)
       )
+      |> elem(1)
     end
   end
 end

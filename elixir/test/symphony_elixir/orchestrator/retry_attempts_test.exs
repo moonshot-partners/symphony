@@ -33,7 +33,7 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
         delay_type: :continuation
       }
 
-      updated = RetryAttempts.schedule(state, "issue-1", 1, metadata, self())
+      {:armed, updated} = RetryAttempts.schedule(state, "issue-1", 1, metadata, self())
 
       assert %{
                attempt: 1,
@@ -67,7 +67,7 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
           }
         })
 
-      updated =
+      {:armed, updated} =
         RetryAttempts.schedule(
           state,
           "issue-1",
@@ -83,7 +83,7 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
   end
 
   describe "Sprint 3: max_retries cap" do
-    test "halts retry and clears retry_attempts entry when next_attempt exceeds the cap" do
+    test "returns {:halted, state} and clears retry_attempts entry when next_attempt exceeds the cap" do
       max_retries = Config.settings!().agent.max_retries
 
       state =
@@ -98,7 +98,7 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
           }
         })
 
-      updated =
+      {:halted, updated} =
         RetryAttempts.schedule(
           state,
           "issue-cap",
@@ -115,7 +115,7 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
       max_retries = Config.settings!().agent.max_retries
       state = empty_state()
 
-      updated =
+      {:armed, updated} =
         RetryAttempts.schedule(
           state,
           "issue-edge",
