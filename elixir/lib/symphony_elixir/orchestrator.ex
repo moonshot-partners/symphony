@@ -258,7 +258,8 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry ->
         {updated_running_entry, token_delta} = AgentUpdate.integrate(running_entry, update)
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
-        updated_running_entry = GateCTrigger.maybe_run(updated_running_entry, update)
+        {gate_c_result, updated_running_entry} = GateCTrigger.maybe_run(updated_running_entry, update)
+        handle_gate_c_result(gate_c_result, issue_id, updated_running_entry)
 
         state =
           state
@@ -705,6 +706,27 @@ defmodule SymphonyElixir.Orchestrator do
     end)
 
     complete_issue(state, issue_id)
+  end
+
+  defp handle_gate_c_result(:ok, _issue_id, _running_entry), do: :ok
+
+  defp handle_gate_c_result({:violation, reason}, issue_id, running_entry) do
+    identifier = Map.get(running_entry, :identifier, issue_id)
+
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      body = """
+      ## Gate C violation
+
+      The agent's first turn did not include the required `## AC Extracted` (or `## BLOCKED: AC not testable`) header.
+
+      Reason: #{reason}
+      Issue: #{identifier}
+
+      The agent will continue running. Review the first-turn output and consider whether the AC extraction contract needs to be reinforced in the workflow prompt.
+      """
+
+      Tracker.create_comment(issue_id, body)
+    end)
   end
 
   defp complete_issue(%State{} = state, issue_id) do
