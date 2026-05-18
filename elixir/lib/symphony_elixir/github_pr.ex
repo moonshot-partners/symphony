@@ -145,6 +145,58 @@ defmodule SymphonyElixir.GitHubPr do
     end
   end
 
+  @doc """
+  Returns true if the issue's open PR body contains `- Result: BLOCKED`,
+  indicating the agent's QA self-review was blocked (e.g. staging auth failure).
+
+  The default implementation shells out to `gh pr view`. Tests inject a pure
+  function via `Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn issue -> bool end)`.
+  """
+  @spec qa_blocked?(SymphonyElixir.Linear.Issue.t() | map()) :: boolean()
+  def qa_blocked?(issue) do
+    check_fn =
+      Application.get_env(:symphony_elixir, :pr_qa_blocked_fn, &__MODULE__.default_qa_blocked?/1)
+
+    check_fn.(issue)
+  end
+
+  @doc false
+  @spec default_qa_blocked?(SymphonyElixir.Linear.Issue.t() | map()) :: boolean()
+  def default_qa_blocked?(issue) do
+    issue
+    |> pr_urls()
+    |> Enum.any?(&body_blocked?/1)
+  end
+
+  @doc """
+  Pure predicate: returns true if the PR body string contains a `- Result: BLOCKED` line.
+  """
+  @spec parse_qa_blocked?(String.t() | nil) :: boolean()
+  def parse_qa_blocked?(nil), do: false
+
+  def parse_qa_blocked?(body) when is_binary(body) do
+    String.contains?(body, "- Result: BLOCKED")
+  end
+
+  defp body_blocked?(url) when is_binary(url) do
+    case Regex.run(@github_pr_regex, url) do
+      [_, owner, repo, number] ->
+        case System.cmd(
+               "gh",
+               ["pr", "view", number, "--repo", "#{owner}/#{repo}", "--json", "body", "--jq", ".body"],
+               stderr_to_stdout: true
+             ) do
+          {body, 0} -> parse_qa_blocked?(body)
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  defp body_blocked?(_), do: false
+
   defp pr_urls(%{repos: repos}) when is_list(repos) do
     Enum.flat_map(repos, fn
       %{pr: %{url: url}} when is_binary(url) -> [url]

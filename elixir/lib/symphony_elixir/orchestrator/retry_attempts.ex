@@ -8,6 +8,10 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
       the next attempt's delay via `RetryPlan`, send `{:retry_issue,
       issue_id, retry_token}` to `recipient` after the delay, and
       store the freshly armed entry on `state.retry_attempts`.
+      Returns `{:armed, state}` when a timer was set, or
+      `{:halted, state}` when `max_retries` was exceeded — so the
+      caller can apply tracker side-effects (comment + state move)
+      without this pure module performing I/O.
     * `pop/3` — look up the entry for an `issue_id`+`retry_token`
       pair and return `{:ok, attempt, metadata, new_state}` (entry
       deleted) when the token still matches the latest schedule, or
@@ -25,14 +29,16 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
 
   @doc """
   Arm a retry timer for `issue_id`, replacing any previously-armed
-  retry entry. Returns the updated `%State{}` with the new retry
+  retry entry. Returns `{:armed, state}` with the new retry
   bookkeeping under `state.retry_attempts[issue_id]`.
 
   When `next_attempt` exceeds `agent.max_retries`, no timer is armed,
-  the previous retry entry is cleared, and a warning is logged. The
-  caller still receives the updated `%State{}` (with the entry removed).
+  the previous retry entry is cleared, a warning is logged, and
+  `{:halted, state}` is returned so the caller can post a tracker
+  comment and move the issue to its reject state.
   """
-  @spec schedule(State.t(), String.t(), term(), map(), pid()) :: State.t()
+  @spec schedule(State.t(), String.t(), term(), map(), pid()) ::
+          {:armed | :halted, State.t()}
   def schedule(%State{} = state, issue_id, attempt, metadata, recipient)
       when is_binary(issue_id) and is_map(metadata) and is_pid(recipient) do
     previous_retry = Map.get(state.retry_attempts, issue_id, %{attempt: 0})
@@ -40,9 +46,9 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
     max_retries = Config.settings!().agent.max_retries
 
     if next_attempt > max_retries do
-      halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata)
+      {:halted, halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata)}
     else
-      arm_retry(state, issue_id, previous_retry, next_attempt, metadata, recipient)
+      {:armed, arm_retry(state, issue_id, previous_retry, next_attempt, metadata, recipient)}
     end
   end
 

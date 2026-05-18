@@ -209,19 +209,15 @@ defmodule SymphonyElixir.Orchestrator do
               Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
 
               next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+              failure_metadata = %{
+                identifier: running_entry.identifier,
+                error: "agent exited: #{inspect(reason)}",
+                worker_host: Map.get(running_entry, :worker_host),
+                workspace_path: Map.get(running_entry, :workspace_path)
+              }
 
-              RetryAttempts.schedule(
-                state,
-                issue_id,
-                next_attempt,
-                %{
-                  identifier: running_entry.identifier,
-                  error: "agent exited: #{inspect(reason)}",
-                  worker_host: Map.get(running_entry, :worker_host),
-                  workspace_path: Map.get(running_entry, :workspace_path)
-                },
-                self()
-              )
+              RetryAttempts.schedule(state, issue_id, next_attempt, failure_metadata, self())
+              |> handle_retry_schedule(Map.get(running_entry, :issue), issue_id, failure_metadata)
           end
 
         Logger.info(
@@ -262,7 +258,8 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry ->
         {updated_running_entry, token_delta} = AgentUpdate.integrate(running_entry, update)
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
-        updated_running_entry = GateCTrigger.maybe_run(updated_running_entry, update)
+        {gate_c_result, updated_running_entry} = GateCTrigger.maybe_run(updated_running_entry, update)
+        handle_gate_c_result(gate_c_result, issue_id, updated_running_entry)
 
         state =
           state
@@ -449,20 +446,17 @@ defmodule SymphonyElixir.Orchestrator do
         )
 
         next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+        dead_metadata = %{
+          identifier: identifier,
+          error: "worker pid dead without :DOWN message",
+          worker_host: Map.get(running_entry, :worker_host),
+          workspace_path: Map.get(running_entry, :workspace_path)
+        }
 
         state
         |> terminate_running_issue(issue_id, false)
-        |> RetryAttempts.schedule(
-          issue_id,
-          next_attempt,
-          %{
-            identifier: identifier,
-            error: "worker pid dead without :DOWN message",
-            worker_host: Map.get(running_entry, :worker_host),
-            workspace_path: Map.get(running_entry, :workspace_path)
-          },
-          self()
-        )
+        |> RetryAttempts.schedule(issue_id, next_attempt, dead_metadata, self())
+        |> handle_retry_schedule(Map.get(running_entry, :issue), issue_id, dead_metadata)
     end
   end
 
@@ -558,18 +552,12 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
 
     next_attempt = RetryPlan.next_attempt_from_running(running_entry)
+    stall_metadata = %{identifier: identifier, error: "stalled for #{elapsed_ms}ms without agent activity"}
 
     state
     |> terminate_running_issue(issue_id, false)
-    |> RetryAttempts.schedule(
-      issue_id,
-      next_attempt,
-      %{
-        identifier: identifier,
-        error: "stalled for #{elapsed_ms}ms without agent activity"
-      },
-      self()
-    )
+    |> RetryAttempts.schedule(issue_id, next_attempt, stall_metadata, self())
+    |> handle_retry_schedule(Map.get(running_entry, :issue), issue_id, stall_metadata)
   end
 
   defp terminate_task(pid) when is_pid(pid) do
@@ -689,19 +677,56 @@ defmodule SymphonyElixir.Orchestrator do
       {:error, reason} ->
         Logger.error("Unable to spawn agent for #{RunningEntry.format_context(issue)}: #{inspect(reason)}")
         next_attempt = if is_integer(attempt), do: attempt + 1, else: nil
+        spawn_metadata = %{identifier: issue.identifier, error: "failed to spawn agent: #{inspect(reason)}", worker_host: worker_host}
 
-        RetryAttempts.schedule(
-          state,
-          issue.id,
-          next_attempt,
-          %{
-            identifier: issue.identifier,
-            error: "failed to spawn agent: #{inspect(reason)}",
-            worker_host: worker_host
-          },
-          self()
-        )
+        RetryAttempts.schedule(state, issue.id, next_attempt, spawn_metadata, self())
+        |> handle_retry_schedule(issue, issue.id, spawn_metadata)
     end
+  end
+
+  defp handle_retry_schedule({:armed, state}, _issue, _issue_id, _metadata), do: state
+
+  defp handle_retry_schedule({:halted, state}, issue, issue_id, metadata) do
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      error = metadata[:error] || "unknown"
+      max = Config.settings!().agent.max_retries
+
+      body = """
+      ## Retry cap reached
+
+      This issue failed #{max} consecutive times and will not be retried automatically.
+
+      Last error: #{error}
+
+      Investigate the root cause, then move the issue back to the dispatch queue.
+      """
+
+      Tracker.create_comment(issue_id, body)
+      StateTransition.apply(issue, Config.settings!().tracker.on_reject_state)
+    end)
+
+    complete_issue(state, issue_id)
+  end
+
+  defp handle_gate_c_result(:ok, _issue_id, _running_entry), do: :ok
+
+  defp handle_gate_c_result({:violation, reason}, issue_id, running_entry) do
+    identifier = Map.get(running_entry, :identifier, issue_id)
+
+    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
+      body = """
+      ## Gate C violation
+
+      The agent's first turn did not include the required `## AC Extracted` (or `## BLOCKED: AC not testable`) header.
+
+      Reason: #{reason}
+      Issue: #{identifier}
+
+      The agent will continue running. Review the first-turn output and consider whether the AC extraction contract needs to be reinforced in the workflow prompt.
+      """
+
+      Tracker.create_comment(issue_id, body)
+    end)
   end
 
   defp complete_issue(%State{} = state, issue_id) do

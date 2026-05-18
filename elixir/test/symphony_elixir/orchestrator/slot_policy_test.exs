@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Orchestrator.SlotPolicyTest do
     %State{
       running: Keyword.get(opts, :running, %{}),
       claimed: Keyword.get(opts, :claimed, MapSet.new()),
+      completed: Keyword.get(opts, :completed, MapSet.new()),
       max_concurrent_agents: Keyword.get(opts, :max_concurrent_agents, 5)
     }
   end
@@ -69,18 +70,32 @@ defmodule SymphonyElixir.Orchestrator.SlotPolicyTest do
   end
 
   describe "should_dispatch?/4" do
+    # active/terminal sets must be normalized (lowercase) —
+    # DispatchGate.active_state? lowercases the issue state before lookup
+    @active MapSet.new(["in development"])
+    @terminal MapSet.new(["done"])
+
+    test "returns true for a valid candidate with available slots" do
+      assert SlotPolicy.should_dispatch?(issue("z"), state(), @active, @terminal)
+    end
+
     test "rejects when the issue id is already in the claimed set" do
       st = state(claimed: MapSet.new(["a"]))
-      refute SlotPolicy.should_dispatch?(issue("a"), st, MapSet.new(["In Development"]), MapSet.new(["Done"]))
+      refute SlotPolicy.should_dispatch?(issue("a"), st, @active, @terminal)
     end
 
     test "rejects when the issue is already running" do
       st = state(running: %{"a" => %{}})
-      refute SlotPolicy.should_dispatch?(issue("a"), st, MapSet.new(["In Development"]), MapSet.new(["Done"]))
+      refute SlotPolicy.should_dispatch?(issue("a"), st, @active, @terminal)
     end
 
     test "rejects non-Issue inputs" do
       refute SlotPolicy.should_dispatch?(:not_an_issue, state(), MapSet.new(), MapSet.new())
+    end
+
+    test "rejects when the issue id is already in the completed set" do
+      st = state(completed: MapSet.new(["a"]))
+      refute SlotPolicy.should_dispatch?(issue("a"), st, @active, @terminal)
     end
   end
 end

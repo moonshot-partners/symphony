@@ -60,6 +60,10 @@ git reset --hard origin/main
 new_sha=$(git rev-parse HEAD)
 log "new_sha=$new_sha"
 
+log "install logrotate config"
+sudo cp "$SYMPHONY_DIR/scripts/symphony-logrotate" /etc/logrotate.d/symphony
+sudo chmod 644 /etc/logrotate.d/symphony
+
 log "build escript"
 export PATH=/home/ubuntu/.local/share/mise/installs/erlang/28.5/bin:/home/ubuntu/.local/share/mise/installs/elixir/1.19.5-otp-28/bin:$PATH
 cd "$SYMPHONY_DIR/elixir"
