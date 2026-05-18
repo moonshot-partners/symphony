@@ -14,7 +14,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   via `send/2` without coupling this module to `self()`.
   """
 
-  alias SymphonyElixir.{Config, QaEvidence, Workpad}
+  alias SymphonyElixir.{Config, GitHubPr, QaEvidence, Workpad}
   alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition}
 
   @doc """
@@ -51,7 +51,16 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   defp run_side_effects(nil, _running_entry, _parent_comment_id), do: :ok
 
   defp run_side_effects(issue, running_entry, parent_comment_id) do
-    StateTransition.apply(issue, Config.settings!().tracker.on_complete_state)
+    reject_state = Config.settings!().tracker.on_reject_state
+
+    target_state =
+      if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
+        reject_state
+      else
+        Config.settings!().tracker.on_complete_state
+      end
+
+    StateTransition.apply(issue, target_state)
     Task.start(fn -> GithubLabel.apply(issue) end)
 
     QaEvidence.maybe_publish(

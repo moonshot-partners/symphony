@@ -65,7 +65,7 @@ defmodule SymphonyElixir.Orchestrator.SlotPolicy do
   @spec should_dispatch?(any(), State.t(), MapSet.t(), MapSet.t()) :: boolean()
   def should_dispatch?(
         %Issue{} = issue,
-        %State{running: running, claimed: claimed} = state,
+        %State{running: running, claimed: claimed, completed: completed} = state,
         active_states,
         terminal_states
       ) do
@@ -73,6 +73,7 @@ defmodule SymphonyElixir.Orchestrator.SlotPolicy do
       !DispatchGate.todo_blocked_by_non_terminal?(issue, terminal_states) and
       !MapSet.member?(claimed, issue.id) and
       !Map.has_key?(running, issue.id) and
+      !MapSet.member?(completed, issue.id) and
       available_slots(state) > 0 and
       state_slots_available?(issue, running) and
       WorkerSelector.slots_available?(state)

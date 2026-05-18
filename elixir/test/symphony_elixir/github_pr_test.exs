@@ -135,4 +135,42 @@ defmodule SymphonyElixir.GitHubPrTest do
       refute_receive {:checked, "https://github.com/org/repo/pull/2"}, 50
     end
   end
+
+  describe "parse_qa_blocked?/1" do
+    test "returns true when body contains '- Result: BLOCKED'" do
+      body = "## QA self-review\n\n- Result: BLOCKED\n\nsome more text"
+      assert GitHubPr.parse_qa_blocked?(body) == true
+    end
+
+    test "returns false when body contains '- Result: PASS'" do
+      body = "## QA self-review\n\n- Result: PASS\n\nsome more text"
+      assert GitHubPr.parse_qa_blocked?(body) == false
+    end
+
+    test "returns false for empty string" do
+      assert GitHubPr.parse_qa_blocked?("") == false
+    end
+
+    test "returns false when no Result line present" do
+      body = "## Summary\n\n- Some change\n\n## Test Plan\n\n- [x] Done"
+      assert GitHubPr.parse_qa_blocked?(body) == false
+    end
+  end
+
+  describe "qa_blocked?/1 with injected fn" do
+    setup do
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+      :ok
+    end
+
+    test "returns true when injected fn returns true" do
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+      assert GitHubPr.qa_blocked?(%{repos: []}) == true
+    end
+
+    test "returns false when injected fn returns false" do
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+      assert GitHubPr.qa_blocked?(%{repos: []}) == false
+    end
+  end
 end

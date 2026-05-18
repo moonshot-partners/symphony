@@ -175,6 +175,16 @@ defmodule SymphonyElixir.WorkflowTest do
                "Expected ticket prompt to retain Liquid variable #{variable}"
       end
     end
+
+    test "template contains PR follow-up conditional for existing-branch continuation" do
+      {:ok, %{prompt_template: template}} = Workflow.load()
+
+      assert String.contains?(template, "issue.has_pr_attachment"),
+             "Expected WORKFLOW prompt to guard PR follow-up section with issue.has_pr_attachment"
+
+      assert String.contains?(template, "gh pr checkout"),
+             "Expected WORKFLOW prompt follow-up section to instruct 'gh pr checkout' for same-branch continuation"
+    end
   end
 
   defp extract_status_map_section(prompt) do

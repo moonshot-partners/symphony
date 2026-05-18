@@ -135,6 +135,66 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-pr-sync-4"}, 2_000
   end
 
+  test "routes state to on_reject_state when QA is BLOCKED" do
+    issue_id = "issue-qa-blocked-1"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{id: issue_id, identifier: "WP-QA-1", state: "Scheduled", repos: []},
+        identifier: "WP-QA-1",
+        workpad_comment_id: "wp-comment-qa-blocked",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+  end
+
+  test "routes state to on_complete_state when QA is not BLOCKED" do
+    issue_id = "issue-qa-ok-1"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{id: issue_id, identifier: "WP-QA-2", state: "Scheduled", repos: []},
+        identifier: "WP-QA-2",
+        workpad_comment_id: "wp-comment-qa-ok",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+  end
+
   defmodule FakeUpload do
     @moduledoc false
     def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}

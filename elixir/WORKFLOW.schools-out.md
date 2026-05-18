@@ -134,3 +134,20 @@ Precedence, highest first: (1) repo `AGENTS.md`/`CLAUDE.md`, (2) this
 workflow, (3) the Linear ticket, (4) framework defaults. A ticket
 that conflicts with `AGENTS.md` is a ticket bug — note it in
 `understanding.md` under `root_cause` and follow the repo convention.
+
+{% if issue.has_pr_attachment %}
+## PR follow-up — open PR detected
+
+An open PR already exists for `{{ issue.identifier }}`. **Do not create a new branch or a second PR.**
+
+Find the existing PR and continue on its branch:
+
+```
+gh pr list --repo schoolsoutapp/fe-next-app --search "{{ issue.identifier }}" --json number,headRefName
+gh pr list --repo schoolsoutapp/schools-out   --search "{{ issue.identifier }}" --json number,headRefName
+gh pr checkout <NUMBER>
+gh pr view <NUMBER> --comments
+```
+
+Fix every **Critical Issue** from the automated review, then `git push` — the open PR updates automatically.
+{% endif %}
