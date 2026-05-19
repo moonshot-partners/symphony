@@ -31,8 +31,10 @@ repos:
       git fetch --depth=1 origin dev:refs/remotes/origin/dev
       git remote set-head origin dev
       if [ -f Gemfile ]; then
-        bundle config set --local path vendor/bundle
-        bundle install --no-color
+        docker run --rm -u root \
+          -v "$(pwd):/workspace" -w /workspace \
+          schoolsout-base:latest \
+          bash -c "bundle config set --local path vendor/bundle && bundle install --no-color"
       fi
   # Frontend Next.js repo — pre-cloned to avoid SODEV-827 class of bugs where
   # the agent burned turns cloning the wrong repo mid-run. Whitelist mirrored
