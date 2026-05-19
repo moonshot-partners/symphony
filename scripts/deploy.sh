@@ -65,7 +65,7 @@ sudo cp "$SYMPHONY_DIR/scripts/symphony-logrotate" /etc/logrotate.d/symphony
 sudo chmod 644 /etc/logrotate.d/symphony
 
 log "build escript"
-export PATH=/home/ubuntu/.local/share/mise/installs/erlang/28.5/bin:/home/ubuntu/.local/share/mise/installs/elixir/1.19.5-otp-28/bin:$PATH
+export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
 cd "$SYMPHONY_DIR/elixir"
 mix deps.get >/dev/null
 mix escript.build >/dev/null
