@@ -132,6 +132,172 @@ defmodule SymphonyElixir.Orchestrator.RetryAttemptsTest do
     end
   end
 
+  describe "circuit breaker — same-error halt at 3 consecutive" do
+    test "first failure: arms with consecutive_same_error_count=1" do
+      state = empty_state()
+
+      {:armed, updated} =
+        RetryAttempts.schedule(
+          state,
+          "issue-cb",
+          1,
+          %{identifier: "ISS-CB", error: "agent exited: 401"},
+          self()
+        )
+
+      assert %{consecutive_same_error_count: 1, error: "agent exited: 401"} =
+               Map.fetch!(updated.retry_attempts, "issue-cb")
+    end
+
+    test "second failure with same error: count=2, still armed" do
+      state =
+        empty_state(%{
+          retry_attempts: %{
+            "issue-cb" => %{
+              attempt: 1,
+              timer_ref: Process.send_after(self(), :stale, 30_000),
+              retry_token: make_ref(),
+              identifier: "ISS-CB",
+              error: "agent exited: 401",
+              consecutive_same_error_count: 1
+            }
+          }
+        })
+
+      {:armed, updated} =
+        RetryAttempts.schedule(
+          state,
+          "issue-cb",
+          2,
+          %{identifier: "ISS-CB", error: "agent exited: 401"},
+          self()
+        )
+
+      assert %{consecutive_same_error_count: 2, error: "agent exited: 401", attempt: 2, timer_ref: timer_ref} =
+               Map.fetch!(updated.retry_attempts, "issue-cb")
+
+      assert is_integer(Process.cancel_timer(timer_ref))
+    end
+
+    test "third failure with same error: halts, no timer armed, entry cleared" do
+      state =
+        empty_state(%{
+          retry_attempts: %{
+            "issue-cb" => %{
+              attempt: 2,
+              timer_ref: Process.send_after(self(), :stale, 30_000),
+              retry_token: make_ref(),
+              identifier: "ISS-CB",
+              error: "agent exited: 401",
+              consecutive_same_error_count: 2
+            }
+          }
+        })
+
+      {:halted, updated} =
+        RetryAttempts.schedule(
+          state,
+          "issue-cb",
+          3,
+          %{identifier: "ISS-CB", error: "agent exited: 401"},
+          self()
+        )
+
+      refute Map.has_key?(updated.retry_attempts, "issue-cb")
+      refute_receive {:retry_issue, "issue-cb", _token}, 200
+    end
+
+    test "different error resets count back to 1, stays armed" do
+      state =
+        empty_state(%{
+          retry_attempts: %{
+            "issue-cb" => %{
+              attempt: 2,
+              timer_ref: Process.send_after(self(), :stale, 30_000),
+              retry_token: make_ref(),
+              identifier: "ISS-CB",
+              error: "agent exited: 401",
+              consecutive_same_error_count: 2
+            }
+          }
+        })
+
+      {:armed, updated} =
+        RetryAttempts.schedule(
+          state,
+          "issue-cb",
+          3,
+          %{identifier: "ISS-CB", error: "agent exited: timeout"},
+          self()
+        )
+
+      assert %{consecutive_same_error_count: 1, error: "agent exited: timeout", timer_ref: timer_ref} =
+               Map.fetch!(updated.retry_attempts, "issue-cb")
+
+      assert is_integer(Process.cancel_timer(timer_ref))
+    end
+
+    test "nil error never trips circuit breaker even on repeated nil" do
+      state =
+        empty_state(%{
+          retry_attempts: %{
+            "issue-cb" => %{
+              attempt: 2,
+              timer_ref: Process.send_after(self(), :stale, 30_000),
+              retry_token: make_ref(),
+              identifier: "ISS-CB",
+              error: nil,
+              consecutive_same_error_count: 2
+            }
+          }
+        })
+
+      {:armed, updated} =
+        RetryAttempts.schedule(
+          state,
+          "issue-cb",
+          3,
+          %{identifier: "ISS-CB"},
+          self()
+        )
+
+      assert %{consecutive_same_error_count: 1, error: nil, timer_ref: timer_ref} =
+               Map.fetch!(updated.retry_attempts, "issue-cb")
+
+      assert is_integer(Process.cancel_timer(timer_ref))
+    end
+
+    test "circuit breaker halt fires before max_retries cap" do
+      max_retries = Config.settings!().agent.max_retries
+
+      state =
+        empty_state(%{
+          retry_attempts: %{
+            "issue-cb" => %{
+              attempt: 2,
+              timer_ref: Process.send_after(self(), :stale, 30_000),
+              retry_token: make_ref(),
+              identifier: "ISS-CB",
+              error: "agent exited: 401",
+              consecutive_same_error_count: 2
+            }
+          }
+        })
+
+      assert max_retries > 3,
+             "circuit breaker only fires before cap when max_retries > 3"
+
+      assert {:halted, _updated} =
+               RetryAttempts.schedule(
+                 state,
+                 "issue-cb",
+                 3,
+                 %{identifier: "ISS-CB", error: "agent exited: 401"},
+                 self()
+               )
+    end
+  end
+
   describe "pop/3" do
     test "returns {:ok, attempt, metadata, new_state} when retry_token matches and clears entry" do
       retry_token = make_ref()

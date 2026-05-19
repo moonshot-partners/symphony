@@ -27,6 +27,8 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
   alias SymphonyElixir.Config
   alias SymphonyElixir.Orchestrator.{RetryPlan, State}
 
+  @circuit_breaker_threshold 3
+
   @doc """
   Arm a retry timer for `issue_id`, replacing any previously-armed
   retry entry. Returns `{:armed, state}` with the new retry
@@ -44,15 +46,32 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
     previous_retry = Map.get(state.retry_attempts, issue_id, %{attempt: 0})
     next_attempt = if is_integer(attempt), do: attempt, else: previous_retry.attempt + 1
     max_retries = Config.settings!().agent.max_retries
+    same_error_count = next_same_error_count(previous_retry, metadata)
 
-    if next_attempt > max_retries do
-      {:halted, halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata)}
-    else
-      {:armed, arm_retry(state, issue_id, previous_retry, next_attempt, metadata, recipient)}
+    cond do
+      next_attempt > max_retries ->
+        {:halted, halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata, :cap)}
+
+      same_error_count >= @circuit_breaker_threshold ->
+        {:halted, halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata, :circuit_breaker)}
+
+      true ->
+        {:armed, arm_retry(state, issue_id, previous_retry, next_attempt, metadata, same_error_count, recipient)}
     end
   end
 
-  defp halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata) do
+  defp next_same_error_count(previous_retry, metadata) do
+    prev_error = Map.get(previous_retry, :error)
+    new_error = Map.get(metadata, :error)
+
+    if is_binary(prev_error) and is_binary(new_error) and prev_error == new_error do
+      Map.get(previous_retry, :consecutive_same_error_count, 1) + 1
+    else
+      1
+    end
+  end
+
+  defp halt_retry(state, issue_id, previous_retry, next_attempt, max_retries, metadata, reason) do
     old_timer = Map.get(previous_retry, :timer_ref)
     if is_reference(old_timer), do: Process.cancel_timer(old_timer)
 
@@ -60,12 +79,20 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
     error = RetryPlan.pick_error(previous_retry, metadata)
     error_suffix = if is_binary(error), do: " error=#{error}", else: ""
 
-    Logger.warning("Retry cap reached issue_id=#{issue_id} issue_identifier=#{identifier} attempt=#{next_attempt} cap=#{max_retries}#{error_suffix}; not arming further retries")
+    case reason do
+      :cap ->
+        Logger.warning("Retry cap reached issue_id=#{issue_id} issue_identifier=#{identifier} attempt=#{next_attempt} cap=#{max_retries}#{error_suffix}; not arming further retries")
+
+      :circuit_breaker ->
+        Logger.warning(
+          "Circuit breaker tripped issue_id=#{issue_id} issue_identifier=#{identifier} attempt=#{next_attempt} consecutive_same_error_count=#{@circuit_breaker_threshold}#{error_suffix}; not arming further retries"
+        )
+    end
 
     %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}
   end
 
-  defp arm_retry(state, issue_id, previous_retry, next_attempt, metadata, recipient) do
+  defp arm_retry(state, issue_id, previous_retry, next_attempt, metadata, same_error_count, recipient) do
     delay_ms = RetryPlan.delay_ms(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
@@ -96,7 +123,8 @@ defmodule SymphonyElixir.Orchestrator.RetryAttempts do
             identifier: identifier,
             error: error,
             worker_host: worker_host,
-            workspace_path: workspace_path
+            workspace_path: workspace_path,
+            consecutive_same_error_count: same_error_count
           })
     }
   end
