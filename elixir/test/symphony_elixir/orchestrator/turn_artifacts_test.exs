@@ -119,6 +119,29 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       assert body =~ "understanding.md"
     end
 
+    test "logs warning when Tracker.create_comment returns error" do
+      Application.put_env(:symphony_elixir, :memory_tracker_create_comment_result, {:error, :boom})
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_create_comment_result) end)
+
+      tmp = System.tmp_dir!()
+      session_id = "sess-err-#{System.unique_integer([:positive])}"
+      state_dir = Path.join([tmp, "ws-#{session_id}", "state", session_id])
+      File.mkdir_p!(state_dir)
+      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nbody.")
+
+      workspace_path = Path.join(tmp, "ws-#{session_id}")
+      e = entry(%{workspace_path: workspace_path, session_id: session_id})
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+          Process.sleep(100)
+        end)
+
+      assert log =~ "TurnArtifacts post failed"
+      assert log =~ "boom"
+    end
+
     test "skips empty understanding.md" do
       tmp = System.tmp_dir!()
       session_id = "sess-empty-#{System.unique_integer([:positive])}"

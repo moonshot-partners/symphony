@@ -40,17 +40,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
         opts = if is_binary(parent_id), do: [parent_id: parent_id], else: []
 
         Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-          case Tracker.create_comment(issue_id, body, opts) do
-            {:ok, comment_id} ->
-              Logger.info(
-                "TurnArtifacts posted understanding.md comment=#{comment_id} issue=#{identifier}"
-              )
-
-            {:error, reason} ->
-              Logger.warning(
-                "TurnArtifacts post failed issue=#{identifier} reason=#{inspect(reason)}"
-              )
-          end
+          publish_comment(issue_id, body, opts, identifier)
         end)
 
         :ok
@@ -59,9 +49,17 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
         Logger.debug("TurnArtifacts: understanding.md empty, skipping issue=#{identifier}")
 
       {:error, reason} ->
-        Logger.debug(
-          "TurnArtifacts: understanding.md not found path=#{path} reason=#{inspect(reason)}"
-        )
+        Logger.debug("TurnArtifacts: understanding.md not found path=#{path} reason=#{inspect(reason)}")
+    end
+  end
+
+  defp publish_comment(issue_id, body, opts, identifier) do
+    case Tracker.create_comment(issue_id, body, opts) do
+      {:ok, comment_id} ->
+        Logger.info("TurnArtifacts posted understanding.md comment=#{comment_id} issue=#{identifier}")
+
+      {:error, reason} ->
+        Logger.warning("TurnArtifacts post failed issue=#{identifier} reason=#{inspect(reason)}")
     end
   end
 end
