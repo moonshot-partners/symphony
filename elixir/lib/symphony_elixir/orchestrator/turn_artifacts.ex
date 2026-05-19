@@ -42,14 +42,10 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
         Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
           case Tracker.create_comment(issue_id, body, opts) do
             {:ok, comment_id} ->
-              Logger.info(
-                "TurnArtifacts posted understanding.md comment=#{comment_id} issue=#{identifier}"
-              )
+              Logger.info("TurnArtifacts posted understanding.md comment=#{comment_id} issue=#{identifier}")
 
             {:error, reason} ->
-              Logger.warning(
-                "TurnArtifacts post failed issue=#{identifier} reason=#{inspect(reason)}"
-              )
+              Logger.warning("TurnArtifacts post failed issue=#{identifier} reason=#{inspect(reason)}")
           end
         end)
 
@@ -59,9 +55,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
         Logger.debug("TurnArtifacts: understanding.md empty, skipping issue=#{identifier}")
 
       {:error, reason} ->
-        Logger.debug(
-          "TurnArtifacts: understanding.md not found path=#{path} reason=#{inspect(reason)}"
-        )
+        Logger.debug("TurnArtifacts: understanding.md not found path=#{path} reason=#{inspect(reason)}")
     end
   end
 end
