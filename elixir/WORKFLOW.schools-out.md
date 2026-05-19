@@ -98,6 +98,12 @@ You are working on Linear ticket `{{ issue.identifier }}`.
 {% if attempt %}
 Continuation attempt #{{ attempt }} — workspace already exists from prior
 turns. Resume; do not redo completed work.
+
+**Gate C still applies on continuation.** If your very first turn-end
+message in this session does not contain `## AC Extracted` (or
+`## BLOCKED: AC not testable`), post it before any other tool use.
+Do not assume a prior run already posted it — this is a new agent
+session and your first output must satisfy the contract.
 {% endif %}
 
 Identifier: {{ issue.identifier }}
