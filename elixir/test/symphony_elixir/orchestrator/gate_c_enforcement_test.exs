@@ -90,7 +90,13 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
         })
 
       assert {:halted, halted_state} =
-               GateCEnforcement.enforce({:violation, :missing_header}, state, "issue-gce-1", entry, terminate_fn: recording_terminate_fn(self()))
+               GateCEnforcement.enforce(
+                 {:violation, :missing_header},
+                 state,
+                 "issue-gce-1",
+                 entry,
+                 terminate_fn: recording_terminate_fn(self())
+               )
 
       assert_receive {:terminate_called, "issue-gce-1", false}, 500
 
@@ -119,7 +125,13 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       state = empty_state(%{running: %{"issue-gce-1" => entry}})
 
       assert {:halted, _} =
-               GateCEnforcement.enforce({:violation, :empty_message}, state, "issue-gce-1", entry, terminate_fn: recording_terminate_fn(self()))
+               GateCEnforcement.enforce(
+                 {:violation, :empty_message},
+                 state,
+                 "issue-gce-1",
+                 entry,
+                 terminate_fn: recording_terminate_fn(self())
+               )
 
       assert_receive {:memory_tracker_comment, "issue-gce-1", body}, 500
       assert body =~ "empty_message"
@@ -137,7 +149,13 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       state = empty_state(%{running: %{"issue-gce-1" => entry}})
 
       assert {:halted, halted_state} =
-               GateCEnforcement.enforce({:violation, :missing_header}, state, "issue-gce-1", entry, terminate_fn: recording_terminate_fn(self()))
+               GateCEnforcement.enforce(
+                 {:violation, :missing_header},
+                 state,
+                 "issue-gce-1",
+                 entry,
+                 terminate_fn: recording_terminate_fn(self())
+               )
 
       assert_receive {:terminate_called, "issue-gce-1", false}, 500
       assert_receive {:memory_tracker_comment, "issue-gce-1", _}, 500
@@ -158,7 +176,13 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       state = empty_state(%{running: %{"issue-gce-1" => entry}})
 
       assert {:halted, _} =
-               GateCEnforcement.enforce({:violation, :missing_header}, state, "issue-gce-1", entry, terminate_fn: recording_terminate_fn(self()))
+               GateCEnforcement.enforce(
+                 {:violation, :missing_header},
+                 state,
+                 "issue-gce-1",
+                 entry,
+                 terminate_fn: recording_terminate_fn(self())
+               )
 
       assert_receive {:memory_tracker_comment, "issue-gce-1", body}, 500
       assert body =~ "issue-gce-1"

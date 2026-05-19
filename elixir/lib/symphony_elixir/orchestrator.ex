@@ -267,7 +267,9 @@ defmodule SymphonyElixir.Orchestrator do
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
         {gate_c_result, updated_running_entry} = GateCTrigger.maybe_run(updated_running_entry, update)
 
-        case GateCEnforcement.enforce(gate_c_result, state, issue_id, updated_running_entry, terminate_fn: &terminate_running_issue/3) do
+        enforce_opts = [terminate_fn: &terminate_running_issue/3]
+
+        case GateCEnforcement.enforce(gate_c_result, state, issue_id, updated_running_entry, enforce_opts) do
           {:halted, state} ->
             state =
               state
