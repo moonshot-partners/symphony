@@ -23,9 +23,32 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          # OpenSSH ed25519 keys require a trailing newline — `printf '%s'`
+          # drops it and libcrypto rejects the key (`error in libcrypto`),
+          # silently falling back to password auth which then fails. `%s\n`
+          # guarantees the newline regardless of how the secret was stored.
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Verify SSH + remote toolchain (preflight)
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          # Fail-fast preflight that surfaces stale SSH_HOST, wrong
+          # SSH_USER, missing mix, or absent /opt/symphony BEFORE the
+          # 10-minute drain handshake in scripts/deploy.sh runs.
+          # Prevents the silent-drift class where a host migration
+          # ships a deploy.sh change but the secrets still point at
+          # the retired host (seen 2026-05-19 EC2→Hetzner gap).
+          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
+            'set -e
+             echo "[preflight] host=$(hostname) user=$(whoami)"
+             export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+             mix --version
+             test -d /opt/symphony/elixir'
 
       - name: Run deploy on VPS
         env:
