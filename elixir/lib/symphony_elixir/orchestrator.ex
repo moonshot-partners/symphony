@@ -32,6 +32,7 @@ defmodule SymphonyElixir.Orchestrator do
     StateTransition,
     StatusFile,
     TickScheduler,
+    TurnArtifacts,
     WorkerSelector,
     WorkpadPrSync,
     WorkpadStore,
@@ -265,6 +266,7 @@ defmodule SymphonyElixir.Orchestrator do
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
         {gate_c_result, updated_running_entry} = GateCTrigger.maybe_run(updated_running_entry, update)
         handle_gate_c_result(gate_c_result, issue_id, updated_running_entry)
+        TurnArtifacts.maybe_post(updated_running_entry, update, issue_id)
 
         state =
           state
