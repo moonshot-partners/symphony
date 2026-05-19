@@ -53,7 +53,7 @@ hooks:
   # Two clones + npm ci + optional bundle install — give it room.
   timeout_ms: 600000
 agent:
-  max_concurrent_agents: 1
+  max_concurrent_agents: 4
   max_turns: 25
 agent_runtime:
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
