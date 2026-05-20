@@ -25,6 +25,45 @@ defmodule SymphonyElixir.Orchestrator.GateCTriggerTest do
       assert updated.gate_c_checked == true
     end
 
+    test "returns {:ok, updated_entry} when continuation turn leads with '## AC Evidence'" do
+      entry = %{turn_count: 1, last_agent_text: "## AC Evidence\n\n- **AC 1** — done"}
+
+      assert {:ok, updated} = GateCTrigger.maybe_run(entry, %{event: :turn_completed})
+      assert updated.gate_c_checked == true
+    end
+
+    test "short-circuits to :ok when ArtifactPin already pinned 'AC Extracted', even if last_agent_text is a header-less final summary" do
+      # The SODEV-891 class: agent posted `## AC Extracted` mid-turn (pinned
+      # durably), then `last_agent_text` rolled to the wrap-up message which
+      # carries no Gate C header. Gate C must trust the pin, not the slice.
+      entry = %{
+        turn_count: 1,
+        pinned_artifacts: MapSet.new(["AC Extracted"]),
+        last_agent_text: "## Summary\n\nOpened PR #568. All work complete."
+      }
+
+      assert {:ok, updated} = GateCTrigger.maybe_run(entry, %{event: :turn_completed})
+      assert updated.gate_c_checked == true
+    end
+
+    test "does not short-circuit when pinned_artifacts lacks 'AC Extracted'" do
+      # A different header pinned (e.g. AC Evidence) must not satisfy Gate C;
+      # only proof of AC extraction does.
+      entry = %{
+        turn_count: 1,
+        pinned_artifacts: MapSet.new(["AC Evidence"]),
+        last_agent_text: "no header at all",
+        identifier: "SODEV-11"
+      }
+
+      capture_log(fn ->
+        assert {{:violation, :missing_header}, updated} =
+                 GateCTrigger.maybe_run(entry, %{event: :turn_completed})
+
+        assert updated.gate_c_checked == true
+      end)
+    end
+
     test "returns {{:violation, reason}, updated_entry} and logs when header missing" do
       entry = %{turn_count: 1, last_agent_text: "no header at all", identifier: "SODEV-9"}
 

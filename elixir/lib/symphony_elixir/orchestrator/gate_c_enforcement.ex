@@ -44,7 +44,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcement do
       body = """
       ## Gate C violation — issue parked
 
-      The agent's first turn did not include the required `## AC Extracted` (or `## BLOCKED: AC not testable`) header.
+      The agent's first turn did not include a required header (`## AC Extracted`, `## AC Evidence`, or `## BLOCKED: AC not testable`).
 
       Reason: #{reason}
       Issue: #{identifier}

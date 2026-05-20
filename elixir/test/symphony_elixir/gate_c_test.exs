@@ -31,6 +31,17 @@ defmodule SymphonyElixir.GateCTest do
       assert :ok = GateC.validate_first_turn(text)
     end
 
+    test "accepts message starting with '## AC Evidence' (continuation final turn)" do
+      text = """
+      ## AC Evidence
+
+      - **AC 1** — chip visible in filter bar: `kid-filter-dropdown.tsx:73`
+      - **AC 2** — search debounced 300ms: `search-input.tsx:41`
+      """
+
+      assert :ok = GateC.validate_first_turn(text)
+    end
+
     test "rejects 'AC Trace' freelance header" do
       text = """
       ## AC Trace

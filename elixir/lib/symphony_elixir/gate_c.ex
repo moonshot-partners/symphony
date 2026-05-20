@@ -7,11 +7,22 @@ defmodule SymphonyElixir.GateC do
   be exercised in isolation. The orchestrator calls `validate_first_turn/1`
   on `:turn_completed` for the first turn and emits a warning when the
   header is missing.
+
+  Valid headers: `## AC Extracted`, `## AC Evidence`,
+  `## BLOCKED: AC not testable`. `AC Evidence` is allowed so a
+  continuation turn that resumes with the final-turn evidence artifact is
+  not falsely halted (see `@valid_header_pattern`).
   """
 
   require Logger
 
-  @valid_header_pattern ~r/^##\s+(?:AC Extracted|BLOCKED: AC not testable)\b/m
+  # `AC Evidence` is accepted because a continuation turn (a fresh agent
+  # session spawned after the issue stays active) re-runs Gate C from
+  # turn 1, and the agent correctly leads that turn with the final-turn
+  # `## AC Evidence` artifact — the AC was already extracted and pinned in
+  # the original turn. Treating it as valid stops a false hard-halt
+  # without weakening detection of an agent that posts no header at all.
+  @valid_header_pattern ~r/^##\s+(?:AC Extracted|AC Evidence|BLOCKED: AC not testable)\b/m
 
   @typedoc """
   Either `:ok` when the first turn message is conformant, or
