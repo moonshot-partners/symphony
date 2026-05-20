@@ -38,7 +38,7 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
 
       out = WeeklyReport.render(runs, @now)
 
-      assert out =~ "Runs: 1"
+      assert out =~ "- Runs: 1\n"
       assert out =~ "SODEV-NEW"
       refute out =~ "SODEV-OLD"
     end
@@ -47,7 +47,7 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
       runs = [run(%{"recorded_at" => "not-a-date"}), run(%{"ticket" => "SODEV-2"})]
 
       out = WeeklyReport.render(runs, @now)
-      assert out =~ "Runs: 1"
+      assert out =~ "- Runs: 1\n"
     end
   end
 
@@ -60,8 +60,8 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
       ]
 
       out = WeeklyReport.render(runs, @now)
-      assert out =~ "Runs: 3"
-      assert out =~ "Tickets worked: 2"
+      assert out =~ "- Runs: 3\n"
+      assert out =~ "- Tickets worked: 2\n"
     end
 
     test "rework rate is the share of tickets that needed more than one pass" do
@@ -75,7 +75,7 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
 
       out = WeeklyReport.render(runs, @now)
       assert out =~ "Rework rate: 33%"
-      assert out =~ "1 of 3 tickets"
+      assert out =~ "(1 of 3 tickets"
     end
 
     test "estimates total and per-ticket agent cost at Sonnet 4.6 pricing" do
@@ -113,7 +113,7 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
 
       out = WeeklyReport.render(runs, @now)
       assert out =~ "Average: 10 min"
-      assert out =~ "1 run excluded"
+      assert out =~ "- 1 run excluded"
     end
 
     test "the excluded-run count is pluralized when more than one is excluded" do
@@ -124,7 +124,7 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
       ]
 
       out = WeeklyReport.render(runs, @now)
-      assert out =~ "2 runs excluded"
+      assert out =~ "- 2 runs excluded"
     end
 
     test "a non-integer token field counts as zero rather than crashing the report" do
@@ -142,8 +142,8 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
       ]
 
       out = WeeklyReport.render(runs, @now)
-      assert out =~ "pr_open: 2"
-      assert out =~ "no_pr: 1"
+      assert out =~ "- pr_open: 2\n"
+      assert out =~ "- no_pr: 1\n"
     end
 
     test "per-ticket table carries one row per ticket with attempt count" do

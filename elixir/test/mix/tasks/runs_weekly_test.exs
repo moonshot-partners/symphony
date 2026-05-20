@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Runs.WeeklyTest do
       assert output =~ "Wrote OUT.md (1 runs from runs.jsonl)"
       body = File.read!("OUT.md")
       assert body =~ "# Symphony weekly report"
-      assert body =~ "Runs: 1"
+      assert body =~ "- Runs: 1\n"
       assert body =~ "$18.00"
     end)
   end
