@@ -1,8 +1,12 @@
 defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
   @moduledoc """
-  After turn 1 completes, reads `state/<session_id>/understanding.md` from
-  the agent workspace and posts its contents as a separate Linear comment
+  After turn 1 completes, discovers `state/*/understanding.md` under the agent
+  workspace via glob and posts its contents as a separate Linear comment
   (threaded under the main workpad comment when available).
+
+  The agent names the state directory after the ticket id, not Symphony's
+  session_id, so the path is discovered by glob and the most-recently-modified
+  match wins when several exist.
 
   The artifact comment is a fixed, permanent record of the agent's initial
   analysis — independent from the rolling workpad that gets overwritten on
@@ -19,11 +23,10 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
   @spec maybe_post(map(), map(), String.t()) :: :ok
   def maybe_post(running_entry, %{event: :turn_completed}, issue_id) do
     with 1 <- Map.get(running_entry, :turn_count),
-         session_id when is_binary(session_id) <- Map.get(running_entry, :session_id),
          workspace_path when is_binary(workspace_path) <- Map.get(running_entry, :workspace_path) do
       parent_id = Map.get(running_entry, :workpad_comment_id)
       identifier = Map.get(running_entry, :identifier, issue_id)
-      post_understanding_md(workspace_path, session_id, issue_id, identifier, parent_id)
+      post_understanding_md(workspace_path, issue_id, identifier, parent_id)
     end
 
     :ok
@@ -31,9 +34,30 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
 
   def maybe_post(_running_entry, _update, _issue_id), do: :ok
 
-  defp post_understanding_md(workspace_path, session_id, issue_id, identifier, parent_id) do
-    path = Path.join([workspace_path, "state", session_id, "understanding.md"])
+  defp post_understanding_md(workspace_path, issue_id, identifier, parent_id) do
+    case discover_understanding_md(workspace_path) do
+      nil ->
+        Logger.debug("TurnArtifacts: understanding.md not found under #{workspace_path}/state/*")
 
+      path ->
+        publish_understanding_md(path, issue_id, identifier, parent_id)
+    end
+  end
+
+  defp discover_understanding_md(workspace_path) do
+    Path.join([workspace_path, "state", "*", "understanding.md"])
+    |> Path.wildcard()
+    |> Enum.max_by(&file_mtime/1, fn -> nil end)
+  end
+
+  defp file_mtime(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{mtime: mtime}} -> mtime
+      {:error, _} -> 0
+    end
+  end
+
+  defp publish_understanding_md(path, issue_id, identifier, parent_id) do
     case File.read(path) do
       {:ok, content} when is_binary(content) and content != "" ->
         body = "## understanding.md — #{identifier}\n\n#{content}"
@@ -49,7 +73,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
         Logger.debug("TurnArtifacts: understanding.md empty, skipping issue=#{identifier}")
 
       {:error, reason} ->
-        Logger.debug("TurnArtifacts: understanding.md not found path=#{path} reason=#{inspect(reason)}")
+        Logger.debug("TurnArtifacts: understanding.md unreadable path=#{path} reason=#{inspect(reason)}")
     end
   end
 
