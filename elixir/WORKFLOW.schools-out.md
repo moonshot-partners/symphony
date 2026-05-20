@@ -95,15 +95,26 @@ process — read them on turn 1 before any code or branch.
 
 You are working on Linear ticket `{{ issue.identifier }}`.
 
+## Hard requirement — first turn-end message
+
+Your very first turn-end message in this session **must** start with one
+of these two headers, before any other tool use or code:
+
+- `## AC Extracted` — followed by a numbered list of binary, testable
+  acceptance criteria derived from the ticket description (see the
+  `AGENTS.md` of the repo you are touching for the exact format).
+- `## BLOCKED: AC not testable` — followed by the reason, when the
+  description does not contain a testable contract.
+
+This applies on every dispatch, including continuation attempts. Do not
+assume a prior run already posted it — each agent session is fresh and
+must satisfy this contract on its own first turn. Gate C halts the run
+if neither header appears, with no further retries.
+
 {% if attempt %}
 Continuation attempt #{{ attempt }} — workspace already exists from prior
-turns. Resume; do not redo completed work.
-
-**Gate C still applies on continuation.** If your very first turn-end
-message in this session does not contain `## AC Extracted` (or
-`## BLOCKED: AC not testable`), post it before any other tool use.
-Do not assume a prior run already posted it — this is a new agent
-session and your first output must satisfy the contract.
+turns. Resume; do not redo completed work. The hard requirement above
+still applies; post the header before resuming.
 {% endif %}
 
 Identifier: {{ issue.identifier }}
