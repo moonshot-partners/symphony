@@ -26,8 +26,11 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
 
   @window_days 7
 
+  @spec render([map()]) :: String.t()
+  def render(runs) when is_list(runs), do: render(runs, DateTime.utc_now())
+
   @spec render([map()], DateTime.t()) :: String.t()
-  def render(runs, now \\ DateTime.utc_now()) when is_list(runs) do
+  def render(runs, now) when is_list(runs) do
     window_start = DateTime.add(now, -@window_days * 24 * 3600, :second)
 
     in_window =
@@ -243,10 +246,7 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
 
   defp parse_dt(_), do: nil
 
-  defp percent(_count, 0), do: 0
   defp percent(count, total), do: round(count / total * 100)
-
-  defp median([]), do: 0
 
   defp median(values) do
     sorted = Enum.sort(values)
@@ -260,7 +260,6 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
     end
   end
 
-  defp usd(amount) when is_float(amount), do: :erlang.float_to_binary(amount, decimals: 2)
   defp usd(amount), do: :erlang.float_to_binary(amount * 1.0, decimals: 2)
 
   defp date(%DateTime{} = dt), do: dt |> DateTime.to_date() |> Date.to_iso8601()

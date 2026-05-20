@@ -116,6 +116,24 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
       assert out =~ "1 run excluded"
     end
 
+    test "the excluded-run count is pluralized when more than one is excluded" do
+      runs = [
+        run(%{"started_at" => nil}),
+        run(%{"started_at" => nil}),
+        run(%{"started_at" => "2026-05-20T17:00:00Z", "recorded_at" => "2026-05-20T17:10:00Z"})
+      ]
+
+      out = WeeklyReport.render(runs, @now)
+      assert out =~ "2 runs excluded"
+    end
+
+    test "a non-integer token field counts as zero rather than crashing the report" do
+      runs = [run(%{"tokens_in" => "bogus", "tokens_out" => nil})]
+
+      out = WeeklyReport.render(runs, @now)
+      assert out =~ "Estimated agent cost: $0.00"
+    end
+
     test "summarizes run outcomes" do
       runs = [
         run(%{"outcome" => "pr_open"}),
