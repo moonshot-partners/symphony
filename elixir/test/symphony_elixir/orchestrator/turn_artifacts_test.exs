@@ -51,14 +51,6 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
-    test "no-op when session_id is missing" do
-      e = entry(%{workspace_path: "/tmp/ws", session_id: nil})
-
-      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      refute_receive {:memory_tracker_comment, _, _}, 200
-    end
-
     test "no-op when workspace_path is missing" do
       e = entry(%{workspace_path: nil})
 
@@ -155,6 +147,89 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
 
       refute_receive {:memory_tracker_comment, _, _}, 500
+    end
+
+    test "posts when state dir name differs from running_entry session_id (glob discovery)" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-glob-#{uniq}")
+      state_dir = Path.join([workspace_path, "state", "sodev-840"])
+      File.mkdir_p!(state_dir)
+      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nAgent-written path.")
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e =
+        entry(%{
+          workspace_path: workspace_path,
+          session_id: "shim-dc9fd3b56806-turn-79756d1a87a3"
+        })
+
+      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+
+      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
+      assert body =~ "Agent-written path."
+    end
+
+    test "posts when session_id is missing — session_id is no longer a guard" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-nosid-#{uniq}")
+      state_dir = Path.join([workspace_path, "state", "sodev-537"])
+      File.mkdir_p!(state_dir)
+      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nNo session id.")
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e = entry(%{workspace_path: workspace_path, session_id: nil})
+
+      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+
+      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
+      assert body =~ "No session id."
+    end
+
+    test "logs debug and skips when the discovered understanding.md is unreadable" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-broken-#{uniq}")
+      state_dir = Path.join([workspace_path, "state", "broken"])
+      File.mkdir_p!(state_dir)
+      File.ln_s!(Path.join(workspace_path, "missing-target"), Path.join(state_dir, "understanding.md"))
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
+
+      log =
+        capture_log([level: :debug], fn ->
+          assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+          Process.sleep(50)
+        end)
+
+      assert log =~ "understanding.md unreadable"
+      refute_receive {:memory_tracker_comment, _, _}, 200
+    end
+
+    test "posts the most-recently-modified understanding.md when multiple state dirs exist" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-multi-#{uniq}")
+      old_dir = Path.join([workspace_path, "state", "old-session"])
+      new_dir = Path.join([workspace_path, "state", "new-session"])
+      File.mkdir_p!(old_dir)
+      File.mkdir_p!(new_dir)
+      old_md = Path.join(old_dir, "understanding.md")
+      new_md = Path.join(new_dir, "understanding.md")
+      File.write!(old_md, "# Analysis\n\nStale turn content.")
+      File.write!(new_md, "# Analysis\n\nFreshest turn content.")
+      File.touch!(old_md, {{2020, 1, 1}, {0, 0, 0}})
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
+
+      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+
+      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
+      assert body =~ "Freshest turn content."
+      refute body =~ "Stale turn content."
     end
   end
 end
