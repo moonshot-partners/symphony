@@ -99,6 +99,21 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHookTest do
       assert run.pr_url == nil
       assert run.outcome == "no_pr"
     end
+
+    test "serializes started_at DateTime to an ISO8601 string" do
+      started = ~U[2026-05-20 14:30:00.000000Z]
+      running_entry = %{identifier: "SODEV-88", started_at: started}
+
+      run = RunLedgerHook.build_run_map(running_entry, "lin-88")
+
+      assert run.started_at == DateTime.to_iso8601(started)
+    end
+
+    test "started_at is nil when the running entry has no start timestamp" do
+      run = RunLedgerHook.build_run_map(%{identifier: "SODEV-89"}, "lin-89")
+
+      assert run.started_at == nil
+    end
   end
 
   describe "record/2 with flag disabled" do

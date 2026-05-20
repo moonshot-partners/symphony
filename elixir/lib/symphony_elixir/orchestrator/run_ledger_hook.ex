@@ -43,9 +43,17 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHook do
       turns: token_value(running_entry, :turn_count),
       retries: token_value(running_entry, :retry_attempt),
       pr_url: pr_url,
+      started_at: started_at_iso(running_entry),
       session_id: Map.get(running_entry, :session_id),
       worker_host: Map.get(running_entry, :worker_host)
     }
+  end
+
+  defp started_at_iso(running_entry) do
+    case Map.get(running_entry, :started_at) do
+      %DateTime{} = dt -> DateTime.to_iso8601(dt)
+      _ -> nil
+    end
   end
 
   defp do_record(running_entry, issue_id, opts) do
