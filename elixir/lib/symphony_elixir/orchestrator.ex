@@ -36,6 +36,7 @@ defmodule SymphonyElixir.Orchestrator do
     TickScheduler,
     TurnArtifacts,
     WorkerSelector,
+    WorkpadPersister,
     WorkpadPrSync,
     WorkpadStore,
     WorkspaceCleanup
@@ -94,23 +95,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp persist_workpads(%{workpads: workpads} = state) do
-    case WorkpadStore.save(workpads_path(), workpads) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        # Disk persistence failed (e.g. permission denied on
-        # workpads.json). Keep the in-memory map so the GenServer survives
-        # — the alternative (raise) crashes the Orchestrator, loses
-        # state.running, and the supervisor restart re-dispatches every
-        # ticket in Linear "In Development". Logged so the operator can
-        # repair the file ownership/path.
-        Logger.warning(
-          "WorkpadStore.save failed (reason=#{inspect(reason)}); " <>
-            "continuing with in-memory workpads only"
-        )
-    end
-
+    # Hand the map to WorkpadPersister for an ordered, off-process write.
+    # A synchronous File.write here would block the Orchestrator's message
+    # loop on disk I/O; a failed write must never crash this process and
+    # lose state.running. WorkpadPersister owns both concerns.
+    WorkpadPersister.save_async(workpads_path(), workpads)
     state
   end
 
@@ -201,15 +190,15 @@ defmodule SymphonyElixir.Orchestrator do
             :normal ->
               Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
 
-              running_entry = ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
-              gate_d_result = GateDTrigger.maybe_run(running_entry)
-              handle_gate_d_result(gate_d_result, issue_id, running_entry)
+              pinned_entry = ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
+              gate_d_result = GateDTrigger.maybe_run(pinned_entry)
+              handle_gate_d_result(gate_d_result, issue_id, pinned_entry)
 
               state
               |> complete_issue(issue_id)
               |> RetryDispatch.maybe_schedule_continuation_retry(
                 issue_id,
-                running_entry,
+                pinned_entry,
                 retry_dispatch_opts()
               )
 
