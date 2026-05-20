@@ -27,6 +27,7 @@ defmodule SymphonyElixir.Application do
     children = [
       {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
       SymphonyElixir.WorkflowStore,
+      SymphonyElixir.Orchestrator.WorkpadPersister,
       SymphonyElixir.Orchestrator
     ]
 

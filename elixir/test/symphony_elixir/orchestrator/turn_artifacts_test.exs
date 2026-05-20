@@ -187,6 +187,39 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       assert body =~ "No session id."
     end
 
+    test "posts when understanding.md is nested under a repo subdir" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-nested-#{uniq}")
+      state_dir = Path.join([workspace_path, "fe-next-app", "state", "sodev-891"])
+      File.mkdir_p!(state_dir)
+      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nNested under repo subdir.")
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
+
+      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+
+      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
+      assert body =~ "Nested under repo subdir."
+    end
+
+    test "ignores understanding.md that is not under a state/ dir" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-nostate-#{uniq}")
+      docs_dir = Path.join([workspace_path, "fe-next-app", "docs"])
+      File.mkdir_p!(docs_dir)
+      File.write!(Path.join(docs_dir, "understanding.md"), "# Repo doc\n\nNot an agent artifact.")
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
+
+      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+
+      refute_receive {:memory_tracker_comment, _, _}, 500
+    end
+
     test "logs debug and skips when the discovered understanding.md is unreadable" do
       tmp = System.tmp_dir!()
       uniq = System.unique_integer([:positive])
