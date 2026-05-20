@@ -187,6 +187,27 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       assert body =~ "No session id."
     end
 
+    test "logs debug and skips when the discovered understanding.md is unreadable" do
+      tmp = System.tmp_dir!()
+      uniq = System.unique_integer([:positive])
+      workspace_path = Path.join(tmp, "ws-broken-#{uniq}")
+      state_dir = Path.join([workspace_path, "state", "broken"])
+      File.mkdir_p!(state_dir)
+      File.ln_s!(Path.join(workspace_path, "missing-target"), Path.join(state_dir, "understanding.md"))
+      on_exit(fn -> File.rm_rf!(workspace_path) end)
+
+      e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
+
+      log =
+        capture_log([level: :debug], fn ->
+          assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+          Process.sleep(50)
+        end)
+
+      assert log =~ "understanding.md unreadable"
+      refute_receive {:memory_tracker_comment, _, _}, 200
+    end
+
     test "posts the most-recently-modified understanding.md when multiple state dirs exist" do
       tmp = System.tmp_dir!()
       uniq = System.unique_integer([:positive])
