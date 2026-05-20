@@ -1,12 +1,13 @@
 defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
   @moduledoc """
-  After turn 1 completes, discovers `state/*/understanding.md` under the agent
-  workspace via glob and posts its contents as a separate Linear comment
-  (threaded under the main workpad comment when available).
+  After turn 1 completes, discovers `state/*/understanding.md` at any depth
+  under the agent workspace via glob and posts its contents as a separate
+  Linear comment (threaded under the main workpad comment when available).
 
   The agent names the state directory after the ticket id, not Symphony's
-  session_id, so the path is discovered by glob and the most-recently-modified
-  match wins when several exist.
+  session_id, and writes it either at the workspace root or under a repo
+  subdir, so the path is discovered by a recursive glob and the
+  most-recently-modified match wins when several exist.
 
   The artifact comment is a fixed, permanent record of the agent's initial
   analysis — independent from the rolling workpad that gets overwritten on
@@ -37,7 +38,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
   defp post_understanding_md(workspace_path, issue_id, identifier, parent_id) do
     case discover_understanding_md(workspace_path) do
       nil ->
-        Logger.debug("TurnArtifacts: understanding.md not found under #{workspace_path}/state/*")
+        Logger.debug("TurnArtifacts: understanding.md not found under #{workspace_path}/**/state/*")
 
       path ->
         publish_understanding_md(path, issue_id, identifier, parent_id)
@@ -45,7 +46,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
   end
 
   defp discover_understanding_md(workspace_path) do
-    Path.join([workspace_path, "state", "*", "understanding.md"])
+    Path.join([workspace_path, "**", "state", "*", "understanding.md"])
     |> Path.wildcard()
     |> Enum.max_by(&file_mtime/1, fn -> nil end)
   end
