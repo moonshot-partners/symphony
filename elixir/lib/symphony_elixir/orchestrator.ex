@@ -12,6 +12,7 @@ defmodule SymphonyElixir.Orchestrator do
   alias SymphonyElixir.Orchestrator.{
     AgentTotals,
     AgentUpdate,
+    ArtifactPin,
     Dispatch,
     DispatchGate,
     GateCEnforcement,
@@ -202,6 +203,7 @@ defmodule SymphonyElixir.Orchestrator do
 
               gate_d_result = GateDTrigger.maybe_run(running_entry)
               handle_gate_d_result(gate_d_result, issue_id, running_entry)
+              ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
 
               state
               |> complete_issue(issue_id)
@@ -281,6 +283,7 @@ defmodule SymphonyElixir.Orchestrator do
 
           {:continue, state} ->
             TurnArtifacts.maybe_post(updated_running_entry, update, issue_id)
+            ArtifactPin.pin(updated_running_entry, issue_id, "AC Extracted")
 
             state =
               state
