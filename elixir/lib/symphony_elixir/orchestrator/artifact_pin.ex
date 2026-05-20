@@ -11,24 +11,47 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPin do
   Sourced from the turn text Symphony already holds — no dependency on the
   agent writing a file to a path Symphony has to guess.
 
-  Pure side-effect: fires an async task and returns `:ok`. No-op when the
-  header is absent, so callers can invoke it unconditionally.
+  Idempotent per run: each header is pinned at most once. `pin/3` returns
+  the running entry with the pinned header recorded under
+  `:pinned_artifacts`; the caller must store that entry back into state so
+  the next turn sees the marker. A header already in `:pinned_artifacts`,
+  or absent from the turn text, is a no-op — callers can invoke it
+  unconditionally on every turn.
   """
 
   require Logger
   alias SymphonyElixir.Tracker
 
-  @spec pin(map(), String.t(), String.t()) :: :ok
+  @spec pin(map(), String.t(), String.t()) :: map()
   def pin(running_entry, issue_id, header) do
-    case extract_section(Map.get(running_entry, :last_agent_text), header) do
-      nil ->
-        Logger.debug("ArtifactPin: '#{header}' section not found issue=#{issue_id}")
+    if already_pinned?(running_entry, header) do
+      running_entry
+    else
+      case extract_section(Map.get(running_entry, :last_agent_text), header) do
+        nil ->
+          Logger.debug("ArtifactPin: '#{header}' section not found issue=#{issue_id}")
+          running_entry
 
-      section ->
-        publish(section, header, running_entry, issue_id)
+        section ->
+          publish(section, header, running_entry, issue_id)
+          mark_pinned(running_entry, header)
+      end
     end
+  end
 
-    :ok
+  defp already_pinned?(running_entry, header) do
+    running_entry |> pinned_set() |> MapSet.member?(header)
+  end
+
+  defp pinned_set(running_entry) do
+    case Map.get(running_entry, :pinned_artifacts) do
+      %MapSet{} = set -> set
+      _ -> MapSet.new()
+    end
+  end
+
+  defp mark_pinned(running_entry, header) do
+    Map.put(running_entry, :pinned_artifacts, MapSet.put(pinned_set(running_entry), header))
   end
 
   defp extract_section(text, _header) when not is_binary(text), do: nil
