@@ -67,8 +67,16 @@ sudo chmod 644 /etc/logrotate.d/symphony
 log "build escript"
 export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
 cd "$SYMPHONY_DIR/elixir"
-mix deps.get >/dev/null
-mix escript.build >/dev/null
+# `</dev/null` is load-bearing: the deploy workflow runs this script via
+# `ssh 'bash -s' < scripts/deploy.sh`, so the script itself is on stdin.
+# `mix` (the BEAM it spawns) reads stdin and would consume the rest of the
+# piped script — every line below, including `systemctl restart symphony`,
+# is then silently dropped and bash exits 0 at the premature EOF. Feeding
+# mix an empty stdin keeps the remainder of the script intact for bash.
+# Verified live on the VPS. Any new stdin-reading command added below this
+# point needs the same redirect.
+mix deps.get </dev/null >/dev/null
+mix escript.build </dev/null >/dev/null
 
 # Rebuild schoolsout-base Docker image when its source changed. The shim
 # image bakes /opt/qa from docker/schoolsout-base/qa, so a stale image
