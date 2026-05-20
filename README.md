@@ -37,6 +37,10 @@ help with the setup:
 - Deploying to a Linux VPS? See [elixir/DEPLOYMENT.md](elixir/DEPLOYMENT.md) for a
   step-by-step runbook (toolchain, env vars, WORKFLOW.md customization, systemd unit).
 
+- Managing the Linear board? See [TICKET-PLAYBOOK.md](TICKET-PLAYBOOK.md)
+  for how to dispatch a ticket, send one back for another pass, and tell whether
+  a ticket is ready for the agent.
+
 ---
 
 ## License
