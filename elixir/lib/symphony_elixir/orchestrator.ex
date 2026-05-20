@@ -283,7 +283,7 @@ defmodule SymphonyElixir.Orchestrator do
 
           {:continue, state} ->
             TurnArtifacts.maybe_post(updated_running_entry, update, issue_id)
-            ArtifactPin.pin(updated_running_entry, issue_id, "AC Extracted")
+            updated_running_entry = ArtifactPin.pin(updated_running_entry, issue_id, "AC Extracted")
 
             state =
               state
