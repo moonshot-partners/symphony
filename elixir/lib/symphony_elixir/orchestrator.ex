@@ -201,9 +201,9 @@ defmodule SymphonyElixir.Orchestrator do
             :normal ->
               Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
 
+              running_entry = ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
               gate_d_result = GateDTrigger.maybe_run(running_entry)
               handle_gate_d_result(gate_d_result, issue_id, running_entry)
-              ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
 
               state
               |> complete_issue(issue_id)
@@ -283,7 +283,11 @@ defmodule SymphonyElixir.Orchestrator do
 
           {:continue, state} ->
             TurnArtifacts.maybe_post(updated_running_entry, update, issue_id)
-            updated_running_entry = ArtifactPin.pin(updated_running_entry, issue_id, "AC Extracted")
+
+            updated_running_entry =
+              updated_running_entry
+              |> ArtifactPin.pin(issue_id, "AC Extracted")
+              |> ArtifactPin.pin(issue_id, "AC Evidence")
 
             state =
               state
