@@ -31,7 +31,14 @@ repos:
       git fetch --depth=1 origin dev:refs/remotes/origin/dev
       git remote set-head origin dev
       if [ -f Gemfile ]; then
-        docker run --rm -u root \
+        # No -u override: the image's default USER is `ubuntu` (UID 1000),
+        # matching the host symphony user. `-u root` made `bundle install`
+        # write `.bundle/` and `vendor/bundle/` as root into the bind-mounted
+        # workspace; the next dispatch then failed `File.rm_rf!` on the
+        # zombie-reset path with :eexist (symphony runs as ubuntu, cannot
+        # remove root-owned files). bundle install is fully workspace-local
+        # (--path vendor/bundle), so it never needed root.
+        docker run --rm \
           -v "$(pwd):/workspace" -w /workspace \
           schoolsout-base:latest \
           bash -c "bundle config set --local path vendor/bundle && bundle install --no-color"
