@@ -31,13 +31,12 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
     window_start = DateTime.add(now, -@window_days * 24 * 3600, :second)
 
     in_window =
-      runs
-      |> Enum.filter(&is_map/1)
-      |> Enum.filter(fn run ->
-        case parse_dt(Map.get(run, "recorded_at")) do
-          %DateTime{} = dt -> DateTime.compare(dt, window_start) != :lt
-          nil -> false
-        end
+      Enum.filter(runs, fn run ->
+        is_map(run) &&
+          case parse_dt(Map.get(run, "recorded_at")) do
+            %DateTime{} = dt -> DateTime.compare(dt, window_start) != :lt
+            nil -> false
+          end
       end)
 
     if in_window == [] do
