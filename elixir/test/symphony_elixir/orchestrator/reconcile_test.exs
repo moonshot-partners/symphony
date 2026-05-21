@@ -329,4 +329,122 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       assert MapSet.size(DispatchGate.active_state_set()) > 0
     end
   end
+
+  describe "DecisionLog emissions" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "reconcile_log_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      path = Path.join(tmp, "decisions.jsonl")
+
+      prior_app = Application.get_env(:symphony_elixir, :decision_log_path)
+      prior_env = System.get_env("SYMPHONY_DECISION_LOG")
+      Application.put_env(:symphony_elixir, :decision_log_path, path)
+      System.put_env("SYMPHONY_DECISION_LOG", "1")
+
+      on_exit(fn ->
+        File.rm_rf!(tmp)
+
+        case prior_app do
+          nil -> Application.delete_env(:symphony_elixir, :decision_log_path)
+          val -> Application.put_env(:symphony_elixir, :decision_log_path, val)
+        end
+
+        case prior_env do
+          nil -> System.delete_env("SYMPHONY_DECISION_LOG")
+          val -> System.put_env("SYMPHONY_DECISION_LOG", val)
+        end
+      end)
+
+      {:ok, ledger_path: path}
+    end
+
+    defp decisions(path) do
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+    end
+
+    defp branches(path) do
+      path
+      |> decisions()
+      |> Enum.filter(&(&1["event"] == "reconcile.decision"))
+      |> Enum.map(& &1["payload"]["branch"])
+    end
+
+    test "emits run + terminal_state branch", %{ledger_path: path} do
+      issue = build_issue(state: "Closed")
+      state = running_state(issue)
+
+      Reconcile.run(state, %{
+        terminate_fn: record_terminate(self()),
+        pr_sync_fn: record_pr_sync(self()),
+        fetch_fn: fn _ids -> {:ok, [issue]} end
+      })
+
+      events = decisions(path) |> Enum.map(& &1["event"])
+      assert "reconcile.run" in events
+      assert "terminal_state" in branches(path)
+    end
+
+    test "emits pr_ready_short_circuit when PR attached and ready", %{ledger_path: path} do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _issue -> true end)
+
+      issue =
+        build_issue(
+          has_pr_attachment: true,
+          repos: [%{name: "fe-next-app", pr: %{url: "https://github.com/o/r/pull/1"}}]
+        )
+
+      state = running_state(issue)
+
+      Reconcile.run(state, %{
+        terminate_fn: record_terminate(self()),
+        pr_sync_fn: record_pr_sync(self()),
+        fetch_fn: fn _ids -> {:ok, [issue]} end
+      })
+
+      assert "pr_ready_short_circuit" in branches(path)
+    end
+
+    test "emits active_state branch for routable issue in active state", %{ledger_path: path} do
+      issue = build_issue(state: "In Development")
+      state = running_state(issue)
+
+      Reconcile.run(state, %{
+        terminate_fn: record_terminate(self()),
+        pr_sync_fn: record_pr_sync(self()),
+        fetch_fn: fn _ids -> {:ok, [issue]} end
+      })
+
+      assert "active_state" in branches(path)
+    end
+
+    test "emits no_longer_visible branch when fetch result drops an id", %{ledger_path: path} do
+      issue = build_issue()
+      state = running_state(issue)
+
+      Reconcile.run(state, %{
+        terminate_fn: record_terminate(self()),
+        pr_sync_fn: record_pr_sync(self()),
+        fetch_fn: fn _ids -> {:ok, []} end
+      })
+
+      assert "no_longer_visible" in branches(path)
+    end
+
+    test "emits fetch_error when fetch_fn returns {:error, _}", %{ledger_path: path} do
+      issue = build_issue()
+      state = running_state(issue)
+
+      Reconcile.run(state, %{
+        terminate_fn: record_terminate(self()),
+        pr_sync_fn: record_pr_sync(self()),
+        fetch_fn: fn _ids -> {:error, :boom} end
+      })
+
+      events = decisions(path) |> Enum.map(& &1["event"])
+      assert "reconcile.fetch_error" in events
+    end
+  end
 end

@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Orchestrator do
   use GenServer
   require Logger
 
-  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad}
+  alias SymphonyElixir.{AgentRunner, Config, DecisionLog, GitHubPr, Tracker, Workpad}
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -154,6 +154,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_info(:run_poll_cycle, state) do
+    emit_tick(state)
+
     state =
       try do
         state = TickScheduler.refresh_runtime_config(state)
@@ -554,6 +556,8 @@ defmodule SymphonyElixir.Orchestrator do
   def maybe_dispatch_for_test(%State{} = state), do: maybe_dispatch(state)
 
   defp terminate_running_issue(%State{} = state, issue_id, cleanup_workspace) do
+    DecisionLog.emit("orchestrator.terminate", %{issue_id: issue_id, cleanup_workspace: cleanup_workspace, had_running_entry: Map.has_key?(state.running, issue_id)})
+
     case Map.get(state.running, issue_id) do
       nil ->
         release_issue_claim(state, issue_id)
@@ -799,11 +803,29 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp complete_issue(%State{} = state, issue_id) do
+    DecisionLog.emit("orchestrator.complete", %{issue_id: issue_id, pr_engagement_keys: Map.keys(state.pr_engagements)})
+
     %{
       state
       | completed: MapSet.put(state.completed, issue_id),
         retry_attempts: Map.delete(state.retry_attempts, issue_id)
     }
+  end
+
+  # Silence idle ticks (no running + no completed + no claims). With the
+  # default 30s poll interval that gate is the difference between zero
+  # JSONL lines and ~2,880/day forever. Diagnostic value only exists when
+  # there is state worth observing — every claim-or-complete bumps the
+  # gate so the K=1 bake window stays fully covered.
+  defp emit_tick(%State{} = state) do
+    if map_size(state.running) > 0 or MapSet.size(state.completed) > 0 or MapSet.size(state.claimed) > 0 do
+      DecisionLog.emit("orchestrator.tick", %{
+        running_keys: Map.keys(state.running),
+        completed_size: MapSet.size(state.completed),
+        pr_engagement_keys: Map.keys(state.pr_engagements),
+        drain: state.drain
+      })
+    end
   end
 
   defp notify_dashboard, do: :ok

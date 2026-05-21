@@ -389,4 +389,144 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       assert body =~ "(no items listed)"
     end
   end
+
+  describe "DecisionLog emissions" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "pr_reengagement_log_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      path = Path.join(tmp, "decisions.jsonl")
+
+      prior_app = Application.get_env(:symphony_elixir, :decision_log_path)
+      prior_env = System.get_env("SYMPHONY_DECISION_LOG")
+      Application.put_env(:symphony_elixir, :decision_log_path, path)
+      System.put_env("SYMPHONY_DECISION_LOG", "1")
+
+      on_exit(fn ->
+        File.rm_rf!(tmp)
+
+        case prior_app do
+          nil -> Application.delete_env(:symphony_elixir, :decision_log_path)
+          val -> Application.put_env(:symphony_elixir, :decision_log_path, val)
+        end
+
+        case prior_env do
+          nil -> System.delete_env("SYMPHONY_DECISION_LOG")
+          val -> System.put_env("SYMPHONY_DECISION_LOG", val)
+        end
+      end)
+
+      {:ok, ledger_path: path}
+    end
+
+    defp ledger_events(path) do
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.map(& &1["event"])
+    end
+
+    test "emits run + dispatch on the happy path", %{ledger_path: path} do
+      parent = self()
+      pr_url = "https://github.com/o/r/pull/1"
+      iss = issue("i-disp", pr_url)
+      state = build_state(%{"i-disp" => iss})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [iss]} end,
+          detector_fn: fn _issue ->
+            {:critical, %{count: 1, items: ["x"], head_sha: "sha-1"}}
+          end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent ->
+            send(parent, :commented)
+            {:ok, "c"}
+          end
+        })
+
+      _ = PrReengagement.run(state, opts)
+      assert_receive :commented, 50
+
+      events = ledger_events(path)
+      assert "pr_reengagement.run" in events
+      assert "pr_reengagement.dispatch" in events
+    end
+
+    test "emits skip_no_pr when issue has no PR url", %{ledger_path: path} do
+      iss = %Issue{id: "i-nopr", identifier: "ISS-i-nopr", state: "Done", repos: []}
+      state = build_state(%{"i-nopr" => iss})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [iss]} end,
+          detector_fn: fn _issue -> raise "should not be called" end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent -> {:ok, "c"} end
+        })
+
+      _ = PrReengagement.run(state, opts)
+      assert "pr_reengagement.skip_no_pr" in ledger_events(path)
+    end
+
+    test "emits skip_no_critical when detector returns :none", %{ledger_path: path} do
+      pr_url = "https://github.com/o/r/pull/2"
+      iss = issue("i-none", pr_url)
+      state = build_state(%{"i-none" => iss})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [iss]} end,
+          detector_fn: fn _issue -> :none end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent -> {:ok, "c"} end
+        })
+
+      _ = PrReengagement.run(state, opts)
+      assert "pr_reengagement.skip_no_critical" in ledger_events(path)
+    end
+
+    test "emits cap_hit and cap_hit_dedup", %{ledger_path: path} do
+      pr_url = "https://github.com/o/r/pull/3"
+      iss = issue("i-cap", pr_url)
+
+      state =
+        build_state(%{"i-cap" => iss}, %{
+          pr_url => %{count: 1, cap_hit_shas: MapSet.new()}
+        })
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [iss]} end,
+          detector_fn: fn _issue ->
+            {:critical, %{count: 2, items: ["y"], head_sha: "sha-cap"}}
+          end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent -> {:ok, "c"} end
+        })
+
+      state_after_first = PrReengagement.run(state, opts)
+      _ = PrReengagement.run(state_after_first, opts)
+
+      events = ledger_events(path)
+      assert "pr_reengagement.cap_hit" in events
+      assert "pr_reengagement.cap_hit_dedup" in events
+    end
+
+    test "emits fetch_error when issue_fetch_fn errors", %{ledger_path: path} do
+      iss = issue("i-err", "https://github.com/o/r/pull/4")
+      state = build_state(%{"i-err" => iss})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:error, :boom} end,
+          detector_fn: fn _issue -> raise "should not be called" end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent -> {:ok, "c"} end
+        })
+
+      _ = PrReengagement.run(state, opts)
+      assert "pr_reengagement.fetch_error" in ledger_events(path)
+    end
+  end
 end

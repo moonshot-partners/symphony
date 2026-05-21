@@ -35,6 +35,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
   require Logger
 
+  alias SymphonyElixir.DecisionLog
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.State
 
@@ -57,6 +58,12 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
   def run(%State{} = state, opts) when is_map(opts) do
     completed_ids = MapSet.to_list(state.completed)
 
+    DecisionLog.emit("pr_reengagement.run", %{
+      completed_size: length(completed_ids),
+      completed_ids: completed_ids,
+      pr_engagement_keys: Map.keys(state.pr_engagements)
+    })
+
     if completed_ids == [] do
       state
     else
@@ -67,6 +74,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
           reengage_issues(state, issues, opts)
 
         {:error, reason} ->
+          DecisionLog.emit("pr_reengagement.fetch_error", %{
+            reason: inspect(reason),
+            completed_ids: completed_ids
+          })
+
           Logger.debug("PrReengagement: issue_fetch_fn failed: #{inspect(reason)}; skipping cycle")
           state
       end
@@ -82,6 +94,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
   defp reengage_issue(%State{} = state, %Issue{} = issue, opts) do
     case pr_url_for(issue) do
       nil ->
+        DecisionLog.emit("pr_reengagement.skip_no_pr", %{
+          issue_id: issue.id,
+          identifier: issue.identifier
+        })
+
         state
 
       pr_url ->
@@ -91,7 +108,14 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
           {:critical, info} when is_map(info) ->
             handle_critical(state, issue, pr_url, info, opts)
 
-          _ ->
+          verdict ->
+            DecisionLog.emit("pr_reengagement.skip_no_critical", %{
+              issue_id: issue.id,
+              identifier: issue.identifier,
+              pr_url: pr_url,
+              verdict: inspect(verdict)
+            })
+
             state
         end
     end
@@ -107,6 +131,14 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
       MapSet.member?(engagement.cap_hit_shas, head_sha) ->
         # Already cap-hit on this exact sha — stay silent, no state churn.
+        DecisionLog.emit("pr_reengagement.cap_hit_dedup", %{
+          issue_id: issue.id,
+          identifier: issue.identifier,
+          pr_url: pr_url,
+          head_sha: head_sha,
+          count: engagement.count
+        })
+
         state
 
       true ->
@@ -122,6 +154,16 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     state_transition_fn.(issue, pickup_state)
     parent_id = Map.get(state.workpads, issue.id)
     _ = comment_fn.(issue.id, dispatch_body(info), parent_id)
+
+    DecisionLog.emit("pr_reengagement.dispatch", %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      pr_url: pr_url,
+      head_sha: Map.get(info, :head_sha, ""),
+      critical_count: Map.get(info, :count, 0),
+      pickup_state: pickup_state,
+      next_count: engagement.count + 1
+    })
 
     %{
       state
@@ -146,6 +188,16 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
     parent_id = Map.get(state.workpads, issue.id)
     _ = comment_fn.(issue.id, cap_hit_body(info), parent_id)
+
+    DecisionLog.emit("pr_reengagement.cap_hit", %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      pr_url: pr_url,
+      head_sha: head_sha,
+      critical_count: Map.get(info, :count, 0),
+      reject_state: reject_state,
+      count: engagement.count
+    })
 
     %{
       state

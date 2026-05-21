@@ -17,7 +17,7 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
 
   require Logger
 
-  alias SymphonyElixir.{GitHubPr, Tracker}
+  alias SymphonyElixir.{DecisionLog, GitHubPr, Tracker}
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.{DispatchGate, RunningEntry, State}
 
@@ -52,6 +52,11 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
       active_states = Map.get(opts, :active_states, DispatchGate.active_state_set())
       terminal_states = Map.get(opts, :terminal_states, DispatchGate.terminal_state_set())
 
+      DecisionLog.emit("reconcile.run", %{
+        running_ids: running_ids,
+        running_size: length(running_ids)
+      })
+
       case fetch_fn.(running_ids) do
         {:ok, issues} ->
           state
@@ -59,6 +64,11 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
           |> reconcile_missing_running_issue_ids(running_ids, issues, terminate_fn)
 
         {:error, reason} ->
+          DecisionLog.emit("reconcile.fetch_error", %{
+            reason: inspect(reason),
+            running_ids: running_ids
+          })
+
           Logger.debug("Failed to refresh running issue states: #{inspect(reason)}; keeping active workers")
 
           state
@@ -97,11 +107,13 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
   defp reconcile_issue_state(state, %Issue{} = issue, active, terminal, terminate_fn, pr_sync_fn) do
     cond do
       DispatchGate.terminal_state?(issue.state, terminal) ->
+        emit_decision(issue, "terminal_state", "terminate")
         Logger.info("Issue moved to terminal state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_fn.(state, issue.id, true)
 
       DispatchGate.has_pr_attachment?(issue) and GitHubPr.ready?(issue) ->
+        emit_decision(issue, "pr_ready_short_circuit", "pr_sync+terminate")
         Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
         state
@@ -112,21 +124,26 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
         Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
 
         if DispatchGate.active_state?(issue.state, active) do
+          emit_decision(issue, "has_pr_attachment_active", "refresh")
           refresh_running_issue_state(state, issue)
         else
+          emit_decision(issue, "has_pr_attachment_non_active", "terminate")
           Logger.info("Issue moved to non-active state with stale PR: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
           terminate_fn.(state, issue.id, true)
         end
 
       !DispatchGate.routable_to_worker?(issue) ->
+        emit_decision(issue, "not_routable", "terminate")
         Logger.info("Issue no longer routed to this worker: #{RunningEntry.format_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
 
         terminate_fn.(state, issue.id, true)
 
       DispatchGate.active_state?(issue.state, active) ->
+        emit_decision(issue, "active_state", "refresh")
         refresh_running_issue_state(state, issue)
 
       true ->
+        emit_decision(issue, "non_active_state", "terminate")
         Logger.info("Issue moved to non-active state: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_fn.(state, issue.id, true)
@@ -135,6 +152,16 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
 
   defp reconcile_issue_state(state, _issue, _active, _terminal, _terminate_fn, _pr_sync_fn) do
     state
+  end
+
+  defp emit_decision(%Issue{} = issue, branch, action) do
+    DecisionLog.emit("reconcile.decision", %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      linear_state: issue.state,
+      branch: branch,
+      action: action
+    })
   end
 
   defp reconcile_missing_running_issue_ids(%State{} = state, requested_issue_ids, issues, terminate_fn)
@@ -151,6 +178,13 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
       if MapSet.member?(visible_issue_ids, issue_id) do
         state_acc
       else
+        DecisionLog.emit("reconcile.decision", %{
+          issue_id: issue_id,
+          identifier: get_in(state_acc.running, [issue_id, :identifier]),
+          branch: "no_longer_visible",
+          action: "terminate"
+        })
+
         log_missing_running_issue(state_acc, issue_id)
         terminate_fn.(state_acc, issue_id, false)
       end
