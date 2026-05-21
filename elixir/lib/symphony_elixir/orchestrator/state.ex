@@ -21,7 +21,8 @@ defmodule SymphonyElixir.Orchestrator.State do
     workpads: %{},
     agent_totals: nil,
     agent_rate_limits: nil,
-    drain: false
+    drain: false,
+    pr_engagements: %{}
   ]
 
   @type t :: %__MODULE__{}

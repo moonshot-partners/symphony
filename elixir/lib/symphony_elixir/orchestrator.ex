@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Orchestrator do
   use GenServer
   require Logger
 
-  alias SymphonyElixir.{AgentRunner, Config, Tracker, Workpad}
+  alias SymphonyElixir.{AgentRunner, Config, GitHubPr, Tracker, Workpad}
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Orchestrator do
     PreDispatch,
     PrMerge,
     ProcessLiveness,
+    PrReengagement,
     Reconcile,
     RetryAttempts,
     RetryDispatch,
@@ -456,6 +457,35 @@ defmodule SymphonyElixir.Orchestrator do
     |> Reconcile.run(%{
       terminate_fn: &terminate_running_issue/3,
       pr_sync_fn: fn s, id -> WorkpadPrSync.sync(s, id, self()) end
+    })
+    |> reconcile_pr_reengagement()
+  end
+
+  # Caller-side short-circuit to avoid building the opts map on every
+  # poll tick when `state.completed` is empty. The opts map costs a
+  # `Config.settings!()` GenServer round-trip (~700ms via WorkflowStore
+  # YAML parse), which is enough to push the :run_poll_cycle latency
+  # past the 10ms retry-arming budget in `core_test.exs:721`.
+  # `PrReengagement.run/2` defends against the same empty-completed
+  # case itself, so it is safe to call unconditionally from other
+  # callers; this guard is purely an optimization for the poll hot
+  # path.
+  defp reconcile_pr_reengagement(%State{completed: completed} = state) do
+    if MapSet.size(completed) == 0, do: state, else: do_pr_reengagement(state)
+  end
+
+  defp do_pr_reengagement(state) do
+    settings = Config.settings!()
+
+    PrReengagement.run(state, %{
+      issue_fetch_fn: &Tracker.fetch_issue_states_by_ids/1,
+      detector_fn: &GitHubPr.critical_review_pending?/1,
+      state_transition_fn: &StateTransition.apply/2,
+      comment_fn: fn issue_id, body, parent_id ->
+        Tracker.create_comment(issue_id, body, parent_id: parent_id)
+      end,
+      pickup_state: settings.tracker.on_pickup_state,
+      reject_state: settings.tracker.on_reject_state
     })
   end
 
