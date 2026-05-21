@@ -80,9 +80,14 @@ defmodule SymphonyElixir.PlanGrounding do
       |> Enum.map(fn {path, _new?} -> path end)
       |> Enum.uniq()
 
+    # Anchor = an untagged path that resolves. A `(new)` tag on a file that
+    # happens to exist still does not anchor the plan — the contract asks
+    # for a real file the plan is *building on*, not creating.
+    grounded_anchor? = Enum.any?(existing, fn {_path, new?} -> not new? end)
+
     cond do
       untagged_missing != [] -> {:violation, {:path_not_found, untagged_missing}}
-      existing == [] -> {:violation, :no_grounded_path}
+      not grounded_anchor? -> {:violation, :no_grounded_path}
       true -> :ok
     end
   end

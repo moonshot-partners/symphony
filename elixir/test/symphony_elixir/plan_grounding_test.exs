@@ -113,5 +113,15 @@ defmodule SymphonyElixir.PlanGroundingTest do
       text = plan("- The filters modal needs a new option for kids.\n")
       assert {:violation, :no_grounded_path} = PlanGrounding.validate(text, ws)
     end
+
+    test "a (new)-tagged path does not anchor the plan even if the file already exists", %{workspace: ws} do
+      text =
+        plan("""
+        - `app/controllers/filter_templates_controller.rb` (new) — tagged new despite existing
+        - `app/services/promotion_service.rb` (new) — genuinely new
+        """)
+
+      assert {:violation, :no_grounded_path} = PlanGrounding.validate(text, ws)
+    end
   end
 end
