@@ -205,6 +205,27 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
       assert MapSet.member?(halted_state.completed, "issue-pg-1")
     end
 
+    test "a plan with no grounded path halts and explains the missing anchor" do
+      memory_workflow()
+
+      ws =
+        workspace_with("""
+        ## Plan
+
+        - The filters modal needs a new option for kids.
+        """)
+
+      entry = running_entry(%{workspace_path: ws})
+      state = empty_state(%{running: %{"issue-pg-1" => entry}})
+
+      assert {:halted, halted_state} =
+               PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
+
+      assert_receive {:memory_tracker_comment, "issue-pg-1", body}, 500
+      assert body =~ "names no file that exists"
+      assert MapSet.member?(halted_state.completed, "issue-pg-1")
+    end
+
     test "skips state move when running_entry.issue is nil but still halts" do
       memory_workflow()
 
