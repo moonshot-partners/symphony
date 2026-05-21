@@ -42,22 +42,36 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
         _ = Workpad.maybe_sync(entry, update, recipient)
 
-        run_side_effects(Map.get(running_entry, :issue), running_entry, comment_id)
+        run_side_effects(
+          Map.get(running_entry, :issue),
+          running_entry,
+          comment_id,
+          state.pr_engagements
+        )
 
         state
     end
   end
 
-  defp run_side_effects(nil, _running_entry, _parent_comment_id), do: :ok
+  defp run_side_effects(nil, _running_entry, _parent_comment_id, _pr_engagements), do: :ok
 
-  defp run_side_effects(issue, running_entry, parent_comment_id) do
+  defp run_side_effects(issue, running_entry, parent_comment_id, pr_engagements) do
     reject_state = Config.settings!().tracker.on_reject_state
 
     target_state =
-      if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
-        reject_state
-      else
-        Config.settings!().tracker.on_complete_state
+      cond do
+        in_auto_engagement?(issue, pr_engagements) ->
+          # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
+          # in on_reject_state on this run even if QA self-reports BLOCKED
+          # — let it land. If the next claude-pr-review verdict is still
+          # critical, PrReengagement caps at K=1 and parks for human review.
+          Config.settings!().tracker.on_complete_state
+
+        GitHubPr.qa_blocked?(issue) and is_binary(reject_state) ->
+          reject_state
+
+        true ->
+          Config.settings!().tracker.on_complete_state
       end
 
     StateTransition.apply(issue, target_state)
@@ -71,4 +85,27 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
 
     :ok
   end
+
+  defp in_auto_engagement?(issue, pr_engagements) when is_map(pr_engagements) do
+    pr_engagements != %{} and
+      issue
+      |> pr_urls()
+      |> Enum.any?(fn url ->
+        case Map.get(pr_engagements, url) do
+          %{count: count} when is_integer(count) and count >= 1 -> true
+          _ -> false
+        end
+      end)
+  end
+
+  defp in_auto_engagement?(_issue, _pr_engagements), do: false
+
+  defp pr_urls(%{repos: repos}) when is_list(repos) do
+    Enum.flat_map(repos, fn
+      %{pr: %{url: url}} when is_binary(url) -> [url]
+      _ -> []
+    end)
+  end
+
+  defp pr_urls(_), do: []
 end

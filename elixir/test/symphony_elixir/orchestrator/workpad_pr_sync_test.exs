@@ -165,6 +165,56 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
   end
 
+  test "bypasses qa_blocked routing and routes to on_complete_state when pr_engagements has count >= 1 for the issue's PR url" do
+    issue_id = "issue-bypass-1"
+    pr_url = "https://github.com/org/repo/pull/77"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-BYPASS-1",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-BYPASS-1",
+        workpad_comment_id: "wp-comment-bypass-1",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    # PR self-reports BLOCKED; without the bypass marker the issue would
+    # be parked in `On Hold / Blocked` and the auto re-engagement loop
+    # would terminate after 8s (see state/SYM-16-baseline.md for the
+    # empirical observation that motivated this branch).
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = %State{
+      running: running,
+      claimed: MapSet.new([issue_id]),
+      workpads: %{},
+      retry_attempts: %{},
+      pr_engagements: %{pr_url => %{count: 1, cap_hit_shas: MapSet.new()}},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    # Bypass kicks in → on_complete_state, NOT on_reject_state.
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
+  end
+
   test "routes state to on_complete_state when QA is not BLOCKED" do
     issue_id = "issue-qa-ok-1"
 
