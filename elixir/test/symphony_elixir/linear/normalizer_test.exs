@@ -96,6 +96,23 @@ defmodule SymphonyElixir.Linear.NormalizerTest do
     assert issue.blocked_by == []
   end
 
+  test "project_name: extracted from project.name" do
+    raw = Map.put(base_issue(), "project", %{"name" => "New Maestro 2.0"})
+    issue = Client.normalize_issue_for_test(raw)
+    assert issue.project_name == "New Maestro 2.0"
+  end
+
+  test "project_name: nil when project key is missing (ticket has no project)" do
+    issue = Client.normalize_issue_for_test(base_issue())
+    assert is_nil(issue.project_name)
+  end
+
+  test "project_name: nil when project is explicitly null" do
+    raw = Map.put(base_issue(), "project", nil)
+    issue = Client.normalize_issue_for_test(raw)
+    assert is_nil(issue.project_name)
+  end
+
   test "assigned_to_worker? is true when assignee matches filter by email" do
     assignee = %{"id" => "u1", "email" => "alice@example.com", "name" => "Alice", "displayName" => "Alice"}
     raw = Map.put(base_issue(), "assignee", assignee)

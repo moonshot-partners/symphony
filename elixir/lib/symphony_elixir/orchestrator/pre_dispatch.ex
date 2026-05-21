@@ -15,6 +15,10 @@ defmodule SymphonyElixir.Orchestrator.PreDispatch do
   Current rule set (kept intentionally minimal — degenerate inputs only):
 
     * `:empty_description` — description is `nil`, `""`, or whitespace-only.
+    * `:unsupported_project` — issue's Linear project is in the configured
+      `tracker.unsupported_projects` deny-list. Defensive gate for cross-project
+      leaks (a SODEV ticket whose project sits outside this Symphony tenant's
+      repo coverage, e.g. New Maestro 2.0 vs schools-out/fe-next-app).
 
   Anything richer (vague AC, scope-mismatched labels) is left to the
   prompt-level BLOCKED template in `AGENTS.md` until empirical evidence
@@ -27,20 +31,47 @@ defmodule SymphonyElixir.Orchestrator.PreDispatch do
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.{RunningEntry, StateTransition}
 
-  @type reject_reason :: :empty_description
+  @type reject_reason :: :empty_description | :unsupported_project
   @type result :: :ok | {:reject, reject_reason(), String.t()}
 
-  @spec check(Issue.t() | term()) :: result()
-  def check(%Issue{description: nil}), do: empty_description_reject()
+  @spec check(Issue.t() | term(), keyword()) :: result()
+  def check(issue, opts \\ [])
 
-  def check(%Issue{description: description}) when is_binary(description) do
+  def check(%Issue{description: nil}, _opts), do: empty_description_reject()
+
+  def check(%Issue{description: description} = issue, opts) when is_binary(description) do
     case String.trim(description) do
-      "" -> empty_description_reject()
-      _ -> :ok
+      "" ->
+        empty_description_reject()
+
+      _ ->
+        unsupported = Keyword.get(opts, :unsupported_projects, [])
+        check_project(issue, unsupported)
     end
   end
 
-  def check(_other), do: :ok
+  def check(_other, _opts), do: :ok
+
+  defp check_project(%Issue{project_name: nil}, _unsupported), do: :ok
+  defp check_project(_issue, []), do: :ok
+
+  defp check_project(%Issue{project_name: name}, unsupported) when is_binary(name) do
+    normalized = name |> String.trim() |> String.downcase()
+
+    cond do
+      normalized == "" -> :ok
+      Enum.any?(unsupported, &project_match?(&1, normalized)) -> unsupported_project_reject(name)
+      true -> :ok
+    end
+  end
+
+  defp check_project(_issue, _unsupported), do: :ok
+
+  defp project_match?(entry, normalized) when is_binary(entry) do
+    String.downcase(String.trim(entry)) == normalized
+  end
+
+  defp project_match?(_entry, _normalized), do: false
 
   @spec apply_reject(Issue.t(), reject_reason(), String.t()) :: :ok
   def apply_reject(%Issue{} = issue, reason_code, reason_msg)
@@ -72,5 +103,13 @@ defmodule SymphonyElixir.Orchestrator.PreDispatch do
      "description is empty — agent cannot extract acceptance criteria. " <>
        "Add a description with binary pass/fail AC, then move the issue back " <>
        "to the dispatch queue."}
+  end
+
+  defp unsupported_project_reject(name) do
+    {:reject, :unsupported_project,
+     "Linear project `#{name}` is outside this Symphony tenant's repo " <>
+       "coverage. Move the ticket to a supported project, or extend " <>
+       "`WORKFLOW.<tenant>.md` repos + remove the project from " <>
+       "`tracker.unsupported_projects`."}
   end
 end

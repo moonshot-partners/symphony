@@ -28,6 +28,7 @@ defmodule SymphonyElixir.Linear.Normalizer do
       repos: extract_repos(issue),
       assigned_to_worker: matches_routing_filter?(assignee, labels, routing_filter),
       has_pr_attachment: pr_attachment?(issue),
+      project_name: extract_project_name(issue),
       created_at: parse_datetime(issue["createdAt"]),
       updated_at: parse_datetime(issue["updatedAt"])
     }
@@ -117,6 +118,15 @@ defmodule SymphonyElixir.Linear.Normalizer do
   end
 
   defp pr_attachment?(_issue), do: false
+
+  defp extract_project_name(%{"project" => %{"name" => name}}) when is_binary(name) do
+    case String.trim(name) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp extract_project_name(_issue), do: nil
 
   defp extract_labels(%{"labels" => %{"nodes" => labels}}) when is_list(labels) do
     labels

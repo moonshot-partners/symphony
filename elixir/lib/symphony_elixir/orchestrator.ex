@@ -663,7 +663,9 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case DispatchGate.revalidate(issue, &Tracker.fetch_issue_states_by_ids/1, DispatchGate.terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        case PreDispatch.check(refreshed_issue) do
+        unsupported = Config.settings!().tracker.unsupported_projects || []
+
+        case PreDispatch.check(refreshed_issue, unsupported_projects: unsupported) do
           :ok ->
             do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
 

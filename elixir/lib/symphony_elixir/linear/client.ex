@@ -51,6 +51,9 @@ defmodule SymphonyElixir.Linear.Client do
             url
           }
         }
+        project {
+          name
+        }
         createdAt
         updatedAt
       }
@@ -103,6 +106,9 @@ defmodule SymphonyElixir.Linear.Client do
           nodes {
             url
           }
+        }
+        project {
+          name
         }
         createdAt
         updatedAt

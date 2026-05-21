@@ -19,6 +19,11 @@ defmodule SymphonyElixir.Config.Schema.Tracker do
     field(:on_complete_state, :string)
     field(:on_pr_merge_state, :string)
     field(:on_reject_state, :string)
+    # Deny-list of Linear project names whose tickets must never dispatch
+    # in this tenant, even when the team filter would otherwise admit them.
+    # Used by Orchestrator.PreDispatch to block cross-project leaks (e.g.
+    # SODEV tickets whose project sits outside the configured `repos:`).
+    field(:unsupported_projects, {:array, :string}, default: [])
   end
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -39,7 +44,8 @@ defmodule SymphonyElixir.Config.Schema.Tracker do
         :on_pickup_state,
         :on_complete_state,
         :on_pr_merge_state,
-        :on_reject_state
+        :on_reject_state,
+        :unsupported_projects
       ],
       empty_values: []
     )

@@ -9,7 +9,8 @@ defmodule SymphonyElixir.Orchestrator.PreDispatchTest do
       id: Keyword.get(opts, :id, "issue-1"),
       identifier: Keyword.get(opts, :identifier, "SODEV-147"),
       title: Keyword.get(opts, :title, "Fix booking step 2"),
-      description: Keyword.get(opts, :description),
+      description: Keyword.get(opts, :description, "x"),
+      project_name: Keyword.get(opts, :project_name),
       state: "Scheduled"
     }
   end
@@ -48,6 +49,40 @@ defmodule SymphonyElixir.Orchestrator.PreDispatchTest do
     test "non-Issue struct returns :ok (degrades open, dispatch decides)" do
       assert :ok = PreDispatch.check(%{description: nil})
       assert :ok = PreDispatch.check(nil)
+    end
+  end
+
+  describe "check/2 — unsupported project rejection" do
+    test "exact match in unsupported list is rejected" do
+      i = issue(project_name: "New Maestro 2.0")
+      assert {:reject, :unsupported_project, msg} = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
+      assert msg =~ "New Maestro 2.0"
+    end
+
+    test "case- and whitespace-insensitive match still rejects" do
+      i = issue(project_name: "  new maestro 2.0  ")
+      assert {:reject, :unsupported_project, _} = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
+    end
+
+    test "project not in unsupported list passes" do
+      i = issue(project_name: "Schools Out core")
+      assert :ok = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
+    end
+
+    test "nil project_name passes (cannot deny what we cannot see)" do
+      i = issue(project_name: nil)
+      assert :ok = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
+    end
+
+    test "empty unsupported list is a no-op (default behavior)" do
+      i = issue(project_name: "New Maestro 2.0")
+      assert :ok = PreDispatch.check(i, unsupported_projects: [])
+      assert :ok = PreDispatch.check(i)
+    end
+
+    test "empty description still beats project check (degenerate input first)" do
+      i = issue(description: nil, project_name: "New Maestro 2.0")
+      assert {:reject, :empty_description, _} = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
     end
   end
 end

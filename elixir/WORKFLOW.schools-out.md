@@ -15,6 +15,13 @@ tracker:
   on_complete_state: "In Code Review"
   on_pr_merge_state: "Ready for QA"
   on_reject_state: "On Hold / Blocked"
+  # Cross-project leak guard. SODEV is a shared team key across multiple
+  # Linear projects; this tenant only covers schools-out + fe-next-app.
+  # Any ticket whose Linear project sits in this list is rejected by
+  # Orchestrator.PreDispatch before agent spawn — `New Maestro 2.0` ships
+  # in `schoolsoutapp/data-ingestion-admin`, which is not in `repos:`.
+  unsupported_projects:
+    - "New Maestro 2.0"
 polling:
   interval_ms: 5000
 workspace:

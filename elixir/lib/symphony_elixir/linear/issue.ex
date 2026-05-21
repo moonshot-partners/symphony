@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Linear.Issue do
     column: nil,
     assigned_to_worker: true,
     has_pr_attachment: false,
+    project_name: nil,
     created_at: nil,
     updated_at: nil
   ]
@@ -49,6 +50,7 @@ defmodule SymphonyElixir.Linear.Issue do
           column: String.t() | nil,
           assigned_to_worker: boolean(),
           has_pr_attachment: boolean(),
+          project_name: String.t() | nil,
           created_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
