@@ -94,6 +94,14 @@ defmodule SymphonyElixir.DecisionLogTest do
       assert :ok = DecisionLog.emit("evt.default_path", %{})
     end
 
+    test "rescue branch swallows exceptions raised mid-write" do
+      # A non-binary path makes Path.dirname/1 raise FunctionClauseError
+      # inside the `with` block — exercises the `try/rescue` arm that
+      # logs at :debug and still returns :ok so the orchestrator never
+      # sees an emit-time crash.
+      assert :ok = DecisionLog.emit("evt.raise", %{}, path: :not_a_binary)
+    end
+
     test "honors Application env override of the default path", %{tmp: tmp} do
       path = Path.join(tmp, "app_env_decisions.jsonl")
       prior = Application.get_env(:symphony_elixir, :decision_log_path)
