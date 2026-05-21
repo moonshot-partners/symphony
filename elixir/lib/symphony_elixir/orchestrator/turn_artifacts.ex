@@ -45,7 +45,13 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifacts do
     end
   end
 
-  defp discover_understanding_md(workspace_path) do
+  @doc """
+  Finds the most-recently-modified `state/*/understanding.md` at any depth
+  under `workspace_path`, or `nil` when none exists. Public so the
+  plan-grounding gate reads the same artifact this module posts.
+  """
+  @spec discover_understanding_md(String.t()) :: String.t() | nil
+  def discover_understanding_md(workspace_path) do
     Path.join([workspace_path, "**", "state", "*", "understanding.md"])
     |> Path.wildcard()
     |> Enum.max_by(&file_mtime/1, fn -> nil end)
