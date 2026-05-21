@@ -64,15 +64,17 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
       case issue_fetch_fn.(completed_ids) do
         {:ok, issues} when is_list(issues) ->
-          Enum.reduce(issues, state, fn issue, state_acc ->
-            reengage_issue(state_acc, issue, opts)
-          end)
+          reengage_issues(state, issues, opts)
 
         {:error, reason} ->
           Logger.debug("PrReengagement: issue_fetch_fn failed: #{inspect(reason)}; skipping cycle")
           state
       end
     end
+  end
+
+  defp reengage_issues(state, issues, opts) do
+    Enum.reduce(issues, state, fn issue, state_acc -> reengage_issue(state_acc, issue, opts) end)
   end
 
   # If the issue carries no PR url we cannot reason about engagements;

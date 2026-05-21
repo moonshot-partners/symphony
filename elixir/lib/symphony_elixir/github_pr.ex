@@ -349,25 +349,23 @@ defmodule SymphonyElixir.GitHubPr do
     comments
     |> Enum.filter(&verdict_comment?/1)
     |> Enum.sort_by(&comment_created_at/1, {:desc, DateTime})
-    |> Enum.find_value(:none, fn comment ->
-      cond do
-        not fresh_enough?(comment, head_committed_at) ->
-          nil
-
-        true ->
-          case parse_critical_review_body(comment["body"]) do
-            {:request_changes, count, items} ->
-              {:critical, %{count: count, items: items, head_sha: head_sha}}
-
-            :none ->
-              # Latest verdict explicitly clears the alarm (approve / comment / zero critical).
-              :none
-          end
-      end
-    end)
+    |> Enum.find_value(:none, &critical_review_from_comment(&1, head_sha, head_committed_at))
   end
 
   def critical_review_from_comments(_, _, _), do: :none
+
+  defp critical_review_from_comment(comment, head_sha, head_committed_at) do
+    if fresh_enough?(comment, head_committed_at) do
+      case parse_critical_review_body(comment["body"]) do
+        {:request_changes, count, items} ->
+          {:critical, %{count: count, items: items, head_sha: head_sha}}
+
+        :none ->
+          # Latest verdict explicitly clears the alarm (approve / comment / zero critical).
+          :none
+      end
+    end
+  end
 
   defp verdict_comment?(%{"body" => body}) when is_binary(body) do
     String.starts_with?(body, "# claude-pr-review:")
