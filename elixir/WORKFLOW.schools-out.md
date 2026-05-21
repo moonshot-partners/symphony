@@ -53,12 +53,14 @@ repos:
       git fetch --depth=1 origin dev:refs/remotes/origin/dev
       git remote set-head origin dev
       npm ci --no-audit --no-fund
-      # NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is a public client key — it already
-      # ships inside the browser bundle. Without it `next build` and the QA
-      # Playwright run render a broken map, so the agent burns turns chasing
-      # a non-bug (SODEV-840). `.env*` is gitignored in fe-next-app, so this
-      # file never lands in a commit.
-      printf 'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=%s\n' 'AIzaSyDBdkV6TpV5z_dE4svgBj1XzSjcopkiL6Q' > .env.local
+      # NEXT_PUBLIC_GOOGLE_MAPS_API_KEY must be injected via the
+      # orchestrator's environment (systemd unit on Hetzner exports it,
+      # System.cmd/3 inherits it into the hook shell). Never inline the
+      # literal value here — this workflow file lives in a public repo.
+      # If the env var is unset, .env.local is written with an empty
+      # value: `next build` still succeeds but the map renders broken,
+      # and the agent must not chase that as a bug (SODEV-840).
+      printf 'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=%s\n' "${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}" > .env.local
     verify: npx --no-install jest --listTests > /dev/null
 hooks:
   before_remove: |
