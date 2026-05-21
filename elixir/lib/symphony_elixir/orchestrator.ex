@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Orchestrator do
     GateCEnforcement,
     GateCTrigger,
     GateDTrigger,
+    PlanGroundingGate,
     PreDispatch,
     PrMerge,
     ProcessLiveness,
@@ -271,20 +272,7 @@ defmodule SymphonyElixir.Orchestrator do
             {:noreply, state}
 
           {:continue, state} ->
-            TurnArtifacts.maybe_post(updated_running_entry, update, issue_id)
-
-            updated_running_entry =
-              updated_running_entry
-              |> ArtifactPin.pin(issue_id, "AC Extracted")
-              |> ArtifactPin.pin(issue_id, "AC Evidence")
-
-            state =
-              state
-              |> AgentTotals.apply_token_delta(token_delta)
-              |> AgentTotals.apply_rate_limits(update)
-
-            notify_dashboard()
-            {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+            apply_plan_grounding(state, issue_id, updated_running_entry, update, token_delta, enforce_opts)
         end
     end
   end
@@ -367,6 +355,38 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(msg, state) do
     Logger.debug("Orchestrator ignored message: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  # Gate C passed: post the turn-1 understanding.md artifact, then run the
+  # plan-grounding gate. A grounded plan pins the AC artifacts and keeps the
+  # run alive; an ungrounded plan halts it.
+  defp apply_plan_grounding(state, issue_id, running_entry, update, token_delta, enforce_opts) do
+    TurnArtifacts.maybe_post(running_entry, update, issue_id)
+
+    case PlanGroundingGate.enforce(state, issue_id, running_entry, update, enforce_opts) do
+      {:halted, state} ->
+        state =
+          state
+          |> AgentTotals.apply_token_delta(token_delta)
+          |> AgentTotals.apply_rate_limits(update)
+
+        notify_dashboard()
+        {:noreply, state}
+
+      {:continue, state, running_entry} ->
+        running_entry =
+          running_entry
+          |> ArtifactPin.pin(issue_id, "AC Extracted")
+          |> ArtifactPin.pin(issue_id, "AC Evidence")
+
+        state =
+          state
+          |> AgentTotals.apply_token_delta(token_delta)
+          |> AgentTotals.apply_rate_limits(update)
+
+        notify_dashboard()
+        {:noreply, %{state | running: Map.put(state.running, issue_id, running_entry)}}
+    end
   end
 
   defp maybe_dispatch(%State{} = state) do
