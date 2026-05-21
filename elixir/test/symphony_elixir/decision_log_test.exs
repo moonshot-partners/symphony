@@ -6,8 +6,21 @@ defmodule SymphonyElixir.DecisionLogTest do
   setup do
     tmp = Path.join(System.tmp_dir!(), "decision_log_test_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
+    # test_helper.exs sets SYMPHONY_DECISION_LOG=0 to silence the production
+    # call sites during the orchestrator test suite. This module needs the
+    # ledger ON to exercise the happy-path writes; restore the suite default
+    # on the way out so other tests keep their silent baseline.
+    prior = System.get_env("SYMPHONY_DECISION_LOG")
+    System.put_env("SYMPHONY_DECISION_LOG", "1")
     on_exit(fn -> File.rm_rf!(tmp) end)
-    on_exit(fn -> System.delete_env("SYMPHONY_DECISION_LOG") end)
+
+    on_exit(fn ->
+      case prior do
+        nil -> System.delete_env("SYMPHONY_DECISION_LOG")
+        val -> System.put_env("SYMPHONY_DECISION_LOG", val)
+      end
+    end)
+
     {:ok, tmp: tmp}
   end
 
@@ -79,6 +92,24 @@ defmodule SymphonyElixir.DecisionLogTest do
       # We can't actually write to /opt/symphony/state in tests, but the call
       # must not crash and must return :ok (error swallowed).
       assert :ok = DecisionLog.emit("evt.default_path", %{})
+    end
+
+    test "honors Application env override of the default path", %{tmp: tmp} do
+      path = Path.join(tmp, "app_env_decisions.jsonl")
+      prior = Application.get_env(:symphony_elixir, :decision_log_path)
+      Application.put_env(:symphony_elixir, :decision_log_path, path)
+
+      on_exit(fn ->
+        case prior do
+          nil -> Application.delete_env(:symphony_elixir, :decision_log_path)
+          val -> Application.put_env(:symphony_elixir, :decision_log_path, val)
+        end
+      end)
+
+      assert :ok = DecisionLog.emit("evt.app_env", %{ok: true})
+      assert File.exists?(path)
+      [line] = path |> File.read!() |> String.split("\n", trim: true)
+      assert Jason.decode!(line)["event"] == "evt.app_env"
     end
   end
 

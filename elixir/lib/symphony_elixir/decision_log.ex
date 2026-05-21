@@ -31,11 +31,18 @@ defmodule SymphonyElixir.DecisionLog do
   def emit(event, payload \\ %{}, opts \\ [])
       when is_binary(event) and is_map(payload) and is_list(opts) do
     if enabled?() do
-      path = Keyword.get(opts, :path, @default_path)
+      path = Keyword.get(opts, :path, configured_path())
       do_emit(event, payload, path)
     else
       :ok
     end
+  end
+
+  # Resolved at call time so the orchestrator/host test suite can override the
+  # default with `Application.put_env(:symphony_elixir, :decision_log_path, ...)`
+  # — same pattern as `:workpads_path`, `:status_path`, `:log_file`.
+  defp configured_path do
+    Application.get_env(:symphony_elixir, :decision_log_path, @default_path)
   end
 
   defp do_emit(event, payload, path) do
