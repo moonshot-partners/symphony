@@ -24,7 +24,9 @@ jobs:
           # absorb the realistic post-split tail (helpers + types + specs).
           # Bumped 800→850: orchestrator.ex absorbs Gate D result handler
           # until a dedicated GateResultHandler sibling is extracted.
-          LIMIT=850
+          # Bumped 850→900: orchestrator.ex absorbs pr_reengagement reconcile
+          # handler from SYM-16 (PR #146) — sibling extraction deferred.
+          LIMIT=900
 
           fail=0
           while IFS= read -r path; do
