@@ -97,8 +97,6 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     end
   end
 
-  defp reengage_issue(state, _issue, _opts), do: state
-
   defp handle_critical(state, issue, pr_url, info, opts) do
     engagement = Map.get(state.pr_engagements, pr_url, %{count: 0, cap_hit_shas: MapSet.new()})
     head_sha = Map.get(info, :head_sha, "")
@@ -165,8 +163,6 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
       _ -> nil
     end)
   end
-
-  defp pr_url_for(_), do: nil
 
   defp dispatch_body(info) do
     count = Map.get(info, :count, 0)

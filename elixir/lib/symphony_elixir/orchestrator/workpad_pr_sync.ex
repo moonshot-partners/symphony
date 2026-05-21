@@ -98,14 +98,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
       end)
   end
 
-  defp in_auto_engagement?(_issue, _pr_engagements), do: false
-
   defp pr_urls(%{repos: repos}) when is_list(repos) do
     Enum.flat_map(repos, fn
       %{pr: %{url: url}} when is_binary(url) -> [url]
       _ -> []
     end)
   end
-
-  defp pr_urls(_), do: []
 end

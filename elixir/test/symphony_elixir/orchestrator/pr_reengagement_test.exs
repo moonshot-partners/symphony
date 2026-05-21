@@ -327,5 +327,66 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       refute_receive :transitioned, 50
       refute_receive :commented, 50
     end
+
+    test "no-op when fetched issue carries repos but none have a PR yet (defensive flat_map fallback)" do
+      parent = self()
+
+      issue_repo_no_pr = %Issue{
+        id: "i-pre-pr",
+        identifier: "ISS-PREPR",
+        state: "Done",
+        repos: [%{name: "fe-next-app", pr: nil}]
+      }
+
+      state = build_state(%{"i-pre-pr" => issue_repo_no_pr})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [issue_repo_no_pr]} end,
+          detector_fn: fn _issue ->
+            send(parent, :detector_called)
+            :none
+          end,
+          state_transition_fn: fn _issue, _target ->
+            send(parent, :transitioned)
+            :ok
+          end,
+          comment_fn: fn _id, _body, _parent ->
+            send(parent, :commented)
+            {:ok, "c"}
+          end
+        })
+
+      assert ^state = PrReengagement.run(state, opts)
+
+      refute_receive :detector_called, 50
+      refute_receive :transitioned, 50
+      refute_receive :commented, 50
+    end
+
+    test "DISPATCH body renders '(no items listed)' when items list is empty" do
+      parent = self()
+      pr_url = "https://github.com/org/repo/pull/12"
+
+      state = build_state(%{"i-empty" => issue("i-empty", pr_url)})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [issue("i-empty", pr_url)]} end,
+          detector_fn: fn _issue ->
+            {:critical, %{count: 0, items: [], head_sha: "sha-empty"}}
+          end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, body, _parent ->
+            send(parent, {:commented, body})
+            {:ok, "c"}
+          end
+        })
+
+      _ = PrReengagement.run(state, opts)
+
+      assert_receive {:commented, body}, 50
+      assert body =~ "(no items listed)"
+    end
   end
 end

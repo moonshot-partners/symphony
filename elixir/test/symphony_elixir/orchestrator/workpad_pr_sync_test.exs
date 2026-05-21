@@ -215,6 +215,100 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
   end
 
+  test "does NOT bypass when pr_engagements entry has count == 0 (engagement initialized but not yet dispatched)" do
+    issue_id = "issue-bypass-zero"
+    pr_url = "https://github.com/org/repo/pull/78"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-BZERO",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-BZERO",
+        workpad_comment_id: "wp-bypass-zero",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = %State{
+      running: running,
+      claimed: MapSet.new([issue_id]),
+      workpads: %{},
+      retry_attempts: %{},
+      pr_engagements: %{pr_url => %{count: 0, cap_hit_shas: MapSet.new()}},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    # count == 0 → bypass NOT armed → QA-BLOCKED routing wins → reject state.
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
+  end
+
+  test "does NOT bypass when pr_engagements references a different PR url than the issue's repos carry" do
+    issue_id = "issue-bypass-mismatch"
+    issue_pr_url = "https://github.com/org/repo/pull/79"
+    engagement_pr_url = "https://github.com/org/repo/pull/999"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-MISMATCH",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: nil}, %{name: "schools-out", pr: %{url: issue_pr_url}}]
+        },
+        identifier: "WP-MISMATCH",
+        workpad_comment_id: "wp-mismatch",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    # First repos entry has `pr: nil` (covers pr_urls flat_map fallback).
+    # pr_engagements indexes a different url than the issue's actual PR → no
+    # bypass match → qa_blocked routes to reject.
+    state = %State{
+      running: running,
+      claimed: MapSet.new([issue_id]),
+      workpads: %{},
+      retry_attempts: %{},
+      pr_engagements: %{engagement_pr_url => %{count: 1, cap_hit_shas: MapSet.new()}},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+  end
+
   test "routes state to on_complete_state when QA is not BLOCKED" do
     issue_id = "issue-qa-ok-1"
 
