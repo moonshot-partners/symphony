@@ -343,4 +343,129 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     @moduledoc false
     def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}
   end
+
+  describe "DecisionLog emissions" do
+    setup do
+      tmp = Path.join(System.tmp_dir!(), "workpad_pr_sync_log_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      path = Path.join(tmp, "decisions.jsonl")
+
+      prior_app = Application.get_env(:symphony_elixir, :decision_log_path)
+      prior_env = System.get_env("SYMPHONY_DECISION_LOG")
+      Application.put_env(:symphony_elixir, :decision_log_path, path)
+      System.put_env("SYMPHONY_DECISION_LOG", "1")
+
+      on_exit(fn ->
+        File.rm_rf!(tmp)
+
+        case prior_app do
+          nil -> Application.delete_env(:symphony_elixir, :decision_log_path)
+          val -> Application.put_env(:symphony_elixir, :decision_log_path, val)
+        end
+
+        case prior_env do
+          nil -> System.delete_env("SYMPHONY_DECISION_LOG")
+          val -> System.put_env("SYMPHONY_DECISION_LOG", val)
+        end
+      end)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        tracker_active_states: ["Scheduled", "In Progress"],
+        tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+        tracker_on_complete_state: "In Code Review",
+        tracker_on_reject_state: "On Hold / Blocked",
+        qa_evidence_subpath: "fe-next-app/qa-evidence"
+      )
+
+      {:ok, ledger_path: path}
+    end
+
+    defp branches(path) do
+      path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["event"] == "workpad_pr_sync.route"))
+      |> Enum.map(& &1["payload"]["branch"])
+    end
+
+    test "emits default_complete branch when QA is not blocked and no engagement", %{ledger_path: path} do
+      issue_id = "i-route-default"
+      pr_url = "https://github.com/o/r/pull/100"
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{
+            id: issue_id,
+            identifier: "WP-100",
+            state: "Scheduled",
+            repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+          },
+          identifier: "WP-100",
+          workpad_comment_id: "wp-100",
+          workspace_path: "/tmp/nonexistent"
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+      _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
+      assert "default_complete" in branches(path)
+    end
+
+    test "emits auto_engagement_bypass branch when PR has active engagement", %{ledger_path: path} do
+      issue_id = "i-route-bypass"
+      pr_url = "https://github.com/o/r/pull/101"
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{
+            id: issue_id,
+            identifier: "WP-101",
+            state: "Scheduled",
+            repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+          },
+          identifier: "WP-101",
+          workpad_comment_id: "wp-101",
+          workspace_path: "/tmp/nonexistent"
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+      state =
+        %{build_state(running) | pr_engagements: %{pr_url => %{count: 1, cap_hit_shas: MapSet.new()}}}
+
+      _ = WorkpadPrSync.sync(state, issue_id, self())
+      assert "auto_engagement_bypass" in branches(path)
+    end
+
+    test "emits qa_blocked branch when QA self-reports BLOCKED and not in engagement", %{ledger_path: path} do
+      issue_id = "i-route-qa-blocked"
+      pr_url = "https://github.com/o/r/pull/102"
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{
+            id: issue_id,
+            identifier: "WP-102",
+            state: "Scheduled",
+            repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+          },
+          identifier: "WP-102",
+          workpad_comment_id: "wp-102",
+          workspace_path: "/tmp/nonexistent"
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+      _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
+      assert "qa_blocked" in branches(path)
+    end
+  end
 end

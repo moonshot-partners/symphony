@@ -14,7 +14,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   via `send/2` without coupling this module to `self()`.
   """
 
-  alias SymphonyElixir.{Config, GitHubPr, QaEvidence, Workpad}
+  alias SymphonyElixir.{Config, DecisionLog, GitHubPr, QaEvidence, Workpad}
   alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition}
 
   @doc """
@@ -53,26 +53,41 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     end
   end
 
-  defp run_side_effects(nil, _running_entry, _parent_comment_id, _pr_engagements), do: :ok
+  defp run_side_effects(nil, _running_entry, _parent_comment_id, _pr_engagements) do
+    DecisionLog.emit("workpad_pr_sync.route", %{
+      branch: "skip_nil_issue",
+      target_state: nil
+    })
+
+    :ok
+  end
 
   defp run_side_effects(issue, running_entry, parent_comment_id, pr_engagements) do
     reject_state = Config.settings!().tracker.on_reject_state
 
-    target_state =
+    {branch, target_state} =
       cond do
         in_auto_engagement?(issue, pr_engagements) ->
           # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
           # in on_reject_state on this run even if QA self-reports BLOCKED
           # — let it land. If the next claude-pr-review verdict is still
           # critical, PrReengagement caps at K=1 and parks for human review.
-          Config.settings!().tracker.on_complete_state
+          {"auto_engagement_bypass", Config.settings!().tracker.on_complete_state}
 
         GitHubPr.qa_blocked?(issue) and is_binary(reject_state) ->
-          reject_state
+          {"qa_blocked", reject_state}
 
         true ->
-          Config.settings!().tracker.on_complete_state
+          {"default_complete", Config.settings!().tracker.on_complete_state}
       end
+
+    DecisionLog.emit("workpad_pr_sync.route", %{
+      branch: branch,
+      issue_id: Map.get(issue, :id),
+      identifier: Map.get(issue, :identifier),
+      target_state: target_state,
+      pr_engagement_keys: Map.keys(pr_engagements)
+    })
 
     StateTransition.apply(issue, target_state)
     Task.start(fn -> GithubLabel.apply(issue) end)
