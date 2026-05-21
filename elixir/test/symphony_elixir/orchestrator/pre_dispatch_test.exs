@@ -74,6 +74,11 @@ defmodule SymphonyElixir.Orchestrator.PreDispatchTest do
       assert :ok = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
     end
 
+    test "whitespace-only project_name passes (normalizer strips, but defensive)" do
+      i = issue(project_name: "   \n\t  ")
+      assert :ok = PreDispatch.check(i, unsupported_projects: ["New Maestro 2.0"])
+    end
+
     test "empty unsupported list is a no-op (default behavior)" do
       i = issue(project_name: "New Maestro 2.0")
       assert :ok = PreDispatch.check(i, unsupported_projects: [])

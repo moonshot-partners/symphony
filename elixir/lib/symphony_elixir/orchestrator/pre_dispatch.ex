@@ -56,22 +56,18 @@ defmodule SymphonyElixir.Orchestrator.PreDispatch do
   defp check_project(_issue, []), do: :ok
 
   defp check_project(%Issue{project_name: name}, unsupported) when is_binary(name) do
-    normalized = name |> String.trim() |> String.downcase()
+    case String.downcase(String.trim(name)) do
+      "" ->
+        :ok
 
-    cond do
-      normalized == "" -> :ok
-      Enum.any?(unsupported, &project_match?(&1, normalized)) -> unsupported_project_reject(name)
-      true -> :ok
+      normalized ->
+        if Enum.any?(unsupported, &(String.downcase(String.trim(&1)) == normalized)) do
+          unsupported_project_reject(name)
+        else
+          :ok
+        end
     end
   end
-
-  defp check_project(_issue, _unsupported), do: :ok
-
-  defp project_match?(entry, normalized) when is_binary(entry) do
-    String.downcase(String.trim(entry)) == normalized
-  end
-
-  defp project_match?(_entry, _normalized), do: false
 
   @spec apply_reject(Issue.t(), reject_reason(), String.t()) :: :ok
   def apply_reject(%Issue{} = issue, reason_code, reason_msg)

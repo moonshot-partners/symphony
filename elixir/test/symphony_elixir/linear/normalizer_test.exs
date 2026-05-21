@@ -113,6 +113,12 @@ defmodule SymphonyElixir.Linear.NormalizerTest do
     assert is_nil(issue.project_name)
   end
 
+  test "project_name: whitespace-only name trims to nil" do
+    raw = Map.put(base_issue(), "project", %{"name" => "   \n\t  "})
+    issue = Client.normalize_issue_for_test(raw)
+    assert is_nil(issue.project_name)
+  end
+
   test "assigned_to_worker? is true when assignee matches filter by email" do
     assignee = %{"id" => "u1", "email" => "alice@example.com", "name" => "Alice", "displayName" => "Alice"}
     raw = Map.put(base_issue(), "assignee", assignee)
