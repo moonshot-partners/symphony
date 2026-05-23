@@ -3,6 +3,8 @@
 .symphony-runtime/
 docs/*
 !docs/spec/
+!docs/ONBOARDING.md
+!docs/templates/
 mvp-claude-sodev/
 .qa-spike/
 __pycache__/
