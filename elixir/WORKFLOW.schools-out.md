@@ -94,6 +94,12 @@ agent_runtime:
     - SYMPHONY_GITHUB_APP_ID
     - SYMPHONY_GITHUB_APP_INSTALLATION_ID
     - SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH
+  # SYM-25: enforce branch naming at `git push` time. Pattern must allow the
+  # types AGENTS.md declares: `agents/` (canonical), plus the conventional-commit
+  # prefixes Symphony itself uses for its own PRs (so the orchestrator's own
+  # branches don't get blocked when symphony repos run through the same shim).
+  # Team prefixes are matched case-insensitively in the shim.
+  branch_naming_pattern: "^(feat|fix|chore|docs|refactor|test|ci|agents)/(SYM|SODEV)-[0-9]+(-[a-z0-9-]+)?$"
 qa:
   # Paths inside the workspace where tests drop QA evidence bundles
   # (screenshots, session.webm, qa-report.md). Symphony reads each dir

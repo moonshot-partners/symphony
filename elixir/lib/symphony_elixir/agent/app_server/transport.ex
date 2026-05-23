@@ -27,6 +27,7 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
     SYMPHONY_WORKFLOW_FILE
     SYMPHONY_TDD_PHASE_ENFORCEMENT
     SYMPHONY_BASH_POLICY_ALLOW
+    SYMPHONY_BRANCH_NAMING_PATTERN
   ]
 
   @doc """
@@ -57,7 +58,16 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
           []
       end
 
-    tdd ++ bash_allow
+    branch_pattern =
+      case Map.get(agent_runtime_settings, :branch_naming_pattern) do
+        pattern when is_binary(pattern) and pattern != "" ->
+          [{~c"SYMPHONY_BRANCH_NAMING_PATTERN", String.to_charlist(pattern)}]
+
+        _ ->
+          []
+      end
+
+    tdd ++ bash_allow ++ branch_pattern
   end
 
   @spec start_port(Path.t(), String.t() | nil) :: {:ok, port()} | {:error, term()}

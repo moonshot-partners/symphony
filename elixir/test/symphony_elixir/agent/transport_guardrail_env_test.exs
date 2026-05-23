@@ -48,5 +48,41 @@ defmodule SymphonyElixir.Agent.AppServer.TransportGuardrailEnvTest do
       assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_TDD_PHASE_ENFORCEMENT" end)
       assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_BASH_POLICY_ALLOW" end)
     end
+
+    test "emits SYMPHONY_BRANCH_NAMING_PATTERN when branch_naming_pattern is a non-empty string" do
+      settings = %{branch_naming_pattern: "^(feat|fix)/SYM-[0-9]+(-[a-z0-9-]+)?$"}
+
+      env = Transport.guardrail_env(settings)
+
+      assert {~c"SYMPHONY_BRANCH_NAMING_PATTERN", charlist} =
+               Enum.find(env, fn {k, _} -> k == ~c"SYMPHONY_BRANCH_NAMING_PATTERN" end)
+
+      assert to_string(charlist) == "^(feat|fix)/SYM-[0-9]+(-[a-z0-9-]+)?$"
+    end
+
+    test "omits SYMPHONY_BRANCH_NAMING_PATTERN when branch_naming_pattern is nil or empty" do
+      assert Enum.all?(
+               Transport.guardrail_env(%{branch_naming_pattern: nil}),
+               fn {k, _} -> k != ~c"SYMPHONY_BRANCH_NAMING_PATTERN" end
+             )
+
+      assert Enum.all?(
+               Transport.guardrail_env(%{branch_naming_pattern: ""}),
+               fn {k, _} -> k != ~c"SYMPHONY_BRANCH_NAMING_PATTERN" end
+             )
+    end
+
+    test "stacks TDD + bash policy + branch_naming envs when all three opt in" do
+      settings = %{
+        tdd_phase_enforcement: true,
+        bash_policy_allow: ["git reset --hard origin/dev"],
+        branch_naming_pattern: "^agents/SODEV-[0-9]+"
+      }
+
+      env = Transport.guardrail_env(settings)
+      assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_TDD_PHASE_ENFORCEMENT" end)
+      assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_BASH_POLICY_ALLOW" end)
+      assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_BRANCH_NAMING_PATTERN" end)
+    end
   end
 end
