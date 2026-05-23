@@ -434,4 +434,133 @@ defmodule SymphonyElixir.GitHubPr do
   end
 
   defp pr_urls(_), do: []
+
+  @typedoc """
+  Decision verdict for `required_checks_status/1` (SYM-1c / SYM-29).
+
+  * `:all_green`  — every check completed with SUCCESS / NEUTRAL / SKIPPED / STALE.
+  * `{:red, [name]}` — at least one check failed; payload lists the failing names
+    in the order returned by GitHub (used by the orchestrator's reject-state
+    comment).
+  * `:pending` — no failures yet but at least one check is still running.
+  """
+  @type required_checks_status :: :all_green | {:red, [String.t()]} | :pending
+
+  @doc """
+  Returns the CI verdict for the issue's PR(s) per `gh pr view --json statusCheckRollup`.
+
+  When multiple PRs are attached, the verdict is the worst case (any red → red,
+  else any pending → pending, else all green). Issues with no PR attached
+  short-circuit to `:all_green` so callers can apply this gate uniformly.
+
+  Tests inject a pure function via
+  `Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn issue -> verdict end)`.
+  """
+  @spec required_checks_status(SymphonyElixir.Linear.Issue.t() | map()) :: required_checks_status()
+  def required_checks_status(issue) do
+    case pr_urls(issue) do
+      [] ->
+        :all_green
+
+      _urls ->
+        check_fn =
+          Application.get_env(
+            :symphony_elixir,
+            :pr_required_checks_status_fn,
+            &__MODULE__.default_required_checks_status/1
+          )
+
+        check_fn.(issue)
+    end
+  end
+
+  @doc false
+  @spec default_required_checks_status(SymphonyElixir.Linear.Issue.t() | map()) ::
+          required_checks_status()
+  def default_required_checks_status(issue) do
+    issue
+    |> pr_urls()
+    |> Enum.reduce(:all_green, &combine_status(&1, &2))
+  end
+
+  defp combine_status(_url, {:red, _} = red), do: red
+
+  defp combine_status(url, acc) do
+    case fetch_status_check_rollup(url) do
+      {:red, _} = red -> red
+      :pending -> :pending
+      :all_green -> acc
+    end
+  end
+
+  defp fetch_status_check_rollup(url) when is_binary(url) do
+    case Regex.run(@github_pr_regex, url) do
+      [_, owner, repo, number] -> shell_status_check_rollup(owner, repo, number, url)
+      _ -> :all_green
+    end
+  end
+
+  defp fetch_status_check_rollup(_), do: :all_green
+
+  defp shell_status_check_rollup(owner, repo, number, url) do
+    case System.cmd(
+           "gh",
+           ["pr", "view", number, "--repo", "#{owner}/#{repo}", "--json", "statusCheckRollup"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        case Jason.decode(output) do
+          {:ok, %{"statusCheckRollup" => list}} when is_list(list) ->
+            classify_status_check_rollup(list)
+
+          _ ->
+            Logger.debug("required_checks_status: malformed rollup for #{url} output=#{inspect(output)}")
+            :all_green
+        end
+
+      {output, code} ->
+        Logger.debug("gh pr view statusCheckRollup failed for #{url} exit=#{code} output=#{inspect(output)}")
+        :all_green
+    end
+  end
+
+  @doc """
+  Pure classifier for a list of `statusCheckRollup` entries returned by
+  `gh pr view --json statusCheckRollup`.
+
+  Handles both shapes the GitHub GraphQL API can emit:
+
+  * `CheckRun` — `%{"status" => "COMPLETED" | _, "conclusion" => "SUCCESS" | "FAILURE" | …, "name" => name}`
+  * `StatusContext` — `%{"state" => "SUCCESS" | "FAILURE" | "PENDING" | _, "context" => name}`
+
+  Treats SUCCESS / NEUTRAL / SKIPPED / STALE as green; FAILURE / CANCELLED /
+  TIMED_OUT / ACTION_REQUIRED / ERROR as red; everything else as pending.
+  """
+  @spec classify_status_check_rollup([map()]) :: required_checks_status()
+  def classify_status_check_rollup(list) when is_list(list) do
+    reds = list |> Enum.filter(&red_check?/1) |> Enum.map(&check_name/1)
+
+    cond do
+      reds != [] -> {:red, reds}
+      Enum.any?(list, &pending_check?/1) -> :pending
+      true -> :all_green
+    end
+  end
+
+  @red_conclusions ~w(FAILURE CANCELLED TIMED_OUT ACTION_REQUIRED)
+  @red_states ~w(FAILURE ERROR)
+  @pending_statuses ~w(IN_PROGRESS QUEUED PENDING WAITING REQUESTED)
+  @pending_states ~w(PENDING EXPECTED)
+
+  defp red_check?(%{"conclusion" => c}) when is_binary(c), do: c in @red_conclusions
+  defp red_check?(%{"state" => s}) when is_binary(s), do: s in @red_states
+  defp red_check?(_), do: false
+
+  defp pending_check?(%{"status" => s}) when is_binary(s), do: s in @pending_statuses
+  defp pending_check?(%{"state" => s}) when is_binary(s), do: s in @pending_states
+  defp pending_check?(_), do: false
+
+  defp check_name(%{"name" => n}) when is_binary(n), do: n
+  defp check_name(%{"context" => n}) when is_binary(n), do: n
+  defp check_name(_), do: "unknown"
 end

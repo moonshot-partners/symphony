@@ -173,4 +173,117 @@ defmodule SymphonyElixir.GitHubPrTest do
       assert GitHubPr.qa_blocked?(%{repos: []}) == false
     end
   end
+
+  describe "classify_status_check_rollup/1" do
+    test "returns :all_green when every CheckRun is COMPLETED+SUCCESS" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "build", "status" => "COMPLETED", "conclusion" => "SUCCESS"},
+        %{"__typename" => "CheckRun", "name" => "lint", "status" => "COMPLETED", "conclusion" => "SUCCESS"}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == :all_green
+    end
+
+    test "treats NEUTRAL/SKIPPED/STALE conclusions as green" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "a", "status" => "COMPLETED", "conclusion" => "NEUTRAL"},
+        %{"__typename" => "CheckRun", "name" => "b", "status" => "COMPLETED", "conclusion" => "SKIPPED"},
+        %{"__typename" => "CheckRun", "name" => "c", "status" => "COMPLETED", "conclusion" => "STALE"}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == :all_green
+    end
+
+    test "returns {:red, names} when any CheckRun concluded FAILURE" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "build", "status" => "COMPLETED", "conclusion" => "SUCCESS"},
+        %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE"}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == {:red, ["qa-evidence"]}
+    end
+
+    test "collects every red check name in order" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "build", "status" => "COMPLETED", "conclusion" => "FAILURE"},
+        %{"__typename" => "CheckRun", "name" => "lint", "status" => "COMPLETED", "conclusion" => "SUCCESS"},
+        %{"__typename" => "CheckRun", "name" => "test", "status" => "COMPLETED", "conclusion" => "CANCELLED"},
+        %{"__typename" => "CheckRun", "name" => "deploy", "status" => "COMPLETED", "conclusion" => "TIMED_OUT"},
+        %{"__typename" => "CheckRun", "name" => "scan", "status" => "COMPLETED", "conclusion" => "ACTION_REQUIRED"}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) ==
+               {:red, ["build", "test", "deploy", "scan"]}
+    end
+
+    test "returns :pending when any CheckRun is not yet COMPLETED" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "build", "status" => "COMPLETED", "conclusion" => "SUCCESS"},
+        %{"__typename" => "CheckRun", "name" => "deploy", "status" => "IN_PROGRESS", "conclusion" => nil}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == :pending
+    end
+
+    test "red wins over pending in mixed rollups" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "build", "status" => "COMPLETED", "conclusion" => "FAILURE"},
+        %{"__typename" => "CheckRun", "name" => "deploy", "status" => "QUEUED", "conclusion" => nil}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == {:red, ["build"]}
+    end
+
+    test "handles legacy StatusContext entries (state/context shape)" do
+      list = [
+        %{"__typename" => "StatusContext", "context" => "ci/circleci", "state" => "SUCCESS"},
+        %{"__typename" => "StatusContext", "context" => "ci/jenkins", "state" => "FAILURE"}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == {:red, ["ci/jenkins"]}
+    end
+
+    test "StatusContext PENDING is pending" do
+      list = [
+        %{"__typename" => "StatusContext", "context" => "ci/jenkins", "state" => "PENDING"}
+      ]
+
+      assert GitHubPr.classify_status_check_rollup(list) == :pending
+    end
+
+    test "returns :all_green for an empty list (no checks configured)" do
+      assert GitHubPr.classify_status_check_rollup([]) == :all_green
+    end
+  end
+
+  describe "required_checks_status/1 with injected fn" do
+    setup do
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn) end)
+      :ok
+    end
+
+    test "returns :all_green for issue with no PR urls" do
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ ->
+        raise "should not be called"
+      end)
+
+      assert GitHubPr.required_checks_status(%{repos: []}) == :all_green
+    end
+
+    test "delegates to the injected fn when PR urls are present" do
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue ->
+        {:red, ["qa-evidence"]}
+      end)
+
+      issue = %{repos: [%{name: "schools-out", pr: %{url: "https://github.com/o/r/pull/1"}}]}
+      assert GitHubPr.required_checks_status(issue) == {:red, ["qa-evidence"]}
+    end
+
+    test "returns :pending verbatim from injected fn" do
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ -> :pending end)
+
+      issue = %{repos: [%{name: "schools-out", pr: %{url: "https://github.com/o/r/pull/1"}}]}
+      assert GitHubPr.required_checks_status(issue) == :pending
+    end
+  end
 end

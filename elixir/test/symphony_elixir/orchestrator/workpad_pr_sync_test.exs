@@ -10,6 +10,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     Application.put_env(:symphony_elixir, :workpad_enabled, true)
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
 
+    # Default required-checks injection so existing tests (and new ones that
+    # don't care about CI routing) don't shell out to `gh pr view`.
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
+
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
       tracker_active_states: ["Scheduled", "In Progress"],
@@ -29,6 +33,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
       else
         Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
       end
+
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
     end)
 
     :ok
@@ -309,6 +315,155 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
   end
 
+  test "routes state to on_reject_state when required CI checks are RED" do
+    issue_id = "issue-ci-red-1"
+    pr_url = "https://github.com/org/repo/pull/200"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-CI-RED-1",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-CI-RED-1",
+        workpad_comment_id: "wp-comment-ci-red",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue ->
+      {:red, ["qa-evidence", "lint"]}
+    end)
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+    end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
+
+    # Linear comment naming the red checks lands on the workpad thread.
+    assert_receive {:memory_tracker_comment, ^issue_id, comment_body}, 1_000
+    assert comment_body =~ "qa-evidence"
+    assert comment_body =~ "lint"
+    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-ci-red"}, 1_000
+  end
+
+  test "does NOT transition when required CI checks are PENDING (retry loop polls)" do
+    issue_id = "issue-ci-pending-1"
+    pr_url = "https://github.com/org/repo/pull/201"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-CI-PENDING-1",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-CI-PENDING-1",
+        workpad_comment_id: "wp-comment-ci-pending",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :pending end)
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+    end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    # NO state transition fires (neither complete nor reject) — caller's
+    # retry loop re-evaluates on the next reconcile tick.
+    refute_receive {:memory_tracker_state_update, ^issue_id, _}, 200
+  end
+
+  test "SYM-16 auto-engagement bypass overrides ci_red (lets K=1 re-engagement run)" do
+    issue_id = "issue-sym16-vs-cired"
+    pr_url = "https://github.com/org/repo/pull/202"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-SYM16",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-SYM16",
+        workpad_comment_id: "wp-comment-sym16",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    # Even with red CI, the SYM-16 bypass wins so the K=1 re-engagement
+    # has a chance to land instead of double-routing on every red check.
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ ->
+      {:red, ["qa-evidence"]}
+    end)
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _ -> true end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+    end)
+
+    state = %State{
+      running: running,
+      claimed: MapSet.new([issue_id]),
+      workpads: %{},
+      retry_attempts: %{},
+      pr_engagements: %{pr_url => %{count: 1, cap_hit_shas: MapSet.new()}},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
+  end
+
   test "routes state to on_complete_state when QA is not BLOCKED" do
     issue_id = "issue-qa-ok-1"
 
@@ -441,6 +596,69 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
       _ = WorkpadPrSync.sync(state, issue_id, self())
       assert "auto_engagement_bypass" in branches(path)
+    end
+
+    test "emits ci_red branch when required checks are RED and no engagement bypass", %{ledger_path: path} do
+      issue_id = "i-route-cired"
+      pr_url = "https://github.com/o/r/pull/210"
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{
+            id: issue_id,
+            identifier: "WP-210",
+            state: "Scheduled",
+            repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+          },
+          identifier: "WP-210",
+          workpad_comment_id: "wp-210",
+          workspace_path: "/tmp/nonexistent"
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ ->
+        {:red, ["qa-evidence"]}
+      end)
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _ -> false end)
+
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+        Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+      end)
+
+      _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
+      assert "ci_red" in branches(path)
+    end
+
+    test "emits ci_pending branch when required checks are PENDING", %{ledger_path: path} do
+      issue_id = "i-route-cipending"
+      pr_url = "https://github.com/o/r/pull/211"
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{
+            id: issue_id,
+            identifier: "WP-211",
+            state: "Scheduled",
+            repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+          },
+          identifier: "WP-211",
+          workpad_comment_id: "wp-211",
+          workspace_path: "/tmp/nonexistent"
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ -> :pending end)
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _ -> false end)
+
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+        Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+      end)
+
+      _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
+      assert "ci_pending" in branches(path)
     end
 
     test "emits qa_blocked branch when QA self-reports BLOCKED and not in engagement", %{ledger_path: path} do
