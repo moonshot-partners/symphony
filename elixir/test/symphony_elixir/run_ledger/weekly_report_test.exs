@@ -153,13 +153,90 @@ defmodule SymphonyElixir.RunLedger.WeeklyReportTest do
       ]
 
       out = WeeklyReport.render(runs, @now)
-      assert out =~ "| SODEV-1 | 2 |"
+      assert out =~ "| SODEV-1 | — | 2 |"
     end
 
     test "points operators to the Linear board for completion data" do
       out = WeeklyReport.render([run(%{})], @now)
       assert out =~ "## Ticket completion"
       assert out =~ "Linear"
+    end
+  end
+
+  describe "render/2 — SYM-6 KPI extensions" do
+    test "groups tickets by their initiator and shows share of total" do
+      # Two tickets attributed to vini, one to mariana, one with no creator —
+      # the breakdown must list every initiator with the percent share rounded
+      # to whole numbers and sort by descending count.
+      runs = [
+        run(%{"ticket" => "SODEV-1", "initiator" => "vini"}),
+        run(%{"ticket" => "SODEV-2", "initiator" => "vini"}),
+        run(%{"ticket" => "SODEV-3", "initiator" => "mariana"}),
+        run(%{"ticket" => "SODEV-4", "initiator" => nil})
+      ]
+
+      out = WeeklyReport.render(runs, @now)
+      assert out =~ "## Initiator breakdown"
+      assert out =~ "- vini: 2 tickets (50%)"
+      assert out =~ "- mariana: 1 ticket (25%)"
+      assert out =~ "- (unknown): 1 ticket (25%)"
+    end
+
+    test "initiator breakdown uses the latest run's initiator per ticket" do
+      runs = [
+        run(%{"ticket" => "SODEV-1", "initiator" => "vini", "recorded_at" => "2026-05-19T12:00:00Z"}),
+        run(%{"ticket" => "SODEV-1", "initiator" => "mariana", "recorded_at" => "2026-05-20T12:00:00Z"})
+      ]
+
+      out = WeeklyReport.render(runs, @now)
+      assert out =~ "- mariana: 1 ticket (100%)"
+    end
+
+    test "rework-after-review counts tickets re-dispatched after a pr_open run" do
+      # SODEV-A: pr_open then re-dispatch → rework after review.
+      # SODEV-B: two runs but neither produced a PR → multi-pass but NOT
+      #          rework-after-review.
+      # SODEV-C: single pr_open run → not rework.
+      runs = [
+        run(%{"ticket" => "SODEV-A", "outcome" => "pr_open", "recorded_at" => "2026-05-19T12:00:00Z"}),
+        run(%{"ticket" => "SODEV-A", "outcome" => "no_pr", "recorded_at" => "2026-05-20T12:00:00Z"}),
+        run(%{"ticket" => "SODEV-B", "outcome" => "no_pr", "recorded_at" => "2026-05-19T12:00:00Z"}),
+        run(%{"ticket" => "SODEV-B", "outcome" => "no_pr", "recorded_at" => "2026-05-20T12:00:00Z"}),
+        run(%{"ticket" => "SODEV-C", "outcome" => "pr_open"})
+      ]
+
+      out = WeeklyReport.render(runs, @now)
+      assert out =~ "Rework after review: 33% (1 of 3 tickets"
+    end
+
+    test "per-ticket row carries initiator and time-in-review for pr_open tickets" do
+      runs = [
+        run(%{
+          "ticket" => "SODEV-9",
+          "initiator" => "vini",
+          "outcome" => "pr_open",
+          "recorded_at" => "2026-05-20T15:30:00Z"
+        })
+      ]
+
+      out = WeeklyReport.render(runs, @now)
+      # @now is 2026-05-20 18:00:00 → 2h 30m in review.
+      assert out =~ "| SODEV-9 | vini | 1 | 1 | 0 | $0.00 | pr_open | 2h 30m |"
+    end
+
+    test "time-in-review is em-dash when the latest run did not produce a PR" do
+      runs = [run(%{"ticket" => "SODEV-X", "outcome" => "no_pr"})]
+
+      out = WeeklyReport.render(runs, @now)
+      # Expect the em-dash placeholder in the time-in-review cell.
+      assert out =~ "| SODEV-X | — | 1 | 1 | 0 | $0.00 | no_pr | — |"
+    end
+
+    test "deferred-metrics section explicitly defers \"% of backlog\" to SYM-6" do
+      out = WeeklyReport.render([run(%{})], @now)
+      assert out =~ "## Future metrics (deferred)"
+      assert out =~ "% of the backlog"
+      assert out =~ "SYM-6"
     end
   end
 end

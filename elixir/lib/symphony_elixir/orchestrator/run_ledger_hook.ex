@@ -43,6 +43,7 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHook do
       turns: token_value(running_entry, :turn_count),
       retries: token_value(running_entry, :retry_attempt),
       pr_url: pr_url,
+      initiator: initiator_for(issue),
       started_at: started_at_iso(running_entry),
       session_id: Map.get(running_entry, :session_id),
       worker_host: Map.get(running_entry, :worker_host)
@@ -86,6 +87,10 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHook do
   defp identifier_for(%{identifier: id}, _) when is_binary(id), do: id
   defp identifier_for(_, %Issue{identifier: id}) when is_binary(id), do: id
   defp identifier_for(_, _), do: nil
+
+  defp initiator_for(%Issue{creator_display_name: name}) when is_binary(name) and name != "", do: name
+  defp initiator_for(%Issue{creator_name: name}) when is_binary(name) and name != "", do: name
+  defp initiator_for(_), do: nil
 
   defp extract_pr_url(%Issue{repos: repos}) when is_list(repos) do
     Enum.find_value(repos, fn

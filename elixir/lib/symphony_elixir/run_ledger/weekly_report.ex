@@ -48,11 +48,13 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
       IO.iodata_to_binary([
         header(window_start, now),
         summary(in_window),
+        initiator_breakdown(in_window),
         time_to_verify(in_window),
         effort(in_window),
         outcomes(in_window),
-        per_ticket(in_window),
-        completion_note()
+        per_ticket(in_window, now),
+        completion_note(),
+        deferred_metrics()
       ])
     end
   end
@@ -81,6 +83,8 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
     ticket_count = map_size(tickets)
     reworked = Enum.count(tickets, fn {_ticket, runs} -> length(runs) > 1 end)
     rework_pct = percent(reworked, ticket_count)
+    rework_after_review = count_rework_after_review(tickets)
+    rework_after_review_pct = percent(rework_after_review, ticket_count)
     cost = total_cost(runs)
     per_ticket_cost = if ticket_count > 0, do: cost / ticket_count, else: 0.0
 
@@ -90,10 +94,61 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
     - Runs: #{length(runs)}
     - Tickets worked: #{ticket_count}
     - Rework rate: #{rework_pct}% (#{reworked} of #{ticket_count} tickets needed more than one pass)
+    - Rework after review: #{rework_after_review_pct}% (#{rework_after_review} of #{ticket_count} tickets re-dispatched after a PR was opened — human jump-in proxy)
     - Estimated agent cost: $#{usd(cost)}
     - Cost per ticket worked: $#{usd(per_ticket_cost)}
 
     """
+  end
+
+  defp initiator_breakdown(runs) do
+    tickets_by_initiator =
+      runs
+      |> distinct_tickets()
+      |> Enum.map(fn {ticket, ticket_runs} -> {ticket, latest_initiator(ticket_runs)} end)
+
+    total = length(tickets_by_initiator)
+
+    rows =
+      tickets_by_initiator
+      |> Enum.frequencies_by(fn {_ticket, initiator} -> initiator end)
+      |> Enum.sort_by(fn {_initiator, count} -> -count end)
+      |> Enum.map_join("\n", fn {initiator, count} ->
+        "- #{initiator || "(unknown)"}: #{count} ticket#{plural(count)} (#{percent(count, total)}%)"
+      end)
+
+    """
+    ## Initiator breakdown
+
+    Who created the Linear ticket the agent worked. Per Juan's KPI ask
+    (\"what we don't measure we can't improve\") and Marianna's
+    attribution question — track the human authorship even before the
+    GitHub App lands.
+
+    #{rows}
+
+    """
+  end
+
+  defp count_rework_after_review(tickets) do
+    Enum.count(tickets, fn {_ticket, ticket_runs} ->
+      sorted = sort_by_recorded_at(ticket_runs)
+
+      sorted
+      |> Enum.drop(-1)
+      |> Enum.any?(fn run -> Map.get(run, "outcome") == "pr_open" end)
+    end)
+  end
+
+  defp latest_initiator(ticket_runs) do
+    ticket_runs
+    |> sort_by_recorded_at()
+    |> List.last()
+    |> Map.get("initiator")
+  end
+
+  defp sort_by_recorded_at(ticket_runs) do
+    Enum.sort_by(ticket_runs, &Map.get(&1, "recorded_at", ""))
   end
 
   defp time_to_verify(runs) do
@@ -158,30 +213,57 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
     """
   end
 
-  defp per_ticket(runs) do
+  defp per_ticket(runs, now) do
     rows =
       runs
       |> distinct_tickets()
       |> Enum.sort_by(fn {_ticket, ticket_runs} -> -length(ticket_runs) end)
-      |> Enum.map_join("\n", &per_ticket_row/1)
+      |> Enum.map_join("\n", &per_ticket_row(&1, now))
 
     """
     ## Per ticket
 
-    | Ticket | Passes | Turns | Tokens | Cost | Last outcome |
-    |---|---|---|---|---|---|
+    | Ticket | Initiator | Passes | Turns | Tokens | Cost | Last outcome | Time in review |
+    |---|---|---|---|---|---|---|---|
     #{rows}
 
     """
   end
 
-  defp per_ticket_row({ticket, ticket_runs}) do
+  defp per_ticket_row({ticket, ticket_runs}, now) do
     turns = sum_field(ticket_runs, "turns")
     tokens = sum_field(ticket_runs, "tokens")
     cost = total_cost(ticket_runs)
     last = last_outcome(ticket_runs)
+    initiator = latest_initiator(ticket_runs) || "—"
+    time_in_review = time_in_review_for(ticket_runs, now)
 
-    "| #{ticket} | #{length(ticket_runs)} | #{turns} | #{tokens} | $#{usd(cost)} | #{last} |"
+    "| #{ticket} | #{initiator} | #{length(ticket_runs)} | #{turns} | #{tokens} | $#{usd(cost)} | #{last} | #{time_in_review} |"
+  end
+
+  defp time_in_review_for(ticket_runs, now) do
+    # Time-in-code-review is approximated by the lifetime of the most recent
+    # `pr_open` run for the ticket. Symphony moves the ticket to the configured
+    # `tracker.on_complete_state` ("In Code Review") at the moment the PR
+    # attaches, so `recorded_at` of the latest `pr_open` is a reliable lower
+    # bound. Once the PR is merged/closed the column entry is no longer "in
+    # review", so we omit the value.
+    latest = ticket_runs |> sort_by_recorded_at() |> List.last()
+
+    # Window-filter guarantees a parseable `recorded_at` for every run reaching
+    # this path, so the only branch that returns "—" is the non-pr_open case.
+    if Map.get(latest, "outcome") == "pr_open" do
+      latest |> Map.get("recorded_at") |> parse_dt() |> format_duration_from(now)
+    else
+      "—"
+    end
+  end
+
+  defp format_duration_from(%DateTime{} = dt, now) do
+    seconds = max(0, DateTime.diff(now, dt, :second))
+    hours = div(seconds, 3600)
+    minutes = div(rem(seconds, 3600), 60)
+    "#{hours}h #{minutes}m"
   end
 
   defp completion_note do
@@ -194,6 +276,19 @@ defmodule SymphonyElixir.RunLedger.WeeklyReport do
 
     For completion, acceptance, and revert counts, read the Linear board
     filtered to the `agent` label and group by state.
+
+    """
+  end
+
+  defp deferred_metrics do
+    """
+    ## Future metrics (deferred)
+
+    "% of the backlog Symphony can realistically take" was flagged by
+    Marianna herself in the 2026-05-20 session as too early to measure
+    now. Tracked in SYM-6 as out-of-scope; revisit once the agent has run
+    on enough mixed tickets to establish a reliable success rate per
+    ticket archetype.
     """
   end
 

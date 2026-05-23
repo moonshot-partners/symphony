@@ -29,6 +29,10 @@ defmodule SymphonyElixir.Linear.Client do
           name
           displayName
         }
+        creator {
+          name
+          displayName
+        }
         labels {
           nodes {
             name
@@ -79,6 +83,10 @@ defmodule SymphonyElixir.Linear.Client do
         assignee {
           id
           email
+          name
+          displayName
+        }
+        creator {
           name
           displayName
         }

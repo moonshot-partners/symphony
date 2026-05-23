@@ -8,6 +8,7 @@ defmodule SymphonyElixir.Linear.Normalizer do
   @spec normalize_issue(map(), map() | nil) :: Issue.t() | nil
   def normalize_issue(issue, routing_filter) when is_map(issue) do
     assignee = issue["assignee"]
+    creator = issue["creator"]
     labels = extract_labels(issue)
 
     %Issue{
@@ -23,6 +24,8 @@ defmodule SymphonyElixir.Linear.Normalizer do
       assignee_id: assignee_field(assignee, "id"),
       assignee_name: assignee_field(assignee, "name"),
       assignee_display_name: assignee_field(assignee, "displayName"),
+      creator_name: assignee_field(creator, "name"),
+      creator_display_name: assignee_field(creator, "displayName"),
       blocked_by: extract_blockers(issue),
       labels: labels,
       repos: extract_repos(issue),
