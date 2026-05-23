@@ -23,6 +23,7 @@ This directory contains the Elixir agent orchestration service that polls Linear
   - Workspaces must stay under configured workspace root.
 - Orchestrator behavior is stateful and concurrency-sensitive; preserve retry, reconciliation, and cleanup semantics.
 - Follow `docs/logging.md` for logging conventions and required issue/session context fields.
+- Read `docs/exhaustion-modes.md` before diagnosing a "stuck" or "ran out" report — it pins the five exhaustion modes (context, OOM, turn cap, read timeout, workspace-hook retry) to their telemetry markers.
 
 ## Tests and Validation
 
