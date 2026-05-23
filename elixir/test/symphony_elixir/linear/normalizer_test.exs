@@ -50,6 +50,19 @@ defmodule SymphonyElixir.Linear.NormalizerTest do
     assert issue.assignee_display_name == "Alice A"
   end
 
+  test "creator: extracts name and display_name from creator map" do
+    creator = %{"name" => "vini", "displayName" => "Vinicius Freitas"}
+    issue = Client.normalize_issue_for_test(Map.put(base_issue(), "creator", creator))
+    assert issue.creator_name == "vini"
+    assert issue.creator_display_name == "Vinicius Freitas"
+  end
+
+  test "creator: nil creator leaves both fields nil" do
+    issue = Client.normalize_issue_for_test(base_issue())
+    assert is_nil(issue.creator_name)
+    assert is_nil(issue.creator_display_name)
+  end
+
   test "pr_attachment? returns true when attachments contain a GH PR URL" do
     nodes = [%{"url" => "https://github.com/org/repo/pull/42"}]
     raw = Map.put(base_issue(), "attachments", %{"nodes" => nodes})

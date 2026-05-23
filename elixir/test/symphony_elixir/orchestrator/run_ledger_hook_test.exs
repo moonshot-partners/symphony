@@ -114,6 +114,44 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHookTest do
 
       assert run.started_at == nil
     end
+
+    test "initiator prefers Linear creator display name when present" do
+      issue = %Issue{
+        id: "lin-i1",
+        identifier: "SODEV-INIT",
+        creator_name: "vini",
+        creator_display_name: "Vinicius Freitas",
+        repos: []
+      }
+
+      run = RunLedgerHook.build_run_map(%{issue: issue}, "lin-i1")
+      assert run.initiator == "Vinicius Freitas"
+    end
+
+    test "initiator falls back to creator name when display name is blank" do
+      issue = %Issue{
+        id: "lin-i2",
+        identifier: "SODEV-INIT2",
+        creator_name: "marianna",
+        creator_display_name: nil,
+        repos: []
+      }
+
+      run = RunLedgerHook.build_run_map(%{issue: issue}, "lin-i2")
+      assert run.initiator == "marianna"
+    end
+
+    test "initiator is nil when issue carries no creator" do
+      issue = %Issue{id: "lin-i3", identifier: "SODEV-INIT3", repos: []}
+
+      run = RunLedgerHook.build_run_map(%{issue: issue}, "lin-i3")
+      assert run.initiator == nil
+    end
+
+    test "initiator is nil when no issue is attached to the running entry" do
+      run = RunLedgerHook.build_run_map(%{identifier: "SODEV-99"}, "lin-99")
+      assert run.initiator == nil
+    end
   end
 
   describe "record/2 with flag disabled" do
