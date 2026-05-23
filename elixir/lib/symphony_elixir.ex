@@ -21,7 +21,7 @@ defmodule SymphonyElixir.Application do
 
   @impl true
   def start(_type, _args) do
-    :ok = Logger.configure(truncate: 32_768)
+    :ok = Application.put_env(:logger, :truncate, 32_768)
     :ok = SymphonyElixir.LogFile.configure()
 
     children = [
