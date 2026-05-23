@@ -47,6 +47,12 @@ help with the setup:
   not plug and play — templates in [docs/templates/](docs/templates/) cut the
   per-project boilerplate.
 
+- Running Symphony on your own machine? See [docs/LOCAL-INSTALL.md](docs/LOCAL-INSTALL.md)
+  for the 7-step local install path (toolchain, agent shim venv, sandbox Linear
+  team, throwaway GitHub repo, boot, smoke-dispatch). A local instance **must
+  not** share a Linear team with production — the doc walks through the safety
+  step.
+
 ---
 
 ## License
