@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Orchestrator do
     StatusFile,
     TickScheduler,
     TurnArtifacts,
+    TurnSoftCap,
     WorkerSelector,
     WorkpadPersister,
     WorkpadPrSync,
@@ -365,6 +366,7 @@ defmodule SymphonyElixir.Orchestrator do
   # run alive; an ungrounded plan halts it.
   defp apply_plan_grounding(state, issue_id, running_entry, update, token_delta, enforce_opts) do
     TurnArtifacts.maybe_post(running_entry, update, issue_id)
+    running_entry = TurnSoftCap.maybe_emit(running_entry, update, issue_id)
 
     case PlanGroundingGate.enforce(state, issue_id, running_entry, update, enforce_opts) do
       {:halted, state} ->
