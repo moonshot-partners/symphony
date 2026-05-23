@@ -28,8 +28,9 @@ This is why the steps below all come back to editing the description.
 ## Send a ticket back for another pass
 
 A ticket needs another pass when the pull request is incomplete, a
-reviewer asked for changes, or the work stopped in **On Hold / Blocked**.
-To re-dispatch:
+reviewer asked for changes, the agent shipped the right code in the
+wrong place, or the work stopped in **On Hold / Blocked**. To
+re-dispatch:
 
 1. **Edit the description.** Add a short section at the bottom saying
    what is still wrong and what you want changed. Be concrete. The agent
@@ -37,13 +38,56 @@ To re-dispatch:
    restate the request here in plain words.
 2. Move the card back into **Scheduled**.
 
-If a pull request already exists for that ticket, Symphony notices it
-and tells the agent to continue on the same branch instead of opening a
-second one. You do not need to do anything special for that.
+That is the whole procedure. Same ticket, edited description, back to
+Scheduled.
 
 What does **not** work: replying in the ticket comments and expecting
 the agent to read them, or moving the card without updating the
 description. The agent will just repeat the same run.
+
+### What carries from one run to the next
+
+A re-dispatch starts the agent over. Concretely:
+
+- **A new agent session.** Symphony opens a fresh agent thread per
+  dispatch. The agent has no memory of what it did in the previous run.
+- **A clean working directory.** Symphony wipes the agent's workspace
+  before each new run. Any uncommitted scratch from a prior run is gone.
+- **The same pull-request branch, if one already exists.** When
+  Symphony sees an open PR for the ticket, the agent is told to check
+  that PR out instead of opening a second one. The commits from the
+  prior run survive — the new run continues on top of them.
+- **The ticket description.** That is the only context the agent
+  reads. The description you edited in step 1 above is what the agent
+  sees.
+
+So a re-dispatch is **a fresh agent, on the same branch (if a PR
+exists), with the latest description.** What changes between runs is
+whatever you put in the description.
+
+### Worked example — code in the wrong place
+
+A teammate files a ticket asking the agent to add a "filter by child"
+control on the parents dashboard. The agent ships the right filter
+logic, but mounts the control in the wrong component — the dropdown
+appears, but not where the user expected it.
+
+To redirect:
+
+1. Open the ticket description and append a short re-dispatch note.
+   For this case it would read something like:
+
+   > Re-dispatch: the filter component should live in the dashboard
+   > toolbar, not in the page-level layout. Move it there and keep the
+   > filter logic you already wrote.
+
+2. Move the ticket back to **Scheduled**.
+
+The agent starts a fresh session, checks out the existing PR branch,
+and reads the updated description. It sees both the original request
+and the redirect note, finds the filter code already on the branch,
+and applies the move. Same ticket, same branch, same PR — corrected
+work on top.
 
 ## What makes a good ticket
 
