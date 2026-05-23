@@ -118,6 +118,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_on_pr_merge_state: nil,
           tracker_on_reject_state: nil,
           tracker_on_exhaust_state: nil,
+          tracker_on_promote_state: nil,
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           worker_ssh_hosts: [],
@@ -168,6 +169,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_on_pr_merge_state = Keyword.get(config, :tracker_on_pr_merge_state)
     tracker_on_reject_state = Keyword.get(config, :tracker_on_reject_state)
     tracker_on_exhaust_state = Keyword.get(config, :tracker_on_exhaust_state)
+    tracker_on_promote_state = Keyword.get(config, :tracker_on_promote_state)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
@@ -219,6 +221,7 @@ defmodule SymphonyElixir.TestSupport do
         "  on_pr_merge_state: #{yaml_value(tracker_on_pr_merge_state)}",
         "  on_reject_state: #{yaml_value(tracker_on_reject_state)}",
         "  on_exhaust_state: #{yaml_value(tracker_on_exhaust_state)}",
+        "  on_promote_state: #{yaml_value(tracker_on_promote_state)}",
         "polling:",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",

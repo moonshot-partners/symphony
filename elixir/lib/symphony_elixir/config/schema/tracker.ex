@@ -20,6 +20,7 @@ defmodule SymphonyElixir.Config.Schema.Tracker do
     field(:on_pr_merge_state, :string)
     field(:on_reject_state, :string)
     field(:on_exhaust_state, :string)
+    field(:on_promote_state, :string)
   end
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -41,7 +42,8 @@ defmodule SymphonyElixir.Config.Schema.Tracker do
         :on_complete_state,
         :on_pr_merge_state,
         :on_reject_state,
-        :on_exhaust_state
+        :on_exhaust_state,
+        :on_promote_state
       ],
       empty_values: []
     )

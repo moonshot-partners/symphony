@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Orchestrator do
     PreDispatch,
     PrMerge,
     ProcessLiveness,
+    PromoteToStaging,
     PrReengagement,
     Reconcile,
     RetryAttempts,
@@ -397,6 +398,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
     PrMerge.reconcile()
+    PromoteToStaging.reconcile()
 
     if state.drain do
       state
