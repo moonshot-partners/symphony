@@ -12,6 +12,7 @@ from __future__ import annotations
 from claude_agent_sdk import HookMatcher
 
 from symphony_agent_shim.guardrails.bash_policy import bash_policy_pre
+from symphony_agent_shim.guardrails.branch_name_check import branch_name_check
 from symphony_agent_shim.guardrails.file_size_check import file_size_check
 from symphony_agent_shim.guardrails.pre_edit_overwrite_guard import pre_edit_overwrite_guard
 from symphony_agent_shim.guardrails.pre_pr_gate import pre_pr_gate
@@ -34,6 +35,7 @@ def build_default_hooks() -> dict[str, list[HookMatcher]]:
             HookMatcher(matcher="Write|Edit", hooks=[tdd_enforcer]),
             HookMatcher(matcher="Bash", hooks=[bash_policy_pre]),
             HookMatcher(matcher="Bash", hooks=[pre_pr_gate]),
+            HookMatcher(matcher="Bash", hooks=[branch_name_check]),
             HookMatcher(matcher="Bash", hooks=[pre_push_gate]),
         ],
         "PostToolUse": [
@@ -45,6 +47,7 @@ def build_default_hooks() -> dict[str, list[HookMatcher]]:
 
 __all__ = [
     "bash_policy_pre",
+    "branch_name_check",
     "build_default_hooks",
     "file_size_check",
     "pre_edit_overwrite_guard",

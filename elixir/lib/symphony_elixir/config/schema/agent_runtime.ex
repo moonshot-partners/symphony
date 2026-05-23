@@ -27,6 +27,7 @@ defmodule SymphonyElixir.Config.Schema.AgentRuntime do
     field(:stall_timeout_ms, :integer, default: 300_000)
     field(:tdd_phase_enforcement, :boolean, default: false)
     field(:bash_policy_allow, {:array, :string}, default: [])
+    field(:branch_naming_pattern, :string)
   end
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -44,7 +45,8 @@ defmodule SymphonyElixir.Config.Schema.AgentRuntime do
         :read_timeout_ms,
         :stall_timeout_ms,
         :tdd_phase_enforcement,
-        :bash_policy_allow
+        :bash_policy_allow,
+        :branch_naming_pattern
       ],
       empty_values: []
     )
