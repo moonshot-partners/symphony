@@ -6,6 +6,7 @@ docs/*
 !docs/ONBOARDING.md
 !docs/LOCAL-INSTALL.md
 !docs/templates/
+!docs/skills/
 mvp-claude-sodev/
 .qa-spike/
 __pycache__/
