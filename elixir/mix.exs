@@ -33,6 +33,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Orchestrator.GithubLabel,
           SymphonyElixir.Orchestrator.PrMerge,
           SymphonyElixir.Orchestrator.PromoteToStaging,
+          SymphonyElixir.Orchestrator.Reconcilers,
           SymphonyElixir.Orchestrator.StateTransition,
           SymphonyElixir.Orchestrator.TokenMetrics,
           SymphonyElixir.QaEvidence,
