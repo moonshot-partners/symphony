@@ -133,6 +133,7 @@ defmodule SymphonyElixir.TestSupport do
           agent_runtime_turn_timeout_ms: 3_600_000,
           agent_runtime_read_timeout_ms: 5_000,
           agent_runtime_stall_timeout_ms: 300_000,
+          agent_runtime_tdd_phase_enforcement: nil,
           hook_after_create: nil,
           hook_before_run: nil,
           hook_after_run: nil,
@@ -178,6 +179,7 @@ defmodule SymphonyElixir.TestSupport do
     agent_runtime_turn_timeout_ms = Keyword.get(config, :agent_runtime_turn_timeout_ms)
     agent_runtime_read_timeout_ms = Keyword.get(config, :agent_runtime_read_timeout_ms)
     agent_runtime_stall_timeout_ms = Keyword.get(config, :agent_runtime_stall_timeout_ms)
+    agent_runtime_tdd_phase_enforcement = Keyword.get(config, :agent_runtime_tdd_phase_enforcement)
     hook_after_create = Keyword.get(config, :hook_after_create)
     hook_before_run = Keyword.get(config, :hook_before_run)
     hook_after_run = Keyword.get(config, :hook_after_run)
@@ -227,6 +229,7 @@ defmodule SymphonyElixir.TestSupport do
         "  turn_timeout_ms: #{yaml_value(agent_runtime_turn_timeout_ms)}",
         "  read_timeout_ms: #{yaml_value(agent_runtime_read_timeout_ms)}",
         "  stall_timeout_ms: #{yaml_value(agent_runtime_stall_timeout_ms)}",
+        "  tdd_phase_enforcement: #{yaml_value(agent_runtime_tdd_phase_enforcement)}",
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         qa_yaml(qa_evidence_subpath, qa_evidence_subpaths),
