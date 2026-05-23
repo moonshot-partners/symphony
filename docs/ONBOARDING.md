@@ -14,7 +14,11 @@ operator must build by hand:
    right scope.
 
 This document is the step-by-step. Templates for steps 2 and 3 live
-in [`docs/templates/`](./templates/).
+in [`docs/templates/`](./templates/). For non-engineer teammates who
+write the *body* of a ticket (not configure Symphony itself), the
+`spec-author` Claude skill at
+[`docs/skills/spec-author/`](./skills/spec-author/) turns a plain-
+language interview into a Symphony-ready Linear description.
 
 The reference implementation of every step is the schools-out setup
 already in this repository — `elixir/WORKFLOW.schools-out.md` and the
