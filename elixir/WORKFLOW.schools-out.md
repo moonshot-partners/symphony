@@ -106,11 +106,27 @@ Drive a Linear-tracked ticket on `schoolsoutapp/*` end-to-end. The
 per-repo `AGENTS.md` files are the source of truth for the agent
 process — read them on turn 1 before any code or branch.
 
+## Rule Enforcement Map
+
+Every rule below carries either `[enforced-by: <mechanism>]` (a CI job,
+PreToolUse hook, or orchestrator gate halts the run on violation) or
+`[advisory]` (prose-only; honor system). Per SYM-1e, no silent Layer-B
+rules — when adding a new rule, assign one tag in this table.
+
+| Rule | Enforcement |
+|------|-------------|
+| First turn-end message starts with `## AC Extracted` or `## BLOCKED: AC not testable` | enforced-by: `SymphonyElixir.Orchestrator.GateCEnforcement` (halts run + parks issue) |
+| Continuation attempts still post the turn-1 header | enforced-by: `SymphonyElixir.Orchestrator.GateCEnforcement` (every dispatch is fresh) |
+| Touch only repos in the "Allowed repositories" whitelist | enforced-by: agent sandbox `workspace-write` (filesystem) + advisory for `git clone` of off-list URLs |
+| Step 0 — Read each repo's `AGENTS.md` on turn 1 | advisory |
+| Precedence (repo `AGENTS.md` > this workflow > Linear ticket > framework defaults) | advisory |
+| PR follow-up: open PR detected → continue on its branch, do not open a second PR | advisory |
+
 ## Ticket prompt
 
 You are working on Linear ticket `{{ issue.identifier }}`.
 
-## Hard requirement — first turn-end message
+## Hard requirement — first turn-end message [enforced-by: orchestrator GateCEnforcement]
 
 Your very first turn-end message in this session **must** start with one
 of these two headers, before any other tool use or code:
@@ -143,7 +159,7 @@ Description:
 No description provided.
 {% endif %}
 
-## Allowed repositories (whitelist)
+## Allowed repositories (whitelist) [enforced-by: agent sandbox workspace-write + advisory for clones]
 
 Both repos are cloned at workspace creation. Touch only these:
 
@@ -152,7 +168,7 @@ Both repos are cloned at workspace creation. Touch only these:
 
 If diagnosis points to a repo NOT in this list, STOP and report.
 
-## Step 0 — Read `AGENTS.md` before any code
+## Step 0 — Read `AGENTS.md` before any code [advisory]
 
 Each repo's `AGENTS.md` carries the full agent process (AC Extracted
 turn-1 post, `understanding.md`, operating rules, UI QA self-review,
@@ -170,7 +186,7 @@ that conflicts with `AGENTS.md` is a ticket bug — note it in
 `understanding.md` under `root_cause` and follow the repo convention.
 
 {% if issue.has_pr_attachment %}
-## PR follow-up — open PR detected
+## PR follow-up — open PR detected [advisory]
 
 An open PR already exists for `{{ issue.identifier }}`. **Do not create a new branch or a second PR.**
 
