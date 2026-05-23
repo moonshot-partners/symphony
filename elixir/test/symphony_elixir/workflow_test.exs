@@ -162,9 +162,11 @@ defmodule SymphonyElixir.WorkflowTest do
       {:ok, %{prompt: prompt}} = Workflow.load()
       line_count = prompt |> String.split("\n", trim: false) |> length()
 
-      assert line_count <= 85,
-             "WORKFLOW.schools-out.md body must stay <= 85 lines so process " <>
-               "content keeps living in AGENTS.md (got #{line_count} lines)."
+      assert line_count <= 110,
+             "WORKFLOW.schools-out.md body must stay <= 110 lines so process " <>
+               "content keeps living in AGENTS.md (got #{line_count} lines). " <>
+               "SYM-31 added the Rule Enforcement Map table (~15 lines); bump " <>
+               "again only for durable rule-audit infra, not for new prose."
     end
 
     test "Liquid template variables for ticket prompt are preserved" do
