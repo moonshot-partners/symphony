@@ -41,6 +41,12 @@ help with the setup:
   for how to dispatch a ticket, send one back for another pass, and tell whether
   a ticket is ready for the agent.
 
+- Adding a new project to Symphony? See [docs/ONBOARDING.md](docs/ONBOARDING.md)
+  for the step-by-step checklist (base Docker image, `WORKFLOW.<project>.md`,
+  per-repo `AGENTS.md`, tracker config). Symphony is configurable per project,
+  not plug and play — templates in [docs/templates/](docs/templates/) cut the
+  per-project boilerplate.
+
 ---
 
 ## License
