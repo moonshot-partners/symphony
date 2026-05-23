@@ -137,6 +137,23 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCapTest do
       Map.merge(base, overrides)
     end
 
+    defp pr_attached_issue(has_pr) do
+      %Issue{
+        id: "issue-abc",
+        identifier: "SODEV-100",
+        title: "Long ticket",
+        state: "In Progress",
+        url: "https://linear.app/issues/SODEV-100",
+        has_pr_attachment: has_pr,
+        repos: [
+          %{
+            name: "schools-out",
+            pr: %{url: "https://github.com/schoolsoutapp/schools-out/pull/999"}
+          }
+        ]
+      }
+    end
+
     test "returns entry unchanged for non turn_completed events" do
       e = entry(%{turn_count: 17})
 
@@ -156,8 +173,16 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCapTest do
       assert body =~ "16/20"
     end
 
-    test "fires exhaust at max_turns, posts comment AND transitions issue to on_exhaust_state" do
-      e = entry(%{turn_count: 20, soft_cap_warned: true})
+    test "fires exhaust at max_turns with ready PR — transitions to on_exhaust_state (env-blocked)" do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_ready_fn) end)
+
+      e =
+        entry(%{
+          turn_count: 20,
+          soft_cap_warned: true,
+          issue: pr_attached_issue(true)
+        })
 
       result = TurnSoftCap.maybe_emit(e, %{event: :turn_completed}, "issue-abc")
       assert result.soft_cap_exhausted == true
@@ -168,7 +193,7 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCapTest do
       assert_receive {:memory_tracker_state_update, "issue-abc", "On Hold / Time Exhausted"}, 2000
     end
 
-    test "exhaust falls back to on_reject_state when on_exhaust_state is unset" do
+    test "exhaust with ready PR falls back to on_reject_state when on_exhaust_state is unset" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
         tracker_on_reject_state: "Rejected",
@@ -178,10 +203,45 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCapTest do
         soft_cap_ratio: 0.80
       )
 
-      e = entry(%{turn_count: 20, soft_cap_warned: true})
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_ready_fn) end)
+
+      e =
+        entry(%{
+          turn_count: 20,
+          soft_cap_warned: true,
+          issue: pr_attached_issue(true)
+        })
+
       _ = TurnSoftCap.maybe_emit(e, %{event: :turn_completed}, "issue-abc")
 
       assert_receive {:memory_tracker_state_update, "issue-abc", "Rejected"}, 2000
+    end
+
+    test "SYM-13 AC2: exhaust without a PR routes to on_reject_state (anti-abuse, no env-blocked)" do
+      e = entry(%{turn_count: 20, soft_cap_warned: true})
+
+      _ = TurnSoftCap.maybe_emit(e, %{event: :turn_completed}, "issue-abc")
+
+      assert_receive {:memory_tracker_state_update, "issue-abc", "Rejected"}, 2000
+      refute_receive {:memory_tracker_state_update, "issue-abc", "On Hold / Time Exhausted"}, 200
+    end
+
+    test "SYM-13 AC2: exhaust with PR but red CI routes to on_reject_state (anti-abuse)" do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_ready_fn) end)
+
+      e =
+        entry(%{
+          turn_count: 20,
+          soft_cap_warned: true,
+          issue: pr_attached_issue(true)
+        })
+
+      _ = TurnSoftCap.maybe_emit(e, %{event: :turn_completed}, "issue-abc")
+
+      assert_receive {:memory_tracker_state_update, "issue-abc", "Rejected"}, 2000
+      refute_receive {:memory_tracker_state_update, "issue-abc", "On Hold / Time Exhausted"}, 200
     end
 
     test "no comment fires when disabled via config" do

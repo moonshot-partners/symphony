@@ -15,6 +15,13 @@ tracker:
   on_complete_state: "In Code Review"
   on_pr_merge_state: "Ready for QA"
   on_reject_state: "On Hold / Blocked"
+  # SYM-13 AC2: turn-cap exhaustion with a green PR is "done, env-blocked",
+  # not a rejection — route to "In Code Review" so a reviewer sees the
+  # finished code instead of "On Hold / Blocked". TurnSoftCap only honors
+  # this when the PR exists AND CI is green; otherwise it falls back to
+  # `on_reject_state` (anti-abuse: no green-CI evidence, no env-blocked
+  # classification).
+  on_exhaust_state: "In Code Review"
 polling:
   interval_ms: 5000
 workspace:

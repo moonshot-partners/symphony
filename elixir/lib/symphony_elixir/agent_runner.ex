@@ -177,10 +177,26 @@ defmodule SymphonyElixir.AgentRunner do
   def continuation_decision_for_test(%Issue{} = issue), do: continuation_decision(issue)
 
   defp continuation_decision(%Issue{has_pr_attachment: true} = issue) do
-    if SymphonyElixir.GitHubPr.ready?(issue) do
-      :done
-    else
-      if active_issue_state?(issue.state), do: :continue, else: :done
+    cond do
+      SymphonyElixir.GitHubPr.ready?(issue) ->
+        :done
+
+      # SYM-13 AC1: env-blocked graceful exit. A PR whose body declares
+      # `- Result: BLOCKED` cannot be unblocked by burning more agent
+      # turns — the gap is in the workspace (missing env var, staging
+      # auth, etc.), not in the agent's code. Exit cleanly so the
+      # orchestrator can re-classify via `WorkpadPrSync.route_by_qa`
+      # instead of burning the full `max_turns` cap. Anti-abuse: only
+      # short-circuits when a PR is attached (the agent already shipped
+      # code) — without a PR there is nothing to evaluate.
+      SymphonyElixir.GitHubPr.qa_blocked?(issue) ->
+        :done
+
+      active_issue_state?(issue.state) ->
+        :continue
+
+      true ->
+        :done
     end
   end
 

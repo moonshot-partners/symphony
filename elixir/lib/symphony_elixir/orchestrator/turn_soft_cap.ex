@@ -14,7 +14,7 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
 
   require Logger
 
-  alias SymphonyElixir.{Config, Tracker}
+  alias SymphonyElixir.{Config, GitHubPr, Tracker}
   alias SymphonyElixir.Orchestrator.StateTransition
 
   @type settings :: map()
@@ -65,8 +65,21 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
   Side-effecting entry point — evaluates the running_entry against the
   configured soft-cap settings, posts the warn/exhaust comment to the
   workpad (threaded under the workpad parent comment when present), and on
-  exhaust routes the issue to `tracker.on_exhaust_state` (falling back to
-  `tracker.on_reject_state`). Returns the updated running entry.
+  exhaust routes the issue to one of the tracker states.
+
+  SYM-13 AC2: routing differentiates by PR status to keep `on_exhaust_state`
+  honest:
+
+    * PR attached AND `GitHubPr.ready?/1` (CI green or PR merged) →
+      `tracker.on_exhaust_state || tracker.on_reject_state`. The agent
+      shipped code that passed CI but ran out of turns finishing QA /
+      polish — "done, environment-blocked", not a rejection.
+    * Otherwise (no PR, or PR with red/pending CI) →
+      `tracker.on_reject_state`. Without green CI evidence the exhaust
+      could just be the agent flailing; refuse to grant the env-blocked
+      classification.
+
+  Returns the updated running entry.
   """
   @spec maybe_emit(map(), map(), String.t()) :: map()
   def maybe_emit(running_entry, %{event: :turn_completed}, issue_id) do
@@ -128,13 +141,26 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
 
     Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
       tracker = Config.settings!().tracker
-      target = tracker.on_exhaust_state || tracker.on_reject_state
 
       case Map.get(running_entry, :issue) do
         nil -> :ok
-        issue -> StateTransition.apply(issue, target)
+        issue -> StateTransition.apply(issue, exhaust_target(issue, tracker))
       end
     end)
+  end
+
+  @doc false
+  @spec exhaust_target(map(), map()) :: String.t() | nil
+  def exhaust_target(issue, tracker) do
+    if env_blocked_eligible?(issue) do
+      tracker.on_exhaust_state || tracker.on_reject_state
+    else
+      tracker.on_reject_state
+    end
+  end
+
+  defp env_blocked_eligible?(issue) do
+    Map.get(issue, :has_pr_attachment) == true and GitHubPr.ready?(issue)
   end
 
   defp publish_comment(issue_id, body, running_entry, label) do
