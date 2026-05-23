@@ -20,7 +20,9 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     DecisionLog,
     GateDValidator,
     GitHubPr,
+    GitHubPrBody,
     GitHubPrFiles,
+    QaArtifactGate,
     QaEvidence,
     Tracker,
     Workpad
@@ -168,6 +170,36 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
 
       _ ->
+        route_post_conflict(
+          issue,
+          running_entry,
+          parent_comment_id,
+          pr_engagements,
+          reject_state,
+          complete_state
+        )
+    end
+  end
+
+  defp route_post_conflict(
+         issue,
+         running_entry,
+         parent_comment_id,
+         pr_engagements,
+         reject_state,
+         complete_state
+       ) do
+    case qa_artifact_verdict(issue, running_entry) do
+      {:fail, :no_artifact} when is_binary(reject_state) ->
+        # SYM-34: the agent's PR body claims `- Result: PASS` under
+        # `## QA self-review` but no Playwright artifact (screenshot,
+        # webm, zip) exists on disk. Park in on_reject_state — the agent
+        # skipped the QA run and only wrote prose.
+        emit_route("qa_artifact_missing", issue, reject_state, pr_engagements)
+        post_qa_artifact_missing_comment(issue, parent_comment_id)
+        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+
+      _ ->
         route_by_qa(
           issue,
           running_entry,
@@ -204,6 +236,14 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     changed_files = GitHubPrFiles.changed_files(issue)
     understanding_md = read_understanding_md(Map.get(running_entry, :workspace_path))
     ConflictDisclosure.validate(description, changed_files, understanding_md)
+  end
+
+  defp qa_artifact_verdict(issue, running_entry) do
+    body = GitHubPrBody.pr_body(issue)
+    workspace_path = Map.get(running_entry, :workspace_path)
+    issue_id = Map.get(issue, :id)
+
+    QaArtifactGate.validate(body, workspace_path, issue_id, subpaths: Config.qa_evidence_subpaths())
   end
 
   defp read_understanding_md(workspace_path) when is_binary(workspace_path) do
@@ -277,6 +317,27 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     #{bullet_list}
 
     _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1d/SYM-30)._
+    """
+  end
+
+  defp post_qa_artifact_missing_comment(issue, parent_comment_id) do
+    issue_id = Map.get(issue, :id)
+
+    if is_binary(issue_id) do
+      body = qa_artifact_missing_comment_body()
+      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
+    end
+
+    :ok
+  end
+
+  defp qa_artifact_missing_comment_body do
+    """
+    ## QA artifact — substance verification failed
+
+    The PR body declares `- Result: PASS` under `## QA self-review`, but no real Playwright artifact (`*.png`, `*.webm`, `*.zip`) was found in the workspace `qa-evidence/` directory or the staged retry snapshot. The agent likely wrote the QA prose without running the spec. Parking in `on_reject_state` so the retry loop or a human can re-run the QA harness end-to-end.
+
+    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-34)._
     """
   end
 
