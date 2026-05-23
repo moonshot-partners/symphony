@@ -82,6 +82,12 @@ hooks:
   timeout_ms: 600000
 agent:
   max_concurrent_agents: 4
+  # See `docs/exhaustion-modes.md` for what "the agent ran out" actually
+  # means in practice: the diagnose-first SYM-33 work confirmed the turn
+  # cap is the only one of buckets 1-4 we have evidence for, plus a new
+  # bucket 5 (workspace-hook retry loop) that looks identical to an
+  # operator. Raising `max_turns` without first ruling out bucket 5 fixes
+  # nothing.
   max_turns: 25
 agent_runtime:
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
