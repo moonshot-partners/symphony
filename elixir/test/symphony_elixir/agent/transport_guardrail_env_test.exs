@@ -19,5 +19,34 @@ defmodule SymphonyElixir.Agent.AppServer.TransportGuardrailEnvTest do
     test "tolerates a missing field gracefully (default OFF)" do
       assert [] == Transport.guardrail_env(%{})
     end
+
+    test "emits SYMPHONY_BASH_POLICY_ALLOW newline-joined when bash_policy_allow is populated" do
+      settings = %{
+        tdd_phase_enforcement: false,
+        bash_policy_allow: ["rm -rf node_modules", "rm -rf \\.next"]
+      }
+
+      assert [
+               {~c"SYMPHONY_BASH_POLICY_ALLOW", joined}
+             ] = Transport.guardrail_env(settings)
+
+      assert to_string(joined) == "rm -rf node_modules\nrm -rf \\.next"
+    end
+
+    test "omits SYMPHONY_BASH_POLICY_ALLOW when bash_policy_allow is empty" do
+      settings = %{tdd_phase_enforcement: false, bash_policy_allow: []}
+      assert [] == Transport.guardrail_env(settings)
+    end
+
+    test "stacks TDD + bash policy envs when both opt in" do
+      settings = %{
+        tdd_phase_enforcement: true,
+        bash_policy_allow: ["git reset --hard origin/dev"]
+      }
+
+      env = Transport.guardrail_env(settings)
+      assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_TDD_PHASE_ENFORCEMENT" end)
+      assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_BASH_POLICY_ALLOW" end)
+    end
   end
 end
