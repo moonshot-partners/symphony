@@ -544,6 +544,133 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
   end
 
+  test "routes state to on_reject_state when ConflictDisclosure detects undisclosed extras (SYM-30)" do
+    issue_id = "issue-conflict-undisclosed"
+    pr_url = "https://github.com/o/r/pull/930"
+
+    description = """
+    ## Files (allowed)
+
+    - `app/models/user.rb`
+    - `spec/models/user_spec.rb`
+    """
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-930",
+          state: "Scheduled",
+          description: description,
+          repos: [%{name: "schools-out", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-930",
+        workpad_comment_id: "wp-comment-conflict",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+
+    Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue ->
+      ["app/models/user.rb", "app/controllers/users_controller.rb", "config/routes.rb"]
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+      Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+    end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
+
+    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
+    assert body =~ "Conflict disclosure"
+    assert body =~ "app/controllers/users_controller.rb"
+    assert body =~ "config/routes.rb"
+    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-conflict"}, 1_000
+  end
+
+  test "routes state to on_complete_state when extras are disclosed in understanding.md root cause (SYM-30)" do
+    issue_id = "issue-conflict-disclosed"
+    pr_url = "https://github.com/o/r/pull/931"
+
+    base = Path.join(System.tmp_dir!(), "conflict-disclosed-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join([base, "state", "wp-931"]))
+
+    File.write!(Path.join([base, "state", "wp-931", "understanding.md"]), """
+    ## Plan
+
+    - `app/models/user.rb`
+
+    ## Root cause
+
+    Also touched app/controllers/users_controller.rb to extract a concern
+    that had grown past 600 lines.
+    """)
+
+    on_exit(fn -> File.rm_rf!(base) end)
+
+    description = """
+    ## Files (allowed)
+
+    - `app/models/user.rb`
+    """
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-931",
+          state: "Scheduled",
+          description: description,
+          repos: [%{name: "schools-out", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-931",
+        workpad_comment_id: "wp-comment-disclosed",
+        workspace_path: base
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+
+    Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue ->
+      ["app/models/user.rb", "app/controllers/users_controller.rb"]
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+      Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+    end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
+  end
+
   test "SYM-16 auto-engagement bypass overrides gate_d_substance_fail" do
     issue_id = "issue-sym16-vs-gated"
     pr_url = "https://github.com/org/repo/pull/220"
@@ -804,6 +931,46 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
       _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
       assert "gate_d_substance_fail" in branches(path)
+    end
+
+    test "emits conflict_disclosure_fail branch when description allowlist excludes undisclosed diff", %{ledger_path: path} do
+      issue_id = "i-route-conflict"
+      pr_url = "https://github.com/o/r/pull/930"
+
+      description = """
+      ## Files (allowed)
+
+      - `lib/a.ex`
+      """
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{
+            id: issue_id,
+            identifier: "WP-930-LEDGER",
+            state: "Scheduled",
+            description: description,
+            repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+          },
+          identifier: "WP-930-LEDGER",
+          workpad_comment_id: "wp-930",
+          workspace_path: "/tmp/nonexistent"
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _ -> false end)
+
+      Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _ ->
+        ["lib/a.ex", "lib/b.ex"]
+      end)
+
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+        Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+      end)
+
+      _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
+      assert "conflict_disclosure_fail" in branches(path)
     end
 
     test "emits qa_blocked branch when QA self-reports BLOCKED and not in engagement", %{ledger_path: path} do
