@@ -27,7 +27,7 @@ defmodule SymphonyElixir.Orchestrator.GateDTrigger do
   skips the stale-slice check entirely.
   """
 
-  alias SymphonyElixir.GateD
+  alias SymphonyElixir.GateDObserver
 
   @type result :: :ok | {:violation, :missing_header | :empty_message}
 
@@ -41,12 +41,12 @@ defmodule SymphonyElixir.Orchestrator.GateDTrigger do
         :ok
 
       true ->
-        case GateD.validate_final_turn(Map.get(running_entry, :last_agent_text)) do
+        case GateDObserver.validate_final_turn(Map.get(running_entry, :last_agent_text)) do
           :ok ->
             :ok
 
           {:violation, _} = violation ->
-            GateD.log_violation(violation, running_entry)
+            GateDObserver.log_observation(violation, running_entry)
             violation
         end
     end
