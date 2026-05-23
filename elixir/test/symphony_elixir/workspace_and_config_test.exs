@@ -1220,6 +1220,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.agent.soft_cap_enabled == true
     assert config.agent.soft_cap_ratio == 0.80
     assert config.tracker.on_exhaust_state == nil
+    assert config.agent_runtime.bash_policy_allow == []
 
     write_workflow_file!(Workflow.workflow_file_path(),
       soft_cap_enabled: false,
@@ -1253,6 +1254,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     )
 
     assert Config.settings!().agent_runtime.tdd_phase_enforcement == true
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      agent_runtime_bash_policy_allow: ["rm -rf node_modules", "rm -rf .next"]
+    )
+
+    assert Config.settings!().agent_runtime.bash_policy_allow == [
+             "rm -rf node_modules",
+             "rm -rf .next"
+           ]
 
     explicit_root =
       Path.join(

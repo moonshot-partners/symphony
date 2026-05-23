@@ -26,6 +26,7 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
     GITHUB_TOKEN
     SYMPHONY_WORKFLOW_FILE
     SYMPHONY_TDD_PHASE_ENFORCEMENT
+    SYMPHONY_BASH_POLICY_ALLOW
   ]
 
   @doc """
@@ -39,11 +40,24 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
   """
   @spec guardrail_env(map() | struct()) :: [{charlist(), charlist()}]
   def guardrail_env(agent_runtime_settings) do
-    if Map.get(agent_runtime_settings, :tdd_phase_enforcement, false) do
-      [{~c"SYMPHONY_TDD_PHASE_ENFORCEMENT", ~c"enabled"}]
-    else
-      []
-    end
+    tdd =
+      if Map.get(agent_runtime_settings, :tdd_phase_enforcement, false) do
+        [{~c"SYMPHONY_TDD_PHASE_ENFORCEMENT", ~c"enabled"}]
+      else
+        []
+      end
+
+    bash_allow =
+      case Map.get(agent_runtime_settings, :bash_policy_allow, []) do
+        list when is_list(list) and list != [] ->
+          joined = Enum.map_join(list, "\n", &to_string/1)
+          [{~c"SYMPHONY_BASH_POLICY_ALLOW", String.to_charlist(joined)}]
+
+        _ ->
+          []
+      end
+
+    tdd ++ bash_allow
   end
 
   @spec start_port(Path.t(), String.t() | nil) :: {:ok, port()} | {:error, term()}
