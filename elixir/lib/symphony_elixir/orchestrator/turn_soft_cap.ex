@@ -17,11 +17,7 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
   alias SymphonyElixir.{Config, Tracker}
   alias SymphonyElixir.Orchestrator.StateTransition
 
-  @type settings :: %{
-          required(:enabled) => boolean(),
-          required(:ratio) => float(),
-          required(:max_turns) => pos_integer()
-        }
+  @type settings :: map()
 
   @type decision ::
           :noop
@@ -29,10 +25,19 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
           | {:exhaust, String.t(), map()}
 
   @spec evaluate(map(), settings()) :: decision()
-  def evaluate(_running_entry, %{enabled: false}), do: :noop
+  def evaluate(running_entry, settings) do
+    enabled? = Map.get(settings, :enabled, false)
+    ratio = Map.get(settings, :ratio, 0.0)
+    max_turns = Map.get(settings, :max_turns, 0)
 
-  def evaluate(running_entry, %{enabled: true, ratio: ratio, max_turns: max_turns})
-      when is_float(ratio) and is_integer(max_turns) and max_turns > 0 do
+    if enabled? and is_number(ratio) and is_integer(max_turns) and max_turns > 0 do
+      evaluate_enabled(running_entry, ratio, max_turns)
+    else
+      :noop
+    end
+  end
+
+  defp evaluate_enabled(running_entry, ratio, max_turns) do
     turn_count = Map.get(running_entry, :turn_count, 0) || 0
     threshold = ratio |> Kernel.*(max_turns) |> Float.ceil() |> trunc()
     phase = phase_for(running_entry, turn_count, max_turns, threshold)
@@ -63,7 +68,7 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
   exhaust routes the issue to `tracker.on_exhaust_state` (falling back to
   `tracker.on_reject_state`). Returns the updated running entry.
   """
-  @spec maybe_emit(map(), %{event: atom()}, String.t()) :: map()
+  @spec maybe_emit(map(), map(), String.t()) :: map()
   def maybe_emit(running_entry, %{event: :turn_completed}, issue_id) do
     settings = current_settings()
 
