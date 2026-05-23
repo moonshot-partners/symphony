@@ -22,6 +22,12 @@ tracker:
   # `on_reject_state` (anti-abuse: no green-CI evidence, no env-blocked
   # classification).
   on_exhaust_state: "In Code Review"
+  # SYM-9: operator-triggered promote-to-staging. When a non-technical
+  # reviewer moves a ticket to this state, the orchestrator squash-merges
+  # the PR iff CI is all green AND claude-pr-review is clean. Red CI or
+  # request_changes parks the ticket back in `on_complete_state` with a
+  # comment explaining why. Pending CI is a no-op (re-checks next tick).
+  on_promote_state: "Promote to Staging"
 polling:
   interval_ms: 5000
 workspace:

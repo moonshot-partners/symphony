@@ -20,10 +20,10 @@ defmodule SymphonyElixir.Orchestrator do
     GateDTrigger,
     PlanGroundingGate,
     PreDispatch,
-    PrMerge,
     ProcessLiveness,
     PrReengagement,
     Reconcile,
+    Reconcilers,
     RetryAttempts,
     RetryDispatch,
     RetryPlan,
@@ -396,7 +396,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
-    PrMerge.reconcile()
+    Reconcilers.tick()
 
     if state.drain do
       state
