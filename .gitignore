@@ -4,6 +4,7 @@
 docs/*
 !docs/spec/
 !docs/ONBOARDING.md
+!docs/LOCAL-INSTALL.md
 !docs/templates/
 mvp-claude-sodev/
 .qa-spike/
