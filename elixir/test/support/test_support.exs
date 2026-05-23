@@ -117,6 +117,7 @@ defmodule SymphonyElixir.TestSupport do
           tracker_on_complete_state: nil,
           tracker_on_pr_merge_state: nil,
           tracker_on_reject_state: nil,
+          tracker_on_exhaust_state: nil,
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           worker_ssh_hosts: [],
@@ -125,6 +126,8 @@ defmodule SymphonyElixir.TestSupport do
           max_turns: 20,
           max_retry_backoff_ms: 300_000,
           max_concurrent_agents_by_state: %{},
+          soft_cap_enabled: nil,
+          soft_cap_ratio: nil,
           agent_runtime_command: "python -m symphony_agent_shim",
           agent_runtime_docker_image: nil,
           agent_runtime_approval_policy: %{reject: %{sandbox_approval: true, rules: true, mcp_elicitations: true}},
@@ -163,6 +166,7 @@ defmodule SymphonyElixir.TestSupport do
     tracker_on_complete_state = Keyword.get(config, :tracker_on_complete_state)
     tracker_on_pr_merge_state = Keyword.get(config, :tracker_on_pr_merge_state)
     tracker_on_reject_state = Keyword.get(config, :tracker_on_reject_state)
+    tracker_on_exhaust_state = Keyword.get(config, :tracker_on_exhaust_state)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
@@ -171,6 +175,8 @@ defmodule SymphonyElixir.TestSupport do
     max_turns = Keyword.get(config, :max_turns)
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
     max_concurrent_agents_by_state = Keyword.get(config, :max_concurrent_agents_by_state)
+    soft_cap_enabled = Keyword.get(config, :soft_cap_enabled)
+    soft_cap_ratio = Keyword.get(config, :soft_cap_ratio)
     agent_runtime_command = Keyword.get(config, :agent_runtime_command)
     agent_runtime_docker_image = Keyword.get(config, :agent_runtime_docker_image)
     agent_runtime_approval_policy = Keyword.get(config, :agent_runtime_approval_policy)
@@ -210,6 +216,7 @@ defmodule SymphonyElixir.TestSupport do
         "  on_complete_state: #{yaml_value(tracker_on_complete_state)}",
         "  on_pr_merge_state: #{yaml_value(tracker_on_pr_merge_state)}",
         "  on_reject_state: #{yaml_value(tracker_on_reject_state)}",
+        "  on_exhaust_state: #{yaml_value(tracker_on_exhaust_state)}",
         "polling:",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
@@ -220,6 +227,8 @@ defmodule SymphonyElixir.TestSupport do
         "  max_turns: #{yaml_value(max_turns)}",
         "  max_retry_backoff_ms: #{yaml_value(max_retry_backoff_ms)}",
         "  max_concurrent_agents_by_state: #{yaml_value(max_concurrent_agents_by_state)}",
+        "  soft_cap_enabled: #{yaml_value(soft_cap_enabled)}",
+        "  soft_cap_ratio: #{yaml_value(soft_cap_ratio)}",
         "agent_runtime:",
         "  command: #{yaml_value(agent_runtime_command)}",
         "  docker_image: #{yaml_value(agent_runtime_docker_image)}",

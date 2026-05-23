@@ -1217,6 +1217,20 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.agent_runtime.read_timeout_ms == 5_000
     assert config.agent_runtime.stall_timeout_ms == 300_000
     assert config.agent_runtime.tdd_phase_enforcement == false
+    assert config.agent.soft_cap_enabled == true
+    assert config.agent.soft_cap_ratio == 0.80
+    assert config.tracker.on_exhaust_state == nil
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      soft_cap_enabled: false,
+      soft_cap_ratio: 0.6,
+      tracker_on_exhaust_state: "On Hold / Time Exhausted"
+    )
+
+    overridden = Config.settings!()
+    assert overridden.agent.soft_cap_enabled == false
+    assert overridden.agent.soft_cap_ratio == 0.6
+    assert overridden.tracker.on_exhaust_state == "On Hold / Time Exhausted"
 
     write_workflow_file!(Workflow.workflow_file_path(),
       agent_runtime_command: "codex --config 'model=\"gpt-5.5\"' app-server"
