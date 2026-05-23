@@ -671,6 +671,107 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
   end
 
+  test "routes state to on_reject_state when PR body claims PASS but no QA artifact exists (SYM-34)" do
+    issue_id = "issue-qa-artifact-missing"
+    pr_url = "https://github.com/o/r/pull/892"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-892",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-892",
+        workpad_comment_id: "wp-comment-qa-missing",
+        workspace_path: "/tmp/nonexistent-892"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue ->
+      "## QA self-review\n\n- Result: PASS\n"
+    end)
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_body_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+    end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
+
+    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
+    assert body =~ "QA artifact"
+    assert body =~ "SYM-34"
+  end
+
+  test "routes state to on_complete_state when PR claims PASS and qa-evidence artifact is present (SYM-34)" do
+    issue_id = "issue-qa-artifact-present"
+    pr_url = "https://github.com/o/r/pull/8920"
+
+    base = Path.join(System.tmp_dir!(), "qa-artifact-present-#{System.unique_integer([:positive])}")
+    evidence_dir = Path.join(base, "fe-next-app/qa-evidence")
+    File.mkdir_p!(evidence_dir)
+    File.write!(Path.join(evidence_dir, "shot.png"), "fakepngbytes")
+
+    on_exit(fn -> File.rm_rf!(base) end)
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-8920",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-8920",
+        workpad_comment_id: "wp-comment-qa-present",
+        workspace_path: base
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue ->
+      "## QA self-review\n\n- Result: PASS\n"
+    end)
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_body_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+    end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
+  end
+
   test "SYM-16 auto-engagement bypass overrides gate_d_substance_fail" do
     issue_id = "issue-sym16-vs-gated"
     pr_url = "https://github.com/org/repo/pull/220"

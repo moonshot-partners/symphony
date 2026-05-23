@@ -22,6 +22,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.CLI,
           SymphonyElixir.Config,
           SymphonyElixir.GitHubPr,
+          SymphonyElixir.GitHubPrBody,
           SymphonyElixir.GitHubPrFiles,
           SymphonyElixir.Linear.Adapter,
           SymphonyElixir.Linear.Client,
