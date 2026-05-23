@@ -1,7 +1,7 @@
-defmodule SymphonyElixir.GateDTest do
+defmodule SymphonyElixir.GateDObserverTest do
   use ExUnit.Case, async: true
 
-  alias SymphonyElixir.GateD
+  alias SymphonyElixir.GateDObserver
 
   describe "validate_final_turn/1" do
     test "accepts message with '## AC Evidence' header" do
@@ -12,7 +12,7 @@ defmodule SymphonyElixir.GateDTest do
       - AC 2: MAX_RETRIES=3 at auth.ts:17, test auth.spec.ts:112
       """
 
-      assert :ok = GateD.validate_final_turn(text)
+      assert :ok = GateDObserver.validate_final_turn(text)
     end
 
     test "accepts message starting with '## BLOCKED:' (agent could not complete ACs)" do
@@ -22,49 +22,50 @@ defmodule SymphonyElixir.GateDTest do
       The AC requires a third-party payment provider that is not accessible in staging.
       """
 
-      assert :ok = GateD.validate_final_turn(text)
+      assert :ok = GateDObserver.validate_final_turn(text)
     end
 
     test "accepts header when preceded by whitespace lines" do
       text = "\n\n## AC Evidence\n\n- AC 1: found at file.ts:10\n"
-      assert :ok = GateD.validate_final_turn(text)
+      assert :ok = GateDObserver.validate_final_turn(text)
     end
 
     test "rejects message without AC Evidence header" do
       text = "I've completed the work and created the PR. All tests pass."
-      assert {:violation, :missing_header} = GateD.validate_final_turn(text)
+      assert {:violation, :missing_header} = GateDObserver.validate_final_turn(text)
     end
 
     test "rejects 'AC Trace' freelance header" do
       text = "## AC Trace\n\n- AC 1: done"
-      assert {:violation, :missing_header} = GateD.validate_final_turn(text)
+      assert {:violation, :missing_header} = GateDObserver.validate_final_turn(text)
     end
 
     test "rejects inline mention of header (not at line start)" do
       text = "Work done. Note: '## AC Evidence' is required but I skipped it."
-      assert {:violation, :missing_header} = GateD.validate_final_turn(text)
+      assert {:violation, :missing_header} = GateDObserver.validate_final_turn(text)
     end
 
     test "rejects nil" do
-      assert {:violation, :empty_message} = GateD.validate_final_turn(nil)
+      assert {:violation, :empty_message} = GateDObserver.validate_final_turn(nil)
     end
 
     test "rejects empty string" do
-      assert {:violation, :empty_message} = GateD.validate_final_turn("")
+      assert {:violation, :empty_message} = GateDObserver.validate_final_turn("")
     end
   end
 
-  describe "log_violation/2" do
+  describe "log_observation/2" do
     test "emits Logger.warning with identifier and truncated sample" do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          GateD.log_violation(
+          GateDObserver.log_observation(
             {:violation, :missing_header},
             %{identifier: "SODEV-999", last_agent_text: "Work done, no evidence section."}
           )
         end)
 
-      assert log =~ "Gate D violation"
+      assert log =~ "Gate D Observer"
+      assert log =~ "informational, no halt"
       assert log =~ "reason=missing_header"
       assert log =~ "SODEV-999"
     end
@@ -72,10 +73,10 @@ defmodule SymphonyElixir.GateDTest do
     test "handles missing context fields gracefully" do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          GateD.log_violation({:violation, :empty_message}, %{})
+          GateDObserver.log_observation({:violation, :empty_message}, %{})
         end)
 
-      assert log =~ "Gate D violation"
+      assert log =~ "Gate D Observer"
       assert log =~ "reason=empty_message"
       assert log =~ "issue_identifier=(unknown)"
     end
@@ -83,7 +84,7 @@ defmodule SymphonyElixir.GateDTest do
     test "labels empty last_agent_text as (empty)" do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          GateD.log_violation(
+          GateDObserver.log_observation(
             {:violation, :missing_header},
             %{identifier: "SODEV-999", last_agent_text: ""}
           )

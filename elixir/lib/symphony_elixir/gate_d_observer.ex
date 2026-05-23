@@ -1,11 +1,17 @@
-defmodule SymphonyElixir.GateD do
+defmodule SymphonyElixir.GateDObserver do
   @moduledoc """
-  Gate D — validates that the agent's final turn message contains an
-  `## AC Evidence` section mapping each acceptance criterion to the
-  specific code or test that satisfies it.
+  Gate D Observer — non-blocking check that the agent's final turn message
+  contains an `## AC Evidence` section mapping each acceptance criterion to
+  the specific code or test that satisfies it.
 
-  Pure boundary so the orchestrator stays workflow-agnostic and the
-  rule can be exercised in isolation. The orchestrator calls
+  Despite the historical "Gate D" name, this module **does not halt** a run
+  on violation: the orchestrator already exited `:normal` by the time the
+  observer fires, so violations are surfaced as Linear comments only —
+  informational, for future runs. The hard-gate substance verification (per
+  AC) lives in a separate ticket (SYM-1b / SYM-28).
+
+  Pure boundary so the orchestrator stays workflow-agnostic and the rule
+  can be exercised in isolation. The orchestrator calls
   `validate_final_turn/1` after a session ends with `:normal` exit.
   """
 
@@ -15,7 +21,7 @@ defmodule SymphonyElixir.GateD do
 
   @typedoc """
   `:ok` when the final turn is conformant, or
-  `{:violation, reason}` describing the specific violation.
+  `{:violation, reason}` describing the specific observation.
   """
   @type result :: :ok | {:violation, :missing_header | :empty_message}
 
@@ -31,8 +37,8 @@ defmodule SymphonyElixir.GateD do
     end
   end
 
-  @spec log_violation({:violation, atom()}, map()) :: :ok
-  def log_violation({:violation, reason}, context) when is_map(context) do
+  @spec log_observation({:violation, atom()}, map()) :: :ok
+  def log_observation({:violation, reason}, context) when is_map(context) do
     identifier =
       Map.get(context, :identifier) || Map.get(context, :issue_identifier) || "(unknown)"
 
@@ -44,7 +50,7 @@ defmodule SymphonyElixir.GateD do
       end
 
     Logger.warning(
-      "Gate D violation: final turn message did not include the required '## AC Evidence' header " <>
+      "Gate D Observer: final turn missing '## AC Evidence' (informational, no halt) " <>
         "reason=#{reason} issue_identifier=#{identifier} sample=#{inspect(sample)}"
     )
 

@@ -36,7 +36,7 @@ defmodule SymphonyElixir.Orchestrator.GateDTriggerTest do
           assert {:violation, :missing_header} = GateDTrigger.maybe_run(entry)
         end)
 
-      assert log =~ "Gate D violation"
+      assert log =~ "Gate D Observer"
       assert log =~ "SODEV-42"
     end
 

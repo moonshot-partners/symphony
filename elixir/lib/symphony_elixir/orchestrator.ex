@@ -788,9 +788,9 @@ defmodule SymphonyElixir.Orchestrator do
 
     Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
       body = """
-      ## Gate D — AC Evidence missing
+      ## Gate D Observer — AC Evidence missing (informational, no halt)
 
-      The agent's final turn did not include the required `## AC Evidence` section mapping each acceptance criterion to the specific code or test that satisfies it.
+      The agent's final turn did not include the recommended `## AC Evidence` section mapping each acceptance criterion to the specific code or test that satisfies it. This observation is logged for future-runs improvement — the run is not halted.
 
       Reason: #{reason}
       Issue: #{identifier}
