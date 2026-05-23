@@ -1216,6 +1216,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.agent_runtime.turn_timeout_ms == 3_600_000
     assert config.agent_runtime.read_timeout_ms == 5_000
     assert config.agent_runtime.stall_timeout_ms == 300_000
+    assert config.agent_runtime.tdd_phase_enforcement == false
 
     write_workflow_file!(Workflow.workflow_file_path(),
       agent_runtime_command: "codex --config 'model=\"gpt-5.5\"' app-server"
@@ -1232,6 +1233,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path())
     assert is_nil(Config.settings!().agent_runtime.docker_image)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      agent_runtime_tdd_phase_enforcement: true
+    )
+
+    assert Config.settings!().agent_runtime.tdd_phase_enforcement == true
 
     explicit_root =
       Path.join(

@@ -16,6 +16,10 @@ from symphony_agent_shim.guardrails.pre_edit_overwrite_guard import pre_edit_ove
 from symphony_agent_shim.guardrails.pre_push_gate import pre_push_gate
 from symphony_agent_shim.guardrails.secrets_gate import secrets_gate
 from symphony_agent_shim.guardrails.tdd_enforcer import tdd_enforcer
+from symphony_agent_shim.guardrails.tdd_phase import (
+    tdd_phase_post_bash,
+    tdd_phase_pre_edit,
+)
 
 
 def build_default_hooks() -> dict[str, list[HookMatcher]]:
@@ -24,11 +28,13 @@ def build_default_hooks() -> dict[str, list[HookMatcher]]:
         "PreToolUse": [
             HookMatcher(matcher="Write|Edit|MultiEdit", hooks=[secrets_gate]),
             HookMatcher(matcher="Write|Edit|MultiEdit", hooks=[pre_edit_overwrite_guard]),
+            HookMatcher(matcher="Write|Edit|MultiEdit", hooks=[tdd_phase_pre_edit]),
             HookMatcher(matcher="Write|Edit", hooks=[tdd_enforcer]),
             HookMatcher(matcher="Bash", hooks=[pre_push_gate]),
         ],
         "PostToolUse": [
             HookMatcher(matcher="Write|Edit|MultiEdit", hooks=[file_size_check]),
+            HookMatcher(matcher="Bash", hooks=[tdd_phase_post_bash]),
         ],
     }
 
@@ -40,4 +46,6 @@ __all__ = [
     "pre_push_gate",
     "secrets_gate",
     "tdd_enforcer",
+    "tdd_phase_post_bash",
+    "tdd_phase_pre_edit",
 ]

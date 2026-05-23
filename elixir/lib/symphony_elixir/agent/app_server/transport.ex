@@ -25,7 +25,26 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
     GH_TOKEN
     GITHUB_TOKEN
     SYMPHONY_WORKFLOW_FILE
+    SYMPHONY_TDD_PHASE_ENFORCEMENT
   ]
+
+  @doc """
+  Builds the `env:` keyword for `Port.open` so the Python shim sees the
+  guardrail toggles declared in the active WORKFLOW config. Only emits
+  variables whose backing flag is set — never overrides the inherited env
+  blindly. Pure helper (no `Config.settings!()` dependency) so tests can
+  drive it without booting the supervision tree.
+
+  See `tdd_phase` guardrail (SYM-21).
+  """
+  @spec guardrail_env(map() | struct()) :: [{charlist(), charlist()}]
+  def guardrail_env(agent_runtime_settings) do
+    if Map.get(agent_runtime_settings, :tdd_phase_enforcement, false) do
+      [{~c"SYMPHONY_TDD_PHASE_ENFORCEMENT", ~c"enabled"}]
+    else
+      []
+    end
+  end
 
   @spec start_port(Path.t(), String.t() | nil) :: {:ok, port()} | {:error, term()}
   def start_port(workspace, nil) do
@@ -122,18 +141,25 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
     if is_nil(executable) do
       {:error, :bash_not_found}
     else
-      port =
-        Port.open(
-          {:spawn_executable, String.to_charlist(executable)},
-          [
-            :binary,
-            :exit_status,
-            :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.settings!().agent_runtime.command)],
-            cd: String.to_charlist(workspace),
-            line: @port_line_bytes
-          ]
-        )
+      agent_runtime = Config.settings!().agent_runtime
+
+      opts =
+        [
+          :binary,
+          :exit_status,
+          :stderr_to_stdout,
+          args: [~c"-lc", String.to_charlist(agent_runtime.command)],
+          cd: String.to_charlist(workspace),
+          line: @port_line_bytes
+        ]
+
+      opts =
+        case guardrail_env(agent_runtime) do
+          [] -> opts
+          env -> opts ++ [env: env]
+        end
+
+      port = Port.open({:spawn_executable, String.to_charlist(executable)}, opts)
 
       {:ok, port}
     end
