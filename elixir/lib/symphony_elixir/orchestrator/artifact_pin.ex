@@ -34,9 +34,22 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPin do
 
         section ->
           publish(section, header, running_entry, issue_id)
-          mark_pinned(running_entry, header)
+
+          running_entry
+          |> mark_pinned(header)
+          |> store_section_text(header, section)
       end
     end
+  end
+
+  defp store_section_text(running_entry, header, section) do
+    current =
+      case Map.get(running_entry, :pinned_evidence_text) do
+        %{} = m -> m
+        _ -> %{}
+      end
+
+    Map.put(running_entry, :pinned_evidence_text, Map.put(current, header, section))
   end
 
   defp already_pinned?(running_entry, header) do

@@ -14,7 +14,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   via `send/2` without coupling this module to `self()`.
   """
 
-  alias SymphonyElixir.{Config, DecisionLog, GitHubPr, QaEvidence, Tracker, Workpad}
+  alias SymphonyElixir.{Config, DecisionLog, GateDValidator, GitHubPr, QaEvidence, Tracker, Workpad}
   alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition}
 
   @doc """
@@ -112,15 +112,40 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         :ok
 
       _ ->
-        # :all_green (or :unknown verdict) — keep the legacy decision tree.
-        if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
-          emit_route("qa_blocked", issue, reject_state, pr_engagements)
-          apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
-        else
-          emit_route("default_complete", issue, complete_state, pr_engagements)
-          apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id)
+        # :all_green (or :unknown verdict) — substance check then legacy tree.
+        case substance_verdict(running_entry) do
+          {:fail, failures} when is_binary(reject_state) ->
+            emit_route("gate_d_substance_fail", issue, reject_state, pr_engagements, %{
+              unbacked_acs: Enum.map(failures, & &1.ac_id)
+            })
+
+            post_substance_fail_comment(issue, failures, parent_comment_id)
+            apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+
+          _ ->
+            route_by_qa(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
         end
     end
+  end
+
+  defp route_by_qa(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state) do
+    if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
+      emit_route("qa_blocked", issue, reject_state, pr_engagements)
+      apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+    else
+      emit_route("default_complete", issue, complete_state, pr_engagements)
+      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id)
+    end
+  end
+
+  defp substance_verdict(running_entry) do
+    evidence_text =
+      case Map.get(running_entry, :pinned_evidence_text) do
+        %{} = m -> Map.get(m, "AC Evidence")
+        _ -> nil
+      end
+
+    GateDValidator.validate(evidence_text, %{workspace_path: Map.get(running_entry, :workspace_path)})
   end
 
   defp apply_completion_side_effects(issue, target_state, running_entry, parent_comment_id) do
@@ -157,6 +182,36 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     end
 
     :ok
+  end
+
+  defp post_substance_fail_comment(issue, failures, parent_comment_id) do
+    issue_id = Map.get(issue, :id)
+
+    if is_binary(issue_id) do
+      body = substance_fail_comment_body(failures)
+      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
+    end
+
+    :ok
+  end
+
+  defp substance_fail_comment_body(failures) when is_list(failures) do
+    bullet_list =
+      Enum.map_join(failures, "\n", fn %{ac_id: id, reason: reason} ->
+        "- AC #{id} — #{reason}"
+      end)
+
+    """
+    ## Gate D — substance verification failed
+
+    The agent's `## AC Evidence` block contains `verified` claims that lack a resolvable artifact reference. Parking in `on_reject_state` so the retry loop or a human can investigate.
+
+    **Unbacked claims:**
+
+    #{bullet_list}
+
+    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1b/SYM-28)._
+    """
   end
 
   defp red_checks_comment_body(names) when is_list(names) do
