@@ -14,8 +14,19 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   via `send/2` without coupling this module to `self()`.
   """
 
-  alias SymphonyElixir.{Config, DecisionLog, GateDValidator, GitHubPr, QaEvidence, Tracker, Workpad}
-  alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition}
+  alias SymphonyElixir.{
+    Config,
+    ConflictDisclosure,
+    DecisionLog,
+    GateDValidator,
+    GitHubPr,
+    GitHubPrFiles,
+    QaEvidence,
+    Tracker,
+    Workpad
+  }
+
+  alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition, TurnArtifacts}
 
   @doc """
   Sync the workpad comment for `issue_id` with the `pr_attached`
@@ -112,7 +123,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         :ok
 
       _ ->
-        # :all_green (or :unknown verdict) — substance check then legacy tree.
+        # :all_green (or :unknown verdict) — substance + conflict checks then legacy tree.
         case substance_verdict(running_entry) do
           {:fail, failures} when is_binary(reject_state) ->
             emit_route("gate_d_substance_fail", issue, reject_state, pr_engagements, %{
@@ -123,8 +134,48 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
             apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
 
           _ ->
-            route_by_qa(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
+            route_post_substance(
+              issue,
+              running_entry,
+              parent_comment_id,
+              pr_engagements,
+              reject_state,
+              complete_state
+            )
         end
+    end
+  end
+
+  defp route_post_substance(
+         issue,
+         running_entry,
+         parent_comment_id,
+         pr_engagements,
+         reject_state,
+         complete_state
+       ) do
+    case conflict_verdict(issue, running_entry) do
+      {:fail, undisclosed} when is_binary(reject_state) ->
+        # SYM-30 (AC4 of SYM-1): the agent's PR touches files outside the
+        # ticket's allowlist without disclosing them in `## Root cause`.
+        # Park in on_reject_state and name the undisclosed files so a human
+        # can decide whether to expand the allowlist or revert the diff.
+        emit_route("conflict_disclosure_fail", issue, reject_state, pr_engagements, %{
+          undisclosed_files: undisclosed
+        })
+
+        post_conflict_disclosure_comment(issue, undisclosed, parent_comment_id)
+        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+
+      _ ->
+        route_by_qa(
+          issue,
+          running_entry,
+          parent_comment_id,
+          pr_engagements,
+          reject_state,
+          complete_state
+        )
     end
   end
 
@@ -147,6 +198,24 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
 
     GateDValidator.validate(evidence_text, %{workspace_path: Map.get(running_entry, :workspace_path)})
   end
+
+  defp conflict_verdict(issue, running_entry) do
+    description = Map.get(issue, :description)
+    changed_files = GitHubPrFiles.changed_files(issue)
+    understanding_md = read_understanding_md(Map.get(running_entry, :workspace_path))
+    ConflictDisclosure.validate(description, changed_files, understanding_md)
+  end
+
+  defp read_understanding_md(workspace_path) when is_binary(workspace_path) do
+    with path when is_binary(path) <- TurnArtifacts.discover_understanding_md(workspace_path),
+         {:ok, content} <- File.read(path) do
+      content
+    else
+      _ -> nil
+    end
+  end
+
+  defp read_understanding_md(_), do: nil
 
   defp apply_completion_side_effects(issue, target_state, running_entry, parent_comment_id) do
     StateTransition.apply(issue, target_state)
@@ -182,6 +251,33 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     end
 
     :ok
+  end
+
+  defp post_conflict_disclosure_comment(issue, undisclosed, parent_comment_id) do
+    issue_id = Map.get(issue, :id)
+
+    if is_binary(issue_id) do
+      body = conflict_disclosure_comment_body(undisclosed)
+      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
+    end
+
+    :ok
+  end
+
+  defp conflict_disclosure_comment_body(undisclosed) when is_list(undisclosed) do
+    bullet_list = Enum.map_join(undisclosed, "\n", &"- `#{&1}`")
+
+    """
+    ## Conflict disclosure — undisclosed files in diff
+
+    The ticket spec declared a minimal-diff allowlist via `## Files (allowed)`, but the PR touches files outside it with no mention in the agent's `## Root cause` section of `understanding.md`. Parking in `on_reject_state` so a human can decide whether to expand the allowlist or revert the diff.
+
+    **Undisclosed files:**
+
+    #{bullet_list}
+
+    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1d/SYM-30)._
+    """
   end
 
   defp post_substance_fail_comment(issue, failures, parent_comment_id) do
