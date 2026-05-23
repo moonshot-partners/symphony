@@ -14,7 +14,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   via `send/2` without coupling this module to `self()`.
   """
 
-  alias SymphonyElixir.{Config, DecisionLog, GitHubPr, QaEvidence, Workpad}
+  alias SymphonyElixir.{Config, DecisionLog, GitHubPr, QaEvidence, Tracker, Workpad}
   alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition}
 
   @doc """
@@ -64,31 +64,66 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
 
   defp run_side_effects(issue, running_entry, parent_comment_id, pr_engagements) do
     reject_state = Config.settings!().tracker.on_reject_state
+    complete_state = Config.settings!().tracker.on_complete_state
 
-    {branch, target_state} =
-      cond do
-        in_auto_engagement?(issue, pr_engagements) ->
-          # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
-          # in on_reject_state on this run even if QA self-reports BLOCKED
-          # — let it land. If the next claude-pr-review verdict is still
-          # critical, PrReengagement caps at K=1 and parks for human review.
-          {"auto_engagement_bypass", Config.settings!().tracker.on_complete_state}
+    if in_auto_engagement?(issue, pr_engagements) do
+      # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
+      # in on_reject_state on this run even if QA self-reports BLOCKED
+      # or CI is red — let the K=1 re-engagement land. If the next
+      # claude-pr-review verdict is still critical, PrReengagement caps
+      # at K=1 and parks for human review.
+      emit_route("auto_engagement_bypass", issue, complete_state, pr_engagements)
+      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id)
+    else
+      route_by_ci_then_qa(
+        issue,
+        running_entry,
+        parent_comment_id,
+        pr_engagements,
+        reject_state,
+        complete_state
+      )
+    end
+  end
 
-        GitHubPr.qa_blocked?(issue) and is_binary(reject_state) ->
-          {"qa_blocked", reject_state}
+  defp route_by_ci_then_qa(
+         issue,
+         running_entry,
+         parent_comment_id,
+         pr_engagements,
+         reject_state,
+         complete_state
+       ) do
+    case GitHubPr.required_checks_status(issue) do
+      {:red, names} when is_binary(reject_state) ->
+        # SYM-1c (SYM-29): a red required check means the agent's PR cannot
+        # land as-is. Park in on_reject_state and post a workpad comment
+        # naming the failing checks so a human can triage.
+        emit_route("ci_red", issue, reject_state, pr_engagements, %{red_checks: names})
+        post_red_checks_comment(issue, names, parent_comment_id)
+        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
 
-        true ->
-          {"default_complete", Config.settings!().tracker.on_complete_state}
-      end
+      :pending ->
+        # SYM-1c (SYM-29) AC3: checks still running — do NOT transition.
+        # The orchestrator's next reconcile tick re-evaluates once GitHub
+        # has decided. Skip side effects entirely so we don't double-fire
+        # GithubLabel / QaEvidence before completion is real.
+        emit_route("ci_pending", issue, nil, pr_engagements)
+        :ok
 
-    DecisionLog.emit("workpad_pr_sync.route", %{
-      branch: branch,
-      issue_id: Map.get(issue, :id),
-      identifier: Map.get(issue, :identifier),
-      target_state: target_state,
-      pr_engagement_keys: Map.keys(pr_engagements)
-    })
+      _ ->
+        # :all_green (or :unknown verdict) — keep the legacy decision tree.
+        if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
+          emit_route("qa_blocked", issue, reject_state, pr_engagements)
+          apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+        else
+          emit_route("default_complete", issue, complete_state, pr_engagements)
+          apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id)
+        end
+    end
+  end
 
+  defp apply_completion_side_effects(issue, target_state, running_entry, parent_comment_id) do
     StateTransition.apply(issue, target_state)
     Task.start(fn -> GithubLabel.apply(issue) end)
 
@@ -99,6 +134,45 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     )
 
     :ok
+  end
+
+  defp emit_route(branch, issue, target_state, pr_engagements, extra \\ %{}) do
+    base = %{
+      branch: branch,
+      issue_id: Map.get(issue, :id),
+      identifier: Map.get(issue, :identifier),
+      target_state: target_state,
+      pr_engagement_keys: Map.keys(pr_engagements)
+    }
+
+    DecisionLog.emit("workpad_pr_sync.route", Map.merge(base, extra))
+  end
+
+  defp post_red_checks_comment(issue, names, parent_comment_id) do
+    issue_id = Map.get(issue, :id)
+
+    if is_binary(issue_id) do
+      body = red_checks_comment_body(names)
+      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
+    end
+
+    :ok
+  end
+
+  defp red_checks_comment_body(names) when is_list(names) do
+    bullet_list = Enum.map_join(names, "\n", &"- `#{&1}`")
+
+    """
+    ## CI gate — required checks failing
+
+    The agent's PR has one or more failing required checks. Parking in `on_reject_state` so the retry loop or a human can investigate.
+
+    **Failing checks:**
+
+    #{bullet_list}
+
+    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1c)._
+    """
   end
 
   defp in_auto_engagement?(issue, pr_engagements) when is_map(pr_engagements) do
