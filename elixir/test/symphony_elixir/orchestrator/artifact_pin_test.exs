@@ -47,6 +47,19 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPinTest do
       assert body =~ "AC#1 -> test_foo passes"
     end
 
+    test "stores the extracted section text in pinned_evidence_text for downstream gates" do
+      # SYM-28: GateDValidator needs the snapshot text durably attached
+      # to running_entry — last_agent_text is overwritten every turn, the
+      # snapshot must outlive it.
+      e = entry(%{last_agent_text: "## AC Evidence\n\n- AC 1: verified — lib/foo.ex:10"})
+
+      result = ArtifactPin.pin(e, "issue-abc", "AC Evidence")
+
+      assert is_map(result.pinned_evidence_text)
+      assert result.pinned_evidence_text["AC Evidence"] =~ "AC 1: verified"
+      assert result.pinned_evidence_text["AC Evidence"] =~ "## AC Evidence"
+    end
+
     test "repeated calls with the same header pin only once" do
       e = entry(%{last_agent_text: "## AC Extracted\n\nbody"})
 

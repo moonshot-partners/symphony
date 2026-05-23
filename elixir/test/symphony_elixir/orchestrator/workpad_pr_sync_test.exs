@@ -464,6 +464,131 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
   end
 
+  test "routes state to on_reject_state when GateDValidator returns substance fail (SYM-28)" do
+    issue_id = "issue-gated-substance-fail"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{id: issue_id, identifier: "WP-GATED-FAIL", state: "Scheduled", repos: []},
+        identifier: "WP-GATED-FAIL",
+        workpad_comment_id: "wp-comment-gated-fail",
+        workspace_path: "/tmp/nonexistent",
+        pinned_evidence_text: %{
+          "AC Evidence" => "## AC Evidence\n\n- AC 1: verified\n- AC 2: verified"
+        }
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
+
+    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
+    assert body =~ "Gate D — substance verification"
+    assert body =~ "AC 1"
+    assert body =~ "AC 2"
+    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-gated-fail"}, 1_000
+  end
+
+  test "routes state to on_complete_state when GateDValidator passes (every verified claim has a resolvable ref)" do
+    issue_id = "issue-gated-substance-ok"
+
+    base = Path.join(System.tmp_dir!(), "gated-ok-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(base)
+    file_path = Path.join(base, "lib/foo.ex")
+    File.mkdir_p!(Path.dirname(file_path))
+    File.write!(file_path, "defmodule Foo do\nend\n")
+    on_exit(fn -> File.rm_rf!(base) end)
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{id: issue_id, identifier: "WP-GATED-OK", state: "Scheduled", repos: []},
+        identifier: "WP-GATED-OK",
+        workpad_comment_id: "wp-comment-gated-ok",
+        workspace_path: base,
+        pinned_evidence_text: %{
+          "AC Evidence" => "## AC Evidence\n\n- AC 1: verified — lib/foo.ex:10"
+        }
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+  end
+
+  test "SYM-16 auto-engagement bypass overrides gate_d_substance_fail" do
+    issue_id = "issue-sym16-vs-gated"
+    pr_url = "https://github.com/org/repo/pull/220"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{
+          id: issue_id,
+          identifier: "WP-SYM16-GATED",
+          state: "Scheduled",
+          repos: [%{name: "fe-next-app", pr: %{url: pr_url}}]
+        },
+        identifier: "WP-SYM16-GATED",
+        workpad_comment_id: "wp-comment-sym16-gated",
+        workspace_path: "/tmp/nonexistent",
+        pinned_evidence_text: %{
+          "AC Evidence" => "## AC Evidence\n\n- AC 1: verified"
+        }
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    state = %State{
+      running: running,
+      claimed: MapSet.new([issue_id]),
+      workpads: %{},
+      retry_attempts: %{},
+      pr_engagements: %{pr_url => %{count: 1, cap_hit_shas: MapSet.new()}},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
+  end
+
   test "routes state to on_complete_state when QA is not BLOCKED" do
     issue_id = "issue-qa-ok-1"
 
@@ -659,6 +784,26 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
       _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
       assert "ci_pending" in branches(path)
+    end
+
+    test "emits gate_d_substance_fail branch when verified AC lacks resolvable ref", %{ledger_path: path} do
+      issue_id = "i-route-gated-fail"
+
+      running = %{
+        issue_id => %{
+          issue: %Issue{id: issue_id, identifier: "WP-220", state: "Scheduled", repos: []},
+          identifier: "WP-220",
+          workpad_comment_id: "wp-220",
+          workspace_path: "/tmp/nonexistent",
+          pinned_evidence_text: %{"AC Evidence" => "## AC Evidence\n\n- AC 1: verified"}
+        }
+      }
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _ -> false end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+      _ = WorkpadPrSync.sync(build_state(running), issue_id, self())
+      assert "gate_d_substance_fail" in branches(path)
     end
 
     test "emits qa_blocked branch when QA self-reports BLOCKED and not in engagement", %{ledger_path: path} do
