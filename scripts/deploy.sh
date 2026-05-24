@@ -67,6 +67,16 @@ sudo chmod 644 /etc/logrotate.d/symphony
 log "build escript"
 export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
 cd "$SYMPHONY_DIR/elixir"
+# Nuke _build/prod before rebuilding. Schema changes (e.g. SYM-22 adding
+# :soft_cap_enabled to Config.Schema.Agent) silently reuse stale compiled
+# BEAMs because mix incremental rebuild does not detect every struct
+# layout shift. The stale BEAM ships an old struct, then a runtime
+# Map.fetch! against the new field raises KeyError and crashes the
+# orchestrator in a restart loop. Verified live 2026-05-24: SYM-22
+# shipped 2026-05-22, deploy reused stale BEAM, Symphony crashed every
+# turn_completed for 16h until manual rebuild on the VPS.
+# 5s extra per deploy buys correctness — keep this.
+rm -rf _build/prod
 # `</dev/null` is load-bearing: the deploy workflow runs this script via
 # `ssh 'bash -s' < scripts/deploy.sh`, so the script itself is on stdin.
 # `mix` (the BEAM it spawns) reads stdin and would consume the rest of the
