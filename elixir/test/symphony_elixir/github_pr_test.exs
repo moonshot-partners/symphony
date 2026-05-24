@@ -256,6 +256,79 @@ defmodule SymphonyElixir.GitHubPrTest do
     end
   end
 
+  describe "classify_pr_view_payload/1 (SODEV-824 closed-PR poison-pill fix)" do
+    test "CLOSED PR with stale FAILURE checks reports :all_green" do
+      payload = %{
+        "state" => "CLOSED",
+        "statusCheckRollup" => [
+          %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE"},
+          %{"__typename" => "CheckRun", "name" => "review", "status" => "COMPLETED", "conclusion" => "CANCELLED"}
+        ]
+      }
+
+      assert GitHubPr.classify_pr_view_payload(payload) == :all_green
+    end
+
+    test "MERGED PR with stale FAILURE checks reports :all_green" do
+      payload = %{
+        "state" => "MERGED",
+        "statusCheckRollup" => [
+          %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE"}
+        ]
+      }
+
+      assert GitHubPr.classify_pr_view_payload(payload) == :all_green
+    end
+
+    test "OPEN PR with red checks still classifies as red" do
+      payload = %{
+        "state" => "OPEN",
+        "statusCheckRollup" => [
+          %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE"}
+        ]
+      }
+
+      assert GitHubPr.classify_pr_view_payload(payload) == {:red, ["qa-evidence"]}
+    end
+
+    test "OPEN PR with all-green checks classifies as :all_green" do
+      payload = %{
+        "state" => "OPEN",
+        "statusCheckRollup" => [
+          %{"__typename" => "CheckRun", "name" => "build", "status" => "COMPLETED", "conclusion" => "SUCCESS"}
+        ]
+      }
+
+      assert GitHubPr.classify_pr_view_payload(payload) == :all_green
+    end
+
+    test "OPEN PR with pending check classifies as :pending" do
+      payload = %{
+        "state" => "OPEN",
+        "statusCheckRollup" => [
+          %{"__typename" => "CheckRun", "name" => "deploy", "status" => "IN_PROGRESS", "conclusion" => nil}
+        ]
+      }
+
+      assert GitHubPr.classify_pr_view_payload(payload) == :pending
+    end
+
+    test "payload without state falls back to rollup-only classification" do
+      payload = %{
+        "statusCheckRollup" => [
+          %{"__typename" => "CheckRun", "name" => "x", "status" => "COMPLETED", "conclusion" => "FAILURE"}
+        ]
+      }
+
+      assert GitHubPr.classify_pr_view_payload(payload) == {:red, ["x"]}
+    end
+
+    test "malformed payload returns :all_green" do
+      assert GitHubPr.classify_pr_view_payload(%{}) == :all_green
+      assert GitHubPr.classify_pr_view_payload(%{"state" => "OPEN"}) == :all_green
+    end
+  end
+
   describe "required_checks_status/1 with injected fn" do
     setup do
       on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn) end)
