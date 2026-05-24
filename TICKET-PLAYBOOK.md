@@ -45,6 +45,29 @@ What does **not** work: replying in the ticket comments and expecting
 the agent to read them, or moving the card without updating the
 description. The agent will just repeat the same run.
 
+## Stop a ticket entirely
+
+**Scheduled** is the re-dispatch trigger. Moving any agent-labelled
+ticket into Scheduled — for any reason, including "I want to reset
+this back to clean" — tells Symphony to start a fresh run. If the
+description is viable, a new agent boots, takes the workspace, and
+opens (or reuses) a pull request.
+
+To stop a ticket without triggering another run, move it to a
+terminal state instead — **Canceled**, **Closed**, **Duplicate**, or
+**Released / Live**. Symphony's reconciler treats those as final and
+will tear down any running agent, delete the workspace, and never
+re-dispatch.
+
+Rule of thumb:
+
+- **Scheduled** = "work this again".
+- **Canceled** = "stop and forget".
+
+If you want to clean up a noisy ticket and pick it up later, move it
+to Canceled first (Symphony halts), then back to Scheduled when the
+description is ready.
+
 ### What carries from one run to the next
 
 A re-dispatch starts the agent over. Concretely:
