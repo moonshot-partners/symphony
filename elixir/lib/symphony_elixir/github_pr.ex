@@ -505,13 +505,13 @@ defmodule SymphonyElixir.GitHubPr do
   defp shell_status_check_rollup(owner, repo, number, url) do
     case System.cmd(
            "gh",
-           ["pr", "view", number, "--repo", "#{owner}/#{repo}", "--json", "statusCheckRollup"],
+           ["pr", "view", number, "--repo", "#{owner}/#{repo}", "--json", "state,statusCheckRollup"],
            stderr_to_stdout: true
          ) do
       {output, 0} ->
         case Jason.decode(output) do
-          {:ok, %{"statusCheckRollup" => list}} when is_list(list) ->
-            classify_status_check_rollup(list)
+          {:ok, payload} ->
+            classify_pr_view_payload(payload)
 
           _ ->
             Logger.debug("required_checks_status: malformed rollup for #{url} output=#{inspect(output)}")
@@ -523,6 +523,28 @@ defmodule SymphonyElixir.GitHubPr do
         :all_green
     end
   end
+
+  @doc """
+  Pure classifier for the `{state, statusCheckRollup}` payload returned by
+  `gh pr view --json state,statusCheckRollup`.
+
+  Closed/merged PRs carry stale check rows from their last CI run. SODEV-824
+  redispatch surfaced this: a prior closed fe-next-app PR left 2× qa-evidence
+  FAILURE + review CANCELLED on the Linear attachment, poisoning the reduce
+  in `default_required_checks_status/1` and parking the issue even though the
+  new open backend PR was green. Same poison-pill class as SODEV-765 (PR #40
+  filtered closed PRs in `ready?/1` but missed this path). Treat non-OPEN as
+  `:all_green` so they don't vote in CI status aggregation.
+  """
+  @spec classify_pr_view_payload(map()) :: required_checks_status()
+  def classify_pr_view_payload(%{"state" => state, "statusCheckRollup" => list})
+      when is_list(list) and state != "OPEN",
+      do: :all_green
+
+  def classify_pr_view_payload(%{"statusCheckRollup" => list}) when is_list(list),
+    do: classify_status_check_rollup(list)
+
+  def classify_pr_view_payload(_), do: :all_green
 
   @doc """
   Pure classifier for a list of `statusCheckRollup` entries returned by
