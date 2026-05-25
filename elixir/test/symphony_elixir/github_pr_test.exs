@@ -370,6 +370,33 @@ defmodule SymphonyElixir.GitHubPrTest do
 
       assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
     end
+
+    test "out-of-order rollup keeps the older entry when the latest comes first" do
+      list = [
+        %{
+          "__typename" => "CheckRun",
+          "name" => "qa-evidence",
+          "status" => "COMPLETED",
+          "conclusion" => "SUCCESS",
+          "startedAt" => "2026-05-24T20:18:33Z"
+        },
+        %{
+          "__typename" => "CheckRun",
+          "name" => "qa-evidence",
+          "status" => "COMPLETED",
+          "conclusion" => "FAILURE",
+          "startedAt" => "2026-05-24T20:16:17Z"
+        }
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
+    end
+
+    test "entries without name, status, or state fall through cleanly" do
+      list = [%{"__typename" => "Unknown"}]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
+    end
   end
 
   describe "classify_pr_view_payload/1 (SODEV-824 closed-PR poison-pill fix)" do
