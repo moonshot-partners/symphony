@@ -25,6 +25,8 @@ defmodule SymphonyElixir.GitHubPr do
 
   require Logger
 
+  alias SymphonyElixir.GitHubPr.ChecksClassifier
+
   @github_pr_regex ~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}
 
   @doc """
@@ -511,7 +513,7 @@ defmodule SymphonyElixir.GitHubPr do
       {output, 0} ->
         case Jason.decode(output) do
           {:ok, payload} ->
-            classify_pr_view_payload(payload)
+            ChecksClassifier.classify_pr_view_payload(payload)
 
           _ ->
             Logger.debug("required_checks_status: malformed rollup for #{url} output=#{inspect(output)}")
@@ -523,66 +525,4 @@ defmodule SymphonyElixir.GitHubPr do
         :all_green
     end
   end
-
-  @doc """
-  Pure classifier for the `{state, statusCheckRollup}` payload returned by
-  `gh pr view --json state,statusCheckRollup`.
-
-  Closed/merged PRs carry stale check rows from their last CI run. SODEV-824
-  redispatch surfaced this: a prior closed fe-next-app PR left 2× qa-evidence
-  FAILURE + review CANCELLED on the Linear attachment, poisoning the reduce
-  in `default_required_checks_status/1` and parking the issue even though the
-  new open backend PR was green. Same poison-pill class as SODEV-765 (PR #40
-  filtered closed PRs in `ready?/1` but missed this path). Treat non-OPEN as
-  `:all_green` so they don't vote in CI status aggregation.
-  """
-  @spec classify_pr_view_payload(map()) :: required_checks_status()
-  def classify_pr_view_payload(%{"state" => state, "statusCheckRollup" => list})
-      when is_list(list) and state != "OPEN",
-      do: :all_green
-
-  def classify_pr_view_payload(%{"statusCheckRollup" => list}) when is_list(list),
-    do: classify_status_check_rollup(list)
-
-  def classify_pr_view_payload(_), do: :all_green
-
-  @doc """
-  Pure classifier for a list of `statusCheckRollup` entries returned by
-  `gh pr view --json statusCheckRollup`.
-
-  Handles both shapes the GitHub GraphQL API can emit:
-
-  * `CheckRun` — `%{"status" => "COMPLETED" | _, "conclusion" => "SUCCESS" | "FAILURE" | …, "name" => name}`
-  * `StatusContext` — `%{"state" => "SUCCESS" | "FAILURE" | "PENDING" | _, "context" => name}`
-
-  Treats SUCCESS / NEUTRAL / SKIPPED / STALE as green; FAILURE / CANCELLED /
-  TIMED_OUT / ACTION_REQUIRED / ERROR as red; everything else as pending.
-  """
-  @spec classify_status_check_rollup([map()]) :: required_checks_status()
-  def classify_status_check_rollup(list) when is_list(list) do
-    reds = list |> Enum.filter(&red_check?/1) |> Enum.map(&check_name/1)
-
-    cond do
-      reds != [] -> {:red, reds}
-      Enum.any?(list, &pending_check?/1) -> :pending
-      true -> :all_green
-    end
-  end
-
-  @red_conclusions ~w(FAILURE CANCELLED TIMED_OUT ACTION_REQUIRED)
-  @red_states ~w(FAILURE ERROR)
-  @pending_statuses ~w(IN_PROGRESS QUEUED PENDING WAITING REQUESTED)
-  @pending_states ~w(PENDING EXPECTED)
-
-  defp red_check?(%{"conclusion" => c}) when is_binary(c), do: c in @red_conclusions
-  defp red_check?(%{"state" => s}) when is_binary(s), do: s in @red_states
-  defp red_check?(_), do: false
-
-  defp pending_check?(%{"status" => s}) when is_binary(s), do: s in @pending_statuses
-  defp pending_check?(%{"state" => s}) when is_binary(s), do: s in @pending_states
-  defp pending_check?(_), do: false
-
-  defp check_name(%{"name" => n}) when is_binary(n), do: n
-  defp check_name(%{"context" => n}) when is_binary(n), do: n
-  defp check_name(_), do: "unknown"
 end

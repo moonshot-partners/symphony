@@ -181,7 +181,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "CheckRun", "name" => "lint", "status" => "COMPLETED", "conclusion" => "SUCCESS"}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
     end
 
     test "treats NEUTRAL/SKIPPED/STALE conclusions as green" do
@@ -191,7 +191,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "CheckRun", "name" => "c", "status" => "COMPLETED", "conclusion" => "STALE"}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
     end
 
     test "returns {:red, names} when any CheckRun concluded FAILURE" do
@@ -200,7 +200,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE"}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == {:red, ["qa-evidence"]}
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == {:red, ["qa-evidence"]}
     end
 
     test "collects every red check name in order" do
@@ -212,7 +212,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "CheckRun", "name" => "scan", "status" => "COMPLETED", "conclusion" => "ACTION_REQUIRED"}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) ==
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) ==
                {:red, ["build", "test", "deploy", "scan"]}
     end
 
@@ -222,7 +222,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "CheckRun", "name" => "deploy", "status" => "IN_PROGRESS", "conclusion" => nil}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == :pending
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :pending
     end
 
     test "red wins over pending in mixed rollups" do
@@ -231,7 +231,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "CheckRun", "name" => "deploy", "status" => "QUEUED", "conclusion" => nil}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == {:red, ["build"]}
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == {:red, ["build"]}
     end
 
     test "handles legacy StatusContext entries (state/context shape)" do
@@ -240,7 +240,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "StatusContext", "context" => "ci/jenkins", "state" => "FAILURE"}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == {:red, ["ci/jenkins"]}
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == {:red, ["ci/jenkins"]}
     end
 
     test "StatusContext PENDING is pending" do
@@ -248,11 +248,127 @@ defmodule SymphonyElixir.GitHubPrTest do
         %{"__typename" => "StatusContext", "context" => "ci/jenkins", "state" => "PENDING"}
       ]
 
-      assert GitHubPr.classify_status_check_rollup(list) == :pending
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :pending
     end
 
     test "returns :all_green for an empty list (no checks configured)" do
-      assert GitHubPr.classify_status_check_rollup([]) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup([]) == :all_green
+    end
+  end
+
+  describe "classify_status_check_rollup/1 (SYM-35 latest-per-name dedup)" do
+    test "3 qa-evidence attempts (FAILURE, FAILURE, SUCCESS) → :all_green" do
+      list = [
+        %{
+          "__typename" => "CheckRun",
+          "name" => "qa-evidence",
+          "status" => "COMPLETED",
+          "conclusion" => "FAILURE",
+          "startedAt" => "2026-05-24T20:16:17Z"
+        },
+        %{
+          "__typename" => "CheckRun",
+          "name" => "qa-evidence",
+          "status" => "COMPLETED",
+          "conclusion" => "FAILURE",
+          "startedAt" => "2026-05-24T20:16:17Z"
+        },
+        %{
+          "__typename" => "CheckRun",
+          "name" => "qa-evidence",
+          "status" => "COMPLETED",
+          "conclusion" => "SUCCESS",
+          "startedAt" => "2026-05-24T20:18:33Z"
+        }
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
+    end
+
+    test "review CANCELLED twice then IN_PROGRESS → :pending (latest is running)" do
+      list = [
+        %{
+          "__typename" => "CheckRun",
+          "name" => "review",
+          "status" => "COMPLETED",
+          "conclusion" => "CANCELLED",
+          "startedAt" => "2026-05-24T20:16:14Z"
+        },
+        %{
+          "__typename" => "CheckRun",
+          "name" => "review",
+          "status" => "COMPLETED",
+          "conclusion" => "CANCELLED",
+          "startedAt" => "2026-05-24T20:16:18Z"
+        },
+        %{
+          "__typename" => "CheckRun",
+          "name" => "review",
+          "status" => "IN_PROGRESS",
+          "conclusion" => nil,
+          "startedAt" => "2026-05-24T20:18:48Z"
+        }
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :pending
+    end
+
+    test "latest attempt FAILURE wins over earlier SUCCESS" do
+      list = [
+        %{
+          "__typename" => "CheckRun",
+          "name" => "build",
+          "status" => "COMPLETED",
+          "conclusion" => "SUCCESS",
+          "startedAt" => "2026-05-24T20:10:00Z"
+        },
+        %{
+          "__typename" => "CheckRun",
+          "name" => "build",
+          "status" => "COMPLETED",
+          "conclusion" => "FAILURE",
+          "startedAt" => "2026-05-24T20:20:00Z"
+        }
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == {:red, ["build"]}
+    end
+
+    test "SODEV-824 PR #595 full rollup → :pending (latest review IN_PROGRESS, qa-evidence SUCCESS)" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "Lint", "status" => "COMPLETED", "conclusion" => "SUCCESS", "startedAt" => "2026-05-24T20:15:12Z"},
+        %{"__typename" => "CheckRun", "name" => "review", "status" => "COMPLETED", "conclusion" => "CANCELLED", "startedAt" => "2026-05-24T20:16:14Z"},
+        %{"__typename" => "CheckRun", "name" => "scope-discipline", "status" => "COMPLETED", "conclusion" => "SUCCESS", "startedAt" => "2026-05-24T20:16:17Z"},
+        %{"__typename" => "CheckRun", "name" => "scope-discipline", "status" => "COMPLETED", "conclusion" => "SUCCESS", "startedAt" => "2026-05-24T20:16:17Z"},
+        %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE", "startedAt" => "2026-05-24T20:16:17Z"},
+        %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "FAILURE", "startedAt" => "2026-05-24T20:16:17Z"},
+        %{"__typename" => "CheckRun", "name" => "review", "status" => "COMPLETED", "conclusion" => "CANCELLED", "startedAt" => "2026-05-24T20:16:18Z"},
+        %{"__typename" => "CheckRun", "name" => "Test", "status" => "COMPLETED", "conclusion" => "SUCCESS", "startedAt" => "2026-05-24T20:17:09Z"},
+        %{"__typename" => "CheckRun", "name" => "scope-discipline", "status" => "COMPLETED", "conclusion" => "SUCCESS", "startedAt" => "2026-05-24T20:18:33Z"},
+        %{"__typename" => "CheckRun", "name" => "qa-evidence", "status" => "COMPLETED", "conclusion" => "SUCCESS", "startedAt" => "2026-05-24T20:18:33Z"},
+        %{"__typename" => "CheckRun", "name" => "deploy", "status" => "COMPLETED", "conclusion" => "SKIPPED", "startedAt" => "2026-05-24T20:18:47Z"},
+        %{"__typename" => "CheckRun", "name" => "review", "status" => "IN_PROGRESS", "conclusion" => nil, "startedAt" => "2026-05-24T20:18:48Z"}
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :pending
+    end
+
+    test "entries without startedAt fall back to insertion order (last wins)" do
+      list = [
+        %{"__typename" => "CheckRun", "name" => "x", "status" => "COMPLETED", "conclusion" => "FAILURE"},
+        %{"__typename" => "CheckRun", "name" => "x", "status" => "COMPLETED", "conclusion" => "SUCCESS"}
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
+    end
+
+    test "StatusContext entries dedupe by context (last wins, no startedAt)" do
+      list = [
+        %{"__typename" => "StatusContext", "context" => "ci/jenkins", "state" => "FAILURE"},
+        %{"__typename" => "StatusContext", "context" => "ci/jenkins", "state" => "SUCCESS"}
+      ]
+
+      assert GitHubPr.ChecksClassifier.classify_status_check_rollup(list) == :all_green
     end
   end
 
@@ -266,7 +382,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         ]
       }
 
-      assert GitHubPr.classify_pr_view_payload(payload) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(payload) == :all_green
     end
 
     test "MERGED PR with stale FAILURE checks reports :all_green" do
@@ -277,7 +393,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         ]
       }
 
-      assert GitHubPr.classify_pr_view_payload(payload) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(payload) == :all_green
     end
 
     test "OPEN PR with red checks still classifies as red" do
@@ -288,7 +404,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         ]
       }
 
-      assert GitHubPr.classify_pr_view_payload(payload) == {:red, ["qa-evidence"]}
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(payload) == {:red, ["qa-evidence"]}
     end
 
     test "OPEN PR with all-green checks classifies as :all_green" do
@@ -299,7 +415,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         ]
       }
 
-      assert GitHubPr.classify_pr_view_payload(payload) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(payload) == :all_green
     end
 
     test "OPEN PR with pending check classifies as :pending" do
@@ -310,7 +426,7 @@ defmodule SymphonyElixir.GitHubPrTest do
         ]
       }
 
-      assert GitHubPr.classify_pr_view_payload(payload) == :pending
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(payload) == :pending
     end
 
     test "payload without state falls back to rollup-only classification" do
@@ -320,12 +436,12 @@ defmodule SymphonyElixir.GitHubPrTest do
         ]
       }
 
-      assert GitHubPr.classify_pr_view_payload(payload) == {:red, ["x"]}
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(payload) == {:red, ["x"]}
     end
 
     test "malformed payload returns :all_green" do
-      assert GitHubPr.classify_pr_view_payload(%{}) == :all_green
-      assert GitHubPr.classify_pr_view_payload(%{"state" => "OPEN"}) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(%{}) == :all_green
+      assert GitHubPr.ChecksClassifier.classify_pr_view_payload(%{"state" => "OPEN"}) == :all_green
     end
   end
 
