@@ -65,24 +65,25 @@ defmodule SymphonyElixir.GitHubPr.ChecksClassifier do
   defp dedupe_latest_by_name(list) do
     list
     |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {entry, idx}, acc ->
-      name = check_name(entry)
-
-      case Map.get(acc, name) do
-        nil ->
-          Map.put(acc, name, {entry, idx})
-
-        {existing, _existing_idx} ->
-          if newer?(entry, existing) do
-            Map.put(acc, name, {entry, idx})
-          else
-            acc
-          end
-      end
-    end)
+    |> Enum.reduce(%{}, &keep_latest_by_name/2)
     |> Map.values()
     |> Enum.sort_by(fn {_entry, idx} -> idx end)
     |> Enum.map(fn {entry, _idx} -> entry end)
+  end
+
+  defp keep_latest_by_name({entry, idx}, acc) do
+    name = check_name(entry)
+
+    case Map.get(acc, name) do
+      nil -> Map.put(acc, name, {entry, idx})
+      {existing, _} -> replace_if_newer(acc, name, entry, idx, existing)
+    end
+  end
+
+  defp replace_if_newer(acc, name, new_entry, new_idx, old_entry) do
+    if newer?(new_entry, old_entry),
+      do: Map.put(acc, name, {new_entry, new_idx}),
+      else: acc
   end
 
   defp newer?(new_entry, old_entry) do
