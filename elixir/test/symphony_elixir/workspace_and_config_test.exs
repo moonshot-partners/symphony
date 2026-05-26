@@ -1264,6 +1264,19 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "rm -rf .next"
            ]
 
+    # memoria: absent → nil
+    write_workflow_file!(Workflow.workflow_file_path())
+    assert is_nil(Config.settings!().agent_runtime.memoria)
+
+    # memoria: present → struct with both fields
+    write_workflow_file!(Workflow.workflow_file_path(),
+      agent_runtime_memoria: %{project_id: "574d7d43-82b9-44ac-b2c2-a8dc93e84c8e", project_tag: "schools-out"}
+    )
+
+    memoria = Config.settings!().agent_runtime.memoria
+    assert memoria.project_id == "574d7d43-82b9-44ac-b2c2-a8dc93e84c8e"
+    assert memoria.project_tag == "schools-out"
+
     explicit_root =
       Path.join(
         System.tmp_dir!(),
