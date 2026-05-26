@@ -48,22 +48,22 @@ defmodule SymphonyElixir.Evals.Diff do
   end
 
   defp diff_one(%Result{} = b, %Result{} = c, turn_tol, event_tol_pct) do
-    []
-    |> maybe_add(b.final_state == c.final_state, %{fixture_id: b.fixture_id, field: :final_state, baseline: b.final_state, candidate: c.final_state})
-    |> maybe_add(b.gate_verdicts == c.gate_verdicts, %{fixture_id: b.fixture_id, field: :gate_verdicts, baseline: b.gate_verdicts, candidate: c.gate_verdicts})
-    |> maybe_add(b.error_class == c.error_class, %{fixture_id: b.fixture_id, field: :error_class, baseline: b.error_class, candidate: c.error_class})
-    |> maybe_add(b.pr_outcome == c.pr_outcome, %{fixture_id: b.fixture_id, field: :pr_outcome, baseline: b.pr_outcome, candidate: c.pr_outcome})
-    |> maybe_add(within_int_tolerance?(b.turn_count, c.turn_count, turn_tol), %{fixture_id: b.fixture_id, field: :turn_count, baseline: b.turn_count, candidate: c.turn_count})
-    |> maybe_add(within_pct_tolerance?(b.decision_event_count, c.decision_event_count, event_tol_pct), %{
-      fixture_id: b.fixture_id,
-      field: :decision_event_count,
-      baseline: b.decision_event_count,
-      candidate: c.decision_event_count
-    })
-  end
+    bd = b.decision_event_count
+    cd = c.decision_event_count
 
-  defp maybe_add(deltas, true, _delta), do: deltas
-  defp maybe_add(deltas, false, delta), do: [delta | deltas]
+    checks = [
+      {b.final_state == c.final_state, :final_state, b.final_state, c.final_state},
+      {b.gate_verdicts == c.gate_verdicts, :gate_verdicts, b.gate_verdicts, c.gate_verdicts},
+      {b.error_class == c.error_class, :error_class, b.error_class, c.error_class},
+      {b.pr_outcome == c.pr_outcome, :pr_outcome, b.pr_outcome, c.pr_outcome},
+      {within_int_tolerance?(b.turn_count, c.turn_count, turn_tol), :turn_count, b.turn_count, c.turn_count},
+      {within_pct_tolerance?(bd, cd, event_tol_pct), :decision_event_count, bd, cd}
+    ]
+
+    for {false, field, base, cand} <- checks do
+      %{fixture_id: b.fixture_id, field: field, baseline: base, candidate: cand}
+    end
+  end
 
   defp within_int_tolerance?(a, b, tol), do: abs(a - b) <= tol
 

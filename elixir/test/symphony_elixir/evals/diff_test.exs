@@ -3,8 +3,18 @@ defmodule SymphonyElixir.Evals.DiffTest do
 
   alias SymphonyElixir.Evals.{Diff, Result}
 
-  defp r(opts),
-    do: struct(Result, [fixture_id: "x", final_state: "In Code Review", gate_verdicts: [], turn_count: 1, error_class: nil, pr_outcome: "merged", decision_event_count: 5, duration_ms: 10] ++ opts)
+  @defaults [
+    fixture_id: "x",
+    final_state: "In Code Review",
+    gate_verdicts: [],
+    turn_count: 1,
+    error_class: nil,
+    pr_outcome: "merged",
+    decision_event_count: 5,
+    duration_ms: 10
+  ]
+
+  defp r(opts), do: struct(Result, @defaults ++ opts)
 
   test "compare/2 returns :ok when results match" do
     assert Diff.compare([r([])], [r([])]) == {:ok, []}

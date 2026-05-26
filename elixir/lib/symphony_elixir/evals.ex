@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Evals do
     * `diff/2`   — compare two JSONL recordings via `Diff.compare/2`
   """
 
-  alias SymphonyElixir.Evals.{Fixture, Result, Runner, Diff}
+  alias SymphonyElixir.Evals.{Diff, Fixture, Result, Runner}
 
   @spec record(keyword()) :: :ok
   def record(opts) do

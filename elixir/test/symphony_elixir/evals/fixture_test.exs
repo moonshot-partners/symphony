@@ -20,7 +20,7 @@ defmodule SymphonyElixir.Evals.FixtureTest do
   test "load/1 parses the planned events sequence" do
     fixture = Fixture.load(@sample_path)
     assert is_list(fixture.events)
-    assert length(fixture.events) > 0
+    refute fixture.events == []
     assert hd(fixture.events) == {:agent_dispatched, %{turn: 1}}
   end
 

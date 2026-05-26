@@ -61,12 +61,7 @@ defmodule SymphonyElixir.Evals.Result do
   def write_all(results, path) when is_list(results) and is_binary(path) do
     File.mkdir_p!(Path.dirname(path))
 
-    body =
-      results
-      |> Enum.map(&to_jsonl/1)
-      |> Enum.join("\n")
-      |> Kernel.<>("\n")
-
+    body = Enum.map_join(results, "\n", &to_jsonl/1) <> "\n"
     File.write!(path, body)
   end
 
