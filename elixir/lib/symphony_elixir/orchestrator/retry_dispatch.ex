@@ -28,8 +28,8 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
 
   require Logger
 
-  alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.{GitHubPr, QaEvidence, Tracker}
+  alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
     DispatchGate,
