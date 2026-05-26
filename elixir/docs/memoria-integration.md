@@ -35,11 +35,11 @@ The key never lives in source. Two surfaces hold it:
    gh secret set MEMORIA_API_KEY --repo moonshot-partners/symphony
    ```
 
-2. **Hetzner production env** at `/etc/symphony.env` on `46.62.226.192`:
+2. **Hetzner production env** at `/etc/symphony/symphony.env` on `46.62.226.192`:
 
    ```bash
    ssh -i ~/.ssh/symphony_ci_hetzner root@46.62.226.192 \
-     "echo 'MEMORIA_API_KEY=mem_<64-hex>' >> /etc/symphony.env && \
+     "echo 'MEMORIA_API_KEY=mem_<64-hex>' >> /etc/symphony/symphony.env && \
       systemctl restart symphony"
    ```
 
@@ -132,7 +132,7 @@ Hetzner and confirm Memoria is up: `curl https://memoria.moonshot-apps.com/api/v
 
 1. Ask Pedro for a new token.
 2. Update the GitHub Actions secret: `gh secret set MEMORIA_API_KEY --repo moonshot-partners/symphony`.
-3. Update `/etc/symphony.env` on Hetzner and `systemctl restart symphony`.
+3. Update `/etc/symphony/symphony.env` on Hetzner and `systemctl restart symphony`.
 4. Confirm a fresh `memoria.call` entry in `decisions.jsonl` after the next run.
 
 There is no overlap window. The token is single-use; the swap takes effect at
