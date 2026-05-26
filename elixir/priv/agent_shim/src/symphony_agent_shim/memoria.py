@@ -17,12 +17,42 @@ Design notes:
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
 import httpx
 
 DEFAULT_BASE_URL = "https://memoria.moonshot-apps.com"
 DEFAULT_TIMEOUT_S = 5.0
+
+logger = logging.getLogger(__name__)
+
+CROSS_CUTTING_TAG = "moonshot"
+
+
+def filter_sources_by_tag(
+    sources: list[dict[str, Any]], *, project_tag: str
+) -> list[dict[str, Any]]:
+    """Drop sources whose tags don't match project_tag or cross-cutting tag.
+
+    Memoria's server-side project_id filter leaks across shared Slack workspaces
+    (confirmed empirically: a Schools Out query returned team-wizard-dev sources).
+    This function is the only airtight scope.
+    """
+    if not project_tag:
+        return sources
+    kept = []
+    for source in sources:
+        raw_tags = source.get("tags")
+        try:
+            tags = json.loads(raw_tags) if isinstance(raw_tags, str) else []
+        except (TypeError, ValueError):
+            logger.debug("dropping source with malformed tags: %r", raw_tags)
+            continue
+        if project_tag in tags or CROSS_CUTTING_TAG in tags:
+            kept.append(source)
+    return kept
 
 
 class MemoriaClient:

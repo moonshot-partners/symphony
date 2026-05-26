@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from symphony_agent_shim.memoria import MemoriaClient
+from symphony_agent_shim.memoria import MemoriaClient, filter_sources_by_tag
 
 
 @respx.mock
@@ -77,3 +77,30 @@ async def test_search_knowledge_returns_empty_on_timeout():
     assert result["answer"] is None
     assert result["error"].startswith("memoria_network_")
     assert route.call_count == 2  # 1 retry on network error
+
+
+def test_filter_sources_by_tag_keeps_match():
+    sources = [
+        {"id": 1, "tags": '["schools-out", "engineering"]'},
+        {"id": 2, "tags": '["wizard", "engineering"]'},
+        {"id": 3, "tags": '["moonshot", "internal"]'},
+        {"id": 4, "tags": '[]'},
+    ]
+    kept = filter_sources_by_tag(sources, project_tag="schools-out")
+    assert [s["id"] for s in kept] == [1, 3]  # tag match OR cross-cutting "moonshot"
+
+
+def test_filter_sources_by_tag_handles_malformed_tags():
+    sources = [
+        {"id": 1, "tags": "not-json"},
+        {"id": 2, "tags": None},
+        {"id": 3},  # missing tags key
+    ]
+    kept = filter_sources_by_tag(sources, project_tag="schools-out")
+    assert kept == []  # malformed → drop
+
+
+def test_filter_sources_by_tag_no_filter_when_tag_empty():
+    sources = [{"id": 1, "tags": '["anything"]'}]
+    kept = filter_sources_by_tag(sources, project_tag="")
+    assert kept == sources
