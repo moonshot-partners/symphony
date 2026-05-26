@@ -29,7 +29,7 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
   require Logger
 
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixir.{QaEvidence, Tracker}
+  alias SymphonyElixir.{GitHubPr, QaEvidence, Tracker}
 
   alias SymphonyElixir.Orchestrator.{
     DispatchGate,
@@ -91,27 +91,36 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatch do
   @spec maybe_schedule_continuation_retry(State.t(), String.t(), map(), opts()) :: State.t()
   def maybe_schedule_continuation_retry(%State{} = state, issue_id, running_entry, opts)
       when is_binary(issue_id) and is_map(running_entry) and is_map(opts) do
-    has_pr = DispatchGate.has_pr_attachment?(Map.get(running_entry, :issue, %{}))
+    issue = Map.get(running_entry, :issue, %{})
+    has_pr = DispatchGate.has_pr_attachment?(issue)
+    pr_blocked = has_pr and GitHubPr.qa_blocked?(issue)
     current_attempt = Map.get(running_entry, :retry_attempt, 0)
 
-    if has_pr and current_attempt >= 1 do
-      Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR attached and attempt=#{current_attempt} >= 1; agent cannot resolve infra CI failures")
-      state
-    else
-      # attempt is always 1 here — never reaches max_retries cap; elem(1) is safe
-      RetryAttempts.schedule(
-        state,
-        issue_id,
-        1,
-        %{
-          identifier: running_entry.identifier,
-          delay_type: :continuation,
-          worker_host: Map.get(running_entry, :worker_host),
-          workspace_path: Map.get(running_entry, :workspace_path)
-        },
-        Map.fetch!(opts, :recipient)
-      )
-      |> elem(1)
+    cond do
+      pr_blocked ->
+        Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR is QA-BLOCKED; agent signalled it cannot proceed")
+        state
+
+      has_pr and current_attempt >= 1 ->
+        Logger.info("Skipping continuation retry for issue_id=#{issue_id}: PR attached and attempt=#{current_attempt} >= 1; agent cannot resolve infra CI failures")
+        state
+
+      true ->
+        QaEvidence.stage_pending_publish(issue_id, Map.get(running_entry, :workspace_path))
+        # attempt is always 1 here — never reaches max_retries cap; elem(1) is safe
+        RetryAttempts.schedule(
+          state,
+          issue_id,
+          1,
+          %{
+            identifier: running_entry.identifier,
+            delay_type: :continuation,
+            worker_host: Map.get(running_entry, :worker_host),
+            workspace_path: Map.get(running_entry, :workspace_path)
+          },
+          Map.fetch!(opts, :recipient)
+        )
+        |> elem(1)
     end
   end
 

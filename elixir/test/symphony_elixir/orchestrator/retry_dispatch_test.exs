@@ -308,5 +308,65 @@ defmodule SymphonyElixir.Orchestrator.RetryDispatchTest do
       refute Map.has_key?(updated.retry_attempts, "issue-1")
       refute_receive {:retry_issue, _, _}, 200
     end
+
+    test "no PR, workspace has qa-evidence -> stages evidence before arming continuation" do
+      state = empty_state()
+      issue = build_issue(has_pr_attachment: false, id: "issue-stage", identifier: "ISS-S")
+
+      ws_base = Path.join(System.tmp_dir!(), "ws-stage-#{System.unique_integer([:positive])}")
+      ev_dir = Path.join(ws_base, "fe-next-app/qa-evidence")
+      File.mkdir_p!(ev_dir)
+      File.write!(Path.join(ev_dir, "shot.png"), "PNG")
+      on_exit(fn -> File.rm_rf!(ws_base) end)
+
+      staged = Path.join(System.tmp_dir!(), "symphony-qa-staged-issue-stage")
+      File.rm_rf(staged)
+      on_exit(fn -> File.rm_rf!(staged) end)
+
+      running_entry = %{
+        identifier: "ISS-S",
+        issue: issue,
+        retry_attempt: 0,
+        worker_host: "host-a",
+        workspace_path: ws_base
+      }
+
+      _updated =
+        RetryDispatch.maybe_schedule_continuation_retry(
+          state,
+          "issue-stage",
+          running_entry,
+          base_opts(self())
+        )
+
+      assert File.dir?(staged), "qa-evidence should be staged before continuation retry"
+      assert File.regular?(Path.join(staged, "shot.png"))
+    end
+
+    test "PR attached and QA-BLOCKED (attempt=0) -> skips continuation retry" do
+      state = empty_state()
+      issue = build_issue(has_pr_attachment: true)
+
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+      running_entry = %{
+        identifier: "ISS-1",
+        issue: issue,
+        retry_attempt: 0
+      }
+
+      updated =
+        RetryDispatch.maybe_schedule_continuation_retry(
+          state,
+          "issue-1",
+          running_entry,
+          base_opts(self())
+        )
+
+      assert updated == state
+      refute Map.has_key?(updated.retry_attempts, "issue-1")
+      refute_receive {:retry_issue, _, _}, 200
+    end
   end
 end
