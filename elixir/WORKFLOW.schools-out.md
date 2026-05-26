@@ -112,6 +112,17 @@ agent_runtime:
   # branches don't get blocked when symphony repos run through the same shim).
   # Team prefixes are matched case-insensitively in the shim.
   branch_naming_pattern: "^(feat|fix|chore|docs|refactor|test|ci|agents)/(SYM|SODEV)-[0-9]+(-[a-z0-9-]+)?$"
+  # SYM-37: opt the Schools Out agent into the Memoria MCP tool. Provides
+  # decision-level human context (Slack threads, meeting notes, wiki pages)
+  # via `search_knowledge`. Optional, fail-open: if MEMORIA_API_KEY is unset
+  # or the API is unavailable, the tool returns empty and the agent proceeds
+  # without it. NOT for code lookup — use grep/glob for files/symbols.
+  # `project_id` is the Memoria UUID for Schools Out; `project_tag` is the
+  # client-side tag filter applied to every result to keep cross-tenant
+  # leakage from the shared Slack workspace out of the agent's context.
+  memoria:
+    project_id: 574d7d43-82b9-44ac-b2c2-a8dc93e84c8e
+    project_tag: schools-out
 qa:
   # Paths inside the workspace where tests drop QA evidence bundles
   # (screenshots, session.webm, qa-report.md). Symphony reads each dir
