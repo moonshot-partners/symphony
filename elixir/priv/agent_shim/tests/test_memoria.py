@@ -61,3 +61,19 @@ async def test_search_knowledge_returns_empty_on_404_no_retry():
 
     assert result == {"sources": [], "answer": None, "error": "memoria_http_404"}
     assert route.call_count == 1  # no retry on 4xx
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_search_knowledge_returns_empty_on_timeout():
+    route = respx.get("https://memoria.moonshot-apps.com/api/v1/search").mock(
+        side_effect=httpx.ReadTimeout("simulated timeout")
+    )
+
+    client = MemoriaClient(api_key="test-key")
+    result = await client.search_knowledge("anything")
+
+    assert result["sources"] == []
+    assert result["answer"] is None
+    assert result["error"].startswith("memoria_network_")
+    assert route.call_count == 2  # 1 retry on network error
