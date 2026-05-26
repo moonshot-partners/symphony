@@ -30,4 +30,13 @@ defmodule SymphonyElixir.Evals.FixtureTest do
     assert fixture.expected.error_class == nil
     assert fixture.expected.pr_outcome == "merged"
   end
+
+  test "load_all/1 loads every .exs file under the given directory, sorted" do
+    fixtures = Fixture.load_all("../evals/dataset")
+    ids = Enum.map(fixtures, & &1.id)
+
+    assert "01_happy_path" in ids
+    assert ids == Enum.sort(ids)
+    assert length(fixtures) >= 10
+  end
 end

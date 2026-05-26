@@ -51,4 +51,21 @@ defmodule SymphonyElixir.Evals.DiffTest do
     assert {:error, deltas} = Diff.compare([r(fixture_id: "x")], [r(fixture_id: "x"), r(fixture_id: "y")])
     assert [%{fixture_id: "y", field: :new_in_candidate}] = deltas
   end
+
+  test "compare/2 flags pr_outcome mismatch" do
+    assert {:error, [%{field: :pr_outcome}]} = Diff.compare([r([])], [r(pr_outcome: "closed_unmerged")])
+  end
+
+  test "compare/2 decision_event_count tolerance: baseline 0 passes only when candidate 0" do
+    base = [r(decision_event_count: 0)]
+    assert Diff.compare(base, [r(decision_event_count: 0)]) == {:ok, []}
+    assert {:error, [%{field: :decision_event_count}]} = Diff.compare(base, [r(decision_event_count: 1)])
+  end
+
+  test "compare/2 decision_event_count tolerance respects custom pct" do
+    base = [r(decision_event_count: 10)]
+    pct = [event_count_tolerance_pct: 20]
+    assert Diff.compare(base, [r(decision_event_count: 11)], pct) == {:ok, []}
+    assert {:error, [%{field: :decision_event_count}]} = Diff.compare(base, [r(decision_event_count: 13)], pct)
+  end
 end

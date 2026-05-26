@@ -30,7 +30,7 @@ defmodule SymphonyElixir.Evals.Fixture do
   end
 
   @spec load_all(Path.t()) :: [t()]
-  def load_all(dir \\ "evals/dataset") do
+  def load_all(dir) when is_binary(dir) do
     dir
     |> Path.join("*.exs")
     |> Path.wildcard()
