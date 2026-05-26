@@ -21,7 +21,7 @@
   expected: %{
     final_state: "In Code Review",
     gate_verdicts: [{"gate_c", :pass}, {"gate_d", :pass}],
-    turn_count: 2,
+    turn_count: 1,
     error_class: nil,
     pr_outcome: "merged",
     decision_event_count_min: 5,
