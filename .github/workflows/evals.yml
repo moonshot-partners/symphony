@@ -36,23 +36,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
-      - name: Install deps
+      - name: Install deps (PR head)
         run: mix deps.get
 
       - name: Record candidate (PR head)
         run: mix symphony.eval --record --output /tmp/candidate.jsonl --dataset ../evals/dataset
 
-      # TODO(post-bootstrap): once main has the eval harness, replace the two steps below with:
-      #   1. Record baseline (origin/main):
-      #        git fetch origin main
-      #        git checkout origin/main -- ../elixir ../evals
-      #        mix deps.get
-      #        mix symphony.eval --record --output /tmp/baseline.jsonl --dataset ../evals/dataset
-      #        git checkout HEAD -- ../elixir ../evals
-      #   2. Diff: mix symphony.eval --diff --baseline /tmp/baseline.jsonl --candidate /tmp/candidate.jsonl
-      #
-      # For this bootstrapping PR we self-diff (candidate vs candidate) so the gate
-      # passes by definition. This also validates that the record + diff plumbing is
-      # wired correctly before we introduce a real baseline comparison.
-      - name: Diff (self, bootstrap)
-        run: mix symphony.eval --diff --baseline /tmp/candidate.jsonl --candidate /tmp/candidate.jsonl
+      - name: Record baseline (origin/${{ github.base_ref }})
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git worktree add /tmp/baseline-tree origin/${{ github.base_ref }}
+          cd /tmp/baseline-tree/elixir
+          mix deps.get
+          mix symphony.eval --record --output /tmp/baseline.jsonl --dataset ../evals/dataset
+
+      - name: Diff (baseline vs candidate)
+        run: mix symphony.eval --diff --baseline /tmp/baseline.jsonl --candidate /tmp/candidate.jsonl
