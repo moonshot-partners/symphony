@@ -1,0 +1,58 @@
+name: evals
+
+on:
+  pull_request:
+    paths:
+      - 'elixir/lib/symphony_elixir/**'
+      - 'elixir/lib/mix/tasks/symphony.eval.ex'
+      - 'evals/**'
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elixir
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up mise tools
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          install: true
+          cache: true
+          working_directory: elixir
+
+      - name: Cache deps and build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            elixir/deps
+            elixir/_build
+          key: ${{ runner.os }}-mix-${{ hashFiles('elixir/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install deps
+        run: mix deps.get
+
+      - name: Record candidate (PR head)
+        run: mix symphony.eval --record --output /tmp/candidate.jsonl --dataset ../evals/dataset
+
+      # TODO(post-bootstrap): once main has the eval harness, replace the two steps below with:
+      #   1. Record baseline (origin/main):
+      #        git fetch origin main
+      #        git checkout origin/main -- ../elixir ../evals
+      #        mix deps.get
+      #        mix symphony.eval --record --output /tmp/baseline.jsonl --dataset ../evals/dataset
+      #        git checkout HEAD -- ../elixir ../evals
+      #   2. Diff: mix symphony.eval --diff --baseline /tmp/baseline.jsonl --candidate /tmp/candidate.jsonl
+      #
+      # For this bootstrapping PR we self-diff (candidate vs candidate) so the gate
+      # passes by definition. This also validates that the record + diff plumbing is
+      # wired correctly before we introduce a real baseline comparison.
+      - name: Diff (self, bootstrap)
+        run: mix symphony.eval --diff --baseline /tmp/candidate.jsonl --candidate /tmp/candidate.jsonl
