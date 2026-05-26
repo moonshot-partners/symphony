@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -37,6 +38,12 @@ SEARCH_DESCRIPTION = (
     "NOT useful for code lookup — use grep/glob for files and symbols. "
     "Returns empty on Memoria outage; safe to call without guarding."
 )
+
+Writer = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+async def _noop_writer(_: dict[str, Any]) -> None:
+    return None
 
 
 def filter_sources_by_tag(
@@ -117,10 +124,26 @@ def build_memoria_tools(
     api_key: str | None,
     project_id: str | None,
     project_tag: str | None,
+    notification_writer: Writer | None = None,
 ) -> list[Any]:
     if not api_key:
         return []
     client = MemoriaClient(api_key=api_key)
+    writer = notification_writer or _noop_writer
+
+    async def _emit(tool_name: str, args: dict[str, Any], result: dict[str, Any]) -> None:
+        summary: dict[str, Any] = {}
+        if "sources" in result:
+            summary["source_count"] = len(result["sources"])
+        if result.get("error"):
+            summary["error"] = result["error"]
+        await writer(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/memoria_call",
+                "params": {"tool": tool_name, "arguments": args, "result_summary": summary},
+            }
+        )
 
     @tool(
         "memoria.search_knowledge",
@@ -142,6 +165,7 @@ def build_memoria_tools(
         )
         if project_tag and raw.get("sources"):
             raw["sources"] = filter_sources_by_tag(raw["sources"], project_tag=project_tag)
+        await _emit("memoria.search_knowledge", args, raw)
         return {"content": [{"type": "text", "text": json.dumps(raw)}]}
 
     return [_search]

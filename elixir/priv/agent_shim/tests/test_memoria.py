@@ -1,4 +1,5 @@
 import os
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -166,6 +167,37 @@ async def test_build_mcp_server_excludes_memoria_when_env_unset():
 
     tool_names = _extract_tool_names(server)
     assert not any(n.startswith("memoria.") for n in tool_names)
+
+
+@pytest.mark.asyncio
+async def test_memoria_tool_emits_notification():
+    sent: list[dict[str, Any]] = []
+
+    async def writer(msg: dict[str, Any]) -> None:
+        sent.append(msg)
+
+    with respx.mock(base_url="https://memoria.moonshot-apps.com") as router:
+        router.get("/api/v1/search").mock(
+            return_value=httpx.Response(200, json={"answer": "x", "sources": []})
+        )
+
+        tools = build_memoria_tools(
+            api_key="key",
+            project_id="uuid",
+            project_tag="schools-out",
+            notification_writer=writer,
+        )
+        search_tool = tools[0]
+        # SDK @tool exposes the wrapped coroutine via `.handler`. If that
+        # attribute does not exist on the actual claude-agent-sdk Tool object,
+        # update both this test and the production code together.
+        await search_tool.handler({"query": "anything"})
+
+    assert len(sent) == 1
+    assert sent[0]["method"] == "notifications/memoria_call"
+    assert sent[0]["params"]["tool"] == "memoria.search_knowledge"
+    assert sent[0]["params"]["arguments"] == {"query": "anything"}
+    assert sent[0]["params"]["result_summary"]["source_count"] == 0
 
 
 def _extract_tool_names(server: object) -> list[str]:

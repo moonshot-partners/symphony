@@ -70,6 +70,7 @@ def build_mcp_server_from_specs(specs: list[dict[str, Any]], *, bridge: ToolBrid
             api_key=os.environ.get("MEMORIA_API_KEY"),
             project_id=os.environ.get("MEMORIA_PROJECT_ID"),
             project_tag=os.environ.get("MEMORIA_PROJECT_TAG"),
+            notification_writer=bridge._writer,
         )
     )
     return create_sdk_mcp_server(name="symphony", version="0.1.0", tools=sdk_tools)
