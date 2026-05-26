@@ -31,8 +31,7 @@ defmodule SymphonyElixir.Evals.Result do
     Jason.encode!(%{
       fixture_id: r.fixture_id,
       final_state: r.final_state,
-      gate_verdicts:
-        Enum.map(r.gate_verdicts, fn {gate, verdict} -> [gate, Atom.to_string(verdict)] end),
+      gate_verdicts: Enum.map(r.gate_verdicts, fn {gate, verdict} -> [gate, Atom.to_string(verdict)] end),
       turn_count: r.turn_count,
       error_class: r.error_class && Atom.to_string(r.error_class),
       pr_outcome: r.pr_outcome,
