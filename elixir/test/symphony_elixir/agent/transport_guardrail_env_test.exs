@@ -84,5 +84,47 @@ defmodule SymphonyElixir.Agent.AppServer.TransportGuardrailEnvTest do
       assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_BASH_POLICY_ALLOW" end)
       assert Enum.any?(env, fn {k, _} -> k == ~c"SYMPHONY_BRANCH_NAMING_PATTERN" end)
     end
+
+    test "emits MEMORIA_PROJECT_ID + MEMORIA_PROJECT_TAG when memoria has both fields" do
+      settings = %{
+        memoria: %{project_id: "574d7d43-82b9-44ac-b2c2-a8dc93e84c8e", project_tag: "schools-out"}
+      }
+
+      env = Transport.guardrail_env(settings)
+
+      assert {~c"MEMORIA_PROJECT_ID", id_charlist} =
+               Enum.find(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_ID" end)
+
+      assert to_string(id_charlist) == "574d7d43-82b9-44ac-b2c2-a8dc93e84c8e"
+
+      assert {~c"MEMORIA_PROJECT_TAG", tag_charlist} =
+               Enum.find(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_TAG" end)
+
+      assert to_string(tag_charlist) == "schools-out"
+    end
+
+    test "omits MEMORIA_PROJECT_ID/TAG when memoria is nil" do
+      env = Transport.guardrail_env(%{memoria: nil})
+      refute Enum.any?(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_ID" end)
+      refute Enum.any?(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_TAG" end)
+    end
+
+    test "omits MEMORIA_PROJECT_ID/TAG when memoria is missing entirely" do
+      env = Transport.guardrail_env(%{})
+      refute Enum.any?(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_ID" end)
+      refute Enum.any?(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_TAG" end)
+    end
+
+    test "omits MEMORIA_PROJECT_ID/TAG when either field is empty (all-or-nothing)" do
+      empty_id = %{memoria: %{project_id: "", project_tag: "schools-out"}}
+      empty_tag = %{memoria: %{project_id: "uuid", project_tag: ""}}
+      nil_id = %{memoria: %{project_id: nil, project_tag: "schools-out"}}
+
+      Enum.each([empty_id, empty_tag, nil_id], fn settings ->
+        env = Transport.guardrail_env(settings)
+        refute Enum.any?(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_ID" end)
+        refute Enum.any?(env, fn {k, _} -> k == ~c"MEMORIA_PROJECT_TAG" end)
+      end)
+    end
   end
 end

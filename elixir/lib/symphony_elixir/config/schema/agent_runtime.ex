@@ -3,6 +3,7 @@ defmodule SymphonyElixir.Config.Schema.AgentRuntime do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias SymphonyElixir.Config.Schema.AgentRuntime.Memoria
   alias SymphonyElixir.Config.Schema.StringOrMap
 
   @primary_key false
@@ -28,6 +29,7 @@ defmodule SymphonyElixir.Config.Schema.AgentRuntime do
     field(:tdd_phase_enforcement, :boolean, default: false)
     field(:bash_policy_allow, {:array, :string}, default: [])
     field(:branch_naming_pattern, :string)
+    embeds_one(:memoria, Memoria, on_replace: :update)
   end
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -50,6 +52,7 @@ defmodule SymphonyElixir.Config.Schema.AgentRuntime do
       ],
       empty_values: []
     )
+    |> cast_embed(:memoria, with: &Memoria.changeset/2)
     |> validate_required([:command])
     |> validate_number(:turn_timeout_ms, greater_than: 0)
     |> validate_number(:read_timeout_ms, greater_than: 0)

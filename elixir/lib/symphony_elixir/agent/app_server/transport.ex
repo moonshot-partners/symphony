@@ -24,6 +24,7 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
     LINEAR_API_KEY
     GH_TOKEN
     GITHUB_TOKEN
+    MEMORIA_API_KEY
     SYMPHONY_WORKFLOW_FILE
     SYMPHONY_TDD_PHASE_ENFORCEMENT
     SYMPHONY_BASH_POLICY_ALLOW
@@ -67,7 +68,7 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
           []
       end
 
-    tdd ++ bash_allow ++ branch_pattern
+    tdd ++ bash_allow ++ branch_pattern ++ memoria_env(agent_runtime_settings)
   end
 
   @spec start_port(Path.t(), String.t() | nil) :: {:ok, port()} | {:error, term()}
@@ -214,6 +215,20 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
           )
 
         {:ok, port}
+    end
+  end
+
+  defp memoria_env(agent_runtime_settings) do
+    case Map.get(agent_runtime_settings, :memoria) do
+      %{project_id: id, project_tag: tag}
+      when is_binary(id) and id != "" and is_binary(tag) and tag != "" ->
+        [
+          {~c"MEMORIA_PROJECT_ID", String.to_charlist(id)},
+          {~c"MEMORIA_PROJECT_TAG", String.to_charlist(tag)}
+        ]
+
+      _ ->
+        []
     end
   end
 
