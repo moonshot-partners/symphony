@@ -36,4 +36,9 @@ defmodule SymphonyElixir.Evals.DiffTest do
   test "compare/2 flags missing fixtures" do
     assert {:error, [%{fixture_id: "x", field: :missing}]} = Diff.compare([r([])], [])
   end
+
+  test "compare/2 flags fixtures present only in candidate" do
+    assert {:error, deltas} = Diff.compare([r(fixture_id: "x")], [r(fixture_id: "x"), r(fixture_id: "y")])
+    assert [%{fixture_id: "y", field: :new_in_candidate}] = deltas
+  end
 end

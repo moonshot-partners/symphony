@@ -39,4 +39,13 @@ defmodule SymphonyElixir.Evals.ResultTest do
 
     File.rm!(path)
   end
+
+  test "read_all/1 raises a clear error on corrupt JSONL" do
+    path = Path.join(System.tmp_dir!(), "evals_result_test_corrupt_#{:rand.uniform(1_000_000)}.jsonl")
+    File.write!(path, Result.to_jsonl(@sample) <> "\n{not-json\n")
+
+    assert_raise RuntimeError, ~r/Corrupt JSONL line/, fn -> Result.read_all(path) end
+
+    File.rm!(path)
+  end
 end

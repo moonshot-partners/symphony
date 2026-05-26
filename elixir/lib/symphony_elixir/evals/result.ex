@@ -76,8 +76,10 @@ defmodule SymphonyElixir.Evals.Result do
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.map(fn line ->
-      {:ok, result} = from_jsonl(line)
-      result
+      case from_jsonl(line) do
+        {:ok, result} -> result
+        {:error, reason} -> raise "Corrupt JSONL line in #{path}: #{inspect(reason)}"
+      end
     end)
   end
 end

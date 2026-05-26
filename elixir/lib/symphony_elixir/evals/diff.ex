@@ -24,14 +24,22 @@ defmodule SymphonyElixir.Evals.Diff do
     event_tol_pct = Keyword.get(opts, :event_count_tolerance_pct, @default_event_count_tolerance_pct)
 
     candidates_by_id = Map.new(candidate, fn r -> {r.fixture_id, r} end)
+    baseline_ids = MapSet.new(baseline, & &1.fixture_id)
 
-    deltas =
+    missing_or_changed =
       Enum.flat_map(baseline, fn b ->
         case Map.fetch(candidates_by_id, b.fixture_id) do
           {:ok, c} -> diff_one(b, c, turn_tol, event_tol_pct)
           :error -> [%{fixture_id: b.fixture_id, field: :missing, baseline: b, candidate: nil}]
         end
       end)
+
+    extras =
+      candidate
+      |> Enum.reject(&MapSet.member?(baseline_ids, &1.fixture_id))
+      |> Enum.map(&%{fixture_id: &1.fixture_id, field: :new_in_candidate, baseline: nil, candidate: &1})
+
+    deltas = missing_or_changed ++ extras
 
     case deltas do
       [] -> {:ok, []}
