@@ -73,9 +73,7 @@ defmodule SymphonyElixir.Orchestrator.AgentExit do
   end
 
   defp dispatch_reason(state, issue_id, :normal, running_entry, session_id, opts) do
-    Logger.info(
-      "Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check"
-    )
+    Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
 
     completer = Keyword.fetch!(opts, :completer)
     retry_dispatch_opts = Keyword.fetch!(opts, :retry_dispatch_opts)
@@ -90,9 +88,7 @@ defmodule SymphonyElixir.Orchestrator.AgentExit do
   end
 
   defp dispatch_reason(state, issue_id, reason, running_entry, session_id, opts) do
-    Logger.warning(
-      "Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry"
-    )
+    Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
 
     retrier = Keyword.fetch!(opts, :retrier)
     recipient = Keyword.fetch!(opts, :recipient)
