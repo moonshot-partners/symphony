@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Orchestrator do
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
+    AgentExit,
     AgentTotals,
     AgentUpdate,
     ArtifactPin,
@@ -17,7 +18,6 @@ defmodule SymphonyElixir.Orchestrator do
     DispatchGate,
     GateCEnforcement,
     GateCTrigger,
-    GateDTrigger,
     PlanGroundingGate,
     PreDispatch,
     ProcessLiveness,
@@ -176,61 +176,10 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
-  def handle_info(
-        {:DOWN, ref, :process, _pid, reason},
-        %{running: running} = state
-      ) do
-    case RunningEntry.find_id_for_ref(running, ref) do
-      nil ->
-        {:noreply, state}
-
-      issue_id ->
-        {running_entry, state} = RunningEntry.pop(state, issue_id)
-        state = AgentTotals.record_session_completion(state, running_entry)
-        RunLedgerHook.record(running_entry, issue_id)
-        session_id = RunningEntry.session_id(running_entry)
-
-        state =
-          case reason do
-            :normal ->
-              Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
-
-              pinned_entry = ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
-              gate_d_result = GateDTrigger.maybe_run(pinned_entry)
-              handle_gate_d_result(gate_d_result, issue_id, pinned_entry)
-
-              state
-              |> complete_issue(issue_id)
-              |> RetryDispatch.maybe_schedule_continuation_retry(
-                issue_id,
-                pinned_entry,
-                retry_dispatch_opts()
-              )
-
-            _ ->
-              Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
-
-              next_attempt = RetryPlan.next_attempt_from_running(running_entry)
-
-              failure_metadata = %{
-                identifier: running_entry.identifier,
-                error: "agent exited: #{inspect(reason)}",
-                worker_host: Map.get(running_entry, :worker_host),
-                workspace_path: Map.get(running_entry, :workspace_path)
-              }
-
-              RetryAttempts.schedule(state, issue_id, next_attempt, failure_metadata, self())
-              |> handle_retry_schedule(Map.get(running_entry, :issue), issue_id, failure_metadata)
-          end
-
-        Logger.info(
-          "Agent task finished for issue_id=#{issue_id} session_id=#{session_id} " <>
-            "reason=#{inspect(reason)} " <> RunningEntry.format_token_totals(running_entry)
-        )
-
-        notify_dashboard()
-        {:noreply, state}
-    end
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %State{} = state) do
+    state = AgentExit.process_exit(state, ref, reason, agent_exit_opts())
+    notify_dashboard()
+    {:noreply, state}
   end
 
   def handle_info({:worker_runtime_info, issue_id, runtime_info}, %{running: running} = state)
@@ -783,27 +732,6 @@ defmodule SymphonyElixir.Orchestrator do
     complete_issue(state, issue_id)
   end
 
-  defp handle_gate_d_result(:ok, _issue_id, _running_entry), do: :ok
-
-  defp handle_gate_d_result({:violation, reason}, issue_id, running_entry) do
-    identifier = Map.get(running_entry, :identifier, issue_id)
-
-    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-      body = """
-      ## Gate D Observer — AC Evidence missing (informational, no halt)
-
-      The agent's final turn did not include the recommended `## AC Evidence` section mapping each acceptance criterion to the specific code or test that satisfies it. This observation is logged for future-runs improvement — the run is not halted.
-
-      Reason: #{reason}
-      Issue: #{identifier}
-
-      Add an `## AC Evidence` section to the final-turn summary in future runs. See AGENTS.md for the expected format.
-      """
-
-      Tracker.create_comment(issue_id, body)
-    end)
-  end
-
   defp complete_issue(%State{} = state, issue_id) do
     DecisionLog.emit("orchestrator.complete", %{issue_id: issue_id, pr_engagement_keys: Map.keys(state.pr_engagements)})
 
@@ -842,6 +770,15 @@ defmodule SymphonyElixir.Orchestrator do
       dispatch_fn: &dispatch_issue/4,
       release_claim_fn: &release_issue_claim/2
     }
+  end
+
+  defp agent_exit_opts do
+    [
+      completer: &complete_issue/2,
+      retrier: &handle_retry_schedule/4,
+      retry_dispatch_opts: retry_dispatch_opts(),
+      recipient: self()
+    ]
   end
 
   @spec request_refresh() :: map() | :unavailable
