@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 import httpx
+from claude_agent_sdk import tool
 
 DEFAULT_BASE_URL = "https://memoria.moonshot-apps.com"
 DEFAULT_TIMEOUT_S = 5.0
@@ -29,6 +30,13 @@ DEFAULT_TIMEOUT_S = 5.0
 logger = logging.getLogger(__name__)
 
 CROSS_CUTTING_TAG = "moonshot"
+
+SEARCH_DESCRIPTION = (
+    "Search team Slack/Drive/transcripts for past decisions, FAQs, processes. "
+    "Useful for product context, people opinions, meeting outcomes. "
+    "NOT useful for code lookup — use grep/glob for files and symbols. "
+    "Returns empty on Memoria outage; safe to call without guarding."
+)
 
 
 def filter_sources_by_tag(
@@ -102,3 +110,38 @@ class MemoriaClient:
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = f"memoria_network_{type(exc).__name__}"
         return {**empty_shape, "error": last_error}
+
+
+def build_memoria_tools(
+    *,
+    api_key: str | None,
+    project_id: str | None,
+    project_tag: str | None,
+) -> list[Any]:
+    if not api_key:
+        return []
+    client = MemoriaClient(api_key=api_key)
+
+    @tool(
+        "memoria.search_knowledge",
+        SEARCH_DESCRIPTION,
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+        },
+    )
+    async def _search(args: dict[str, Any]) -> dict[str, Any]:
+        raw = await client.search_knowledge(
+            args["query"],
+            project_id=project_id,
+            limit=args.get("limit", 10),
+        )
+        if project_tag and raw.get("sources"):
+            raw["sources"] = filter_sources_by_tag(raw["sources"], project_tag=project_tag)
+        return {"content": [{"type": "text", "text": json.dumps(raw)}]}
+
+    return [_search]

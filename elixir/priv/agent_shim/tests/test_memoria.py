@@ -2,7 +2,11 @@ import httpx
 import pytest
 import respx
 
-from symphony_agent_shim.memoria import MemoriaClient, filter_sources_by_tag
+from symphony_agent_shim.memoria import (
+    MemoriaClient,
+    build_memoria_tools,
+    filter_sources_by_tag,
+)
 
 
 @respx.mock
@@ -104,3 +108,18 @@ def test_filter_sources_by_tag_no_filter_when_tag_empty():
     sources = [{"id": 1, "tags": '["anything"]'}]
     kept = filter_sources_by_tag(sources, project_tag="")
     assert kept == sources
+
+
+def test_build_memoria_tools_returns_search_tool_when_api_key_set():
+    tools = build_memoria_tools(
+        api_key="some-key",
+        project_id="574d7d43-82b9-44ac-b2c2-a8dc93e84c8e",
+        project_tag="schools-out",
+    )
+    names = [t.name for t in tools]
+    assert names == ["memoria.search_knowledge"]
+
+
+def test_build_memoria_tools_returns_empty_when_api_key_missing():
+    assert build_memoria_tools(api_key=None, project_id="x", project_tag="y") == []
+    assert build_memoria_tools(api_key="", project_id="x", project_tag="y") == []
