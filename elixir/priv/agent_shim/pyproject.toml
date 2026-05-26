@@ -7,6 +7,7 @@ dependencies = [
   "claude-agent-sdk>=0.1.0",
   "anyio>=4.0",
   "PyJWT[crypto]>=2.8",
+  "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -14,6 +15,7 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "ruff>=0.5",
+  "respx>=0.21",
   # Used by tests to generate ephemeral RSA keypairs. Production already pulls
   # this in via PyJWT[crypto] but we list it explicitly so the test dep is
   # auditable.
