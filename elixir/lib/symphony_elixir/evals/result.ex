@@ -31,7 +31,8 @@ defmodule SymphonyElixir.Evals.Result do
     Jason.encode!(%{
       fixture_id: r.fixture_id,
       final_state: r.final_state,
-      gate_verdicts: Enum.map(r.gate_verdicts, fn {gate, verdict} -> [gate, Atom.to_string(verdict)] end),
+      gate_verdicts:
+        Enum.map(r.gate_verdicts, fn {gate, verdict} -> [gate, Atom.to_string(verdict)] end),
       turn_count: r.turn_count,
       error_class: r.error_class && Atom.to_string(r.error_class),
       pr_outcome: r.pr_outcome,
@@ -47,9 +48,9 @@ defmodule SymphonyElixir.Evals.Result do
        %__MODULE__{
          fixture_id: map["fixture_id"],
          final_state: map["final_state"],
-         gate_verdicts: Enum.map(map["gate_verdicts"], fn [g, v] -> {g, String.to_existing_atom(v)} end),
+         gate_verdicts: Enum.map(map["gate_verdicts"], fn [g, v] -> {g, String.to_atom(v)} end),
          turn_count: map["turn_count"],
-         error_class: map["error_class"] && String.to_existing_atom(map["error_class"]),
+         error_class: map["error_class"] && String.to_atom(map["error_class"]),
          pr_outcome: map["pr_outcome"],
          decision_event_count: map["decision_event_count"],
          duration_ms: map["duration_ms"]
