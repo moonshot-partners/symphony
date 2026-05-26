@@ -1,18 +1,24 @@
 defmodule SymphonyElixir.Evals.Fixture do
   @moduledoc """
-  Frozen scenario fixture for the eval harness.
+  Frozen scenario fixture for the eval harness, grounded in real production
+  data from Hetzner `decisions.jsonl` + `runs.jsonl`.
 
   Each fixture is an `.exs` file at `evals/dataset/<id>.exs` evaluating to a
-  map with `issue`, `events`, and `expected` keys. See `evals/README.md` for
-  the schema.
+  map with `:issue`, `:events`, `:run`, and `:expected` keys. The `:events`
+  list uses the production decisions.jsonl event vocabulary (see
+  `evals/README.md`). The `:run` map mirrors a single row from runs.jsonl
+  (turns, outcome, tokens, retries, pr_url) so the Runner can reproduce both
+  the orchestrator's classification (from events) and the agent session
+  outcome (from the run row).
   """
 
-  defstruct [:id, :issue, :events, :expected]
+  defstruct [:id, :issue, :events, :run, :expected]
 
   @type t :: %__MODULE__{
           id: String.t(),
           issue: map(),
           events: [tuple()],
+          run: map(),
           expected: map()
         }
 
@@ -25,6 +31,7 @@ defmodule SymphonyElixir.Evals.Fixture do
       id: id,
       issue: Map.fetch!(data, :issue),
       events: Map.fetch!(data, :events),
+      run: Map.fetch!(data, :run),
       expected: Map.fetch!(data, :expected)
     }
   end

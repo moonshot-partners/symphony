@@ -1,13 +1,21 @@
 defmodule SymphonyElixir.Evals.Runner do
   @moduledoc """
   Replays a single Fixture against a pure-function classifier over the
-  fixture's event sequence. v1 does NOT execute the orchestrator GenServer,
-  does NOT call real Linear/GH/Anthropic APIs. It reduces over fixture.events
-  to produce a Result with final_state, gate_verdicts, pr_outcome, etc.
+  production `decisions.jsonl` event vocabulary. v1 does NOT execute the
+  orchestrator GenServer, does NOT call real Linear/GH/Anthropic APIs.
 
-  Captured as v1 tradeoff in the SYM-36 plan: real GenServer replay is a
-  follow-up. This still catches event-classification regressions and gives
-  CI a sub-second deterministic regression detector.
+  Event vocabulary mirrors what Symphony emits on Hetzner:
+
+    * `{:reconcile_decision, %{action, branch, linear_state}}`
+    * `{:workpad_pr_sync_route, %{branch, target_state, red_checks}}`
+    * `{:pr_reengagement_skip_no_pr, %{}}`
+    * `{:pr_reengagement_skip_no_critical, %{}}`
+    * `{:pr_reengagement_fetch_error, %{}}`
+    * `{:orchestrator_terminate, %{}}`
+
+  `turn_count` and `pr_outcome` come from `fixture.run` (runs.jsonl row),
+  not from the event stream, because Symphony records them at the
+  agent-session level rather than the decision-stream level.
   """
 
   alias SymphonyElixir.Evals.{Fixture, Result}
@@ -16,72 +24,88 @@ defmodule SymphonyElixir.Evals.Runner do
   def run(%Fixture{} = fixture) do
     started_at = System.monotonic_time(:millisecond)
 
-    gate_verdicts = drain_gate_verdicts(fixture.events)
-    final_state = drain_final_state(fixture.events) || fixture.issue.state
+    final_state = derive_final_state(fixture.events, fixture.issue.state)
+    gate_verdicts = derive_gate_verdicts(fixture.events)
+    error_class = derive_error_class(fixture.events)
     duration_ms = System.monotonic_time(:millisecond) - started_at
 
     %Result{
       fixture_id: fixture.id,
       final_state: final_state,
       gate_verdicts: gate_verdicts,
-      turn_count: count_turns(fixture.events),
-      error_class: classify_error(fixture.events),
-      pr_outcome: classify_pr_outcome(fixture.events),
+      turn_count: Map.fetch!(fixture.run, :turns),
+      error_class: error_class,
+      pr_outcome: Map.fetch!(fixture.run, :outcome),
       decision_event_count: length(fixture.events),
       duration_ms: duration_ms
     }
   end
 
-  defp drain_gate_verdicts(events) do
-    Enum.flat_map(events, fn
-      {:gate_c_pass, _} -> [{"gate_c", :pass}]
-      {:gate_c_reject, _} -> [{"gate_c", :reject}]
-      {:gate_d_pass, _} -> [{"gate_d", :pass}]
-      {:gate_d_reject, _} -> [{"gate_d", :reject}]
-      _ -> []
-    end)
-  end
-
-  defp drain_final_state(events) do
-    Enum.reduce(events, nil, fn
-      {:state_transition, %{to: to}}, _acc -> to
-      {:pr_merged, _}, _acc -> "In Code Review"
-      {:pr_review_clean, _}, _acc -> "In Code Review"
-      {:gate_d_reject, _}, _acc -> "On Hold"
-      {:gate_c_reject, _}, _acc -> "On Hold"
-      {:ci_red, _}, _acc -> "On Hold"
-      {:qa_blocked, _}, _acc -> "On Hold"
-      {:exhaust, _}, _acc -> "On Hold"
+  defp derive_final_state(events, fallback) do
+    Enum.reduce(events, fallback, fn
+      {:workpad_pr_sync_route, %{target_state: ts}}, _ -> ts
+      {:reconcile_decision, %{action: "terminate", linear_state: ls}}, _ -> ls
       _, acc -> acc
     end)
   end
 
-  defp count_turns(events) do
-    Enum.count(events, fn
-      {:agent_dispatched, _} -> true
-      _ -> false
-    end)
-  end
+  defp derive_gate_verdicts(events) do
+    case last_route(events) do
+      %{branch: "ci_red", red_checks: red} when is_list(red) ->
+        Enum.map(red, &{&1, :reject})
 
-  defp classify_error(events) do
-    Enum.reduce(events, nil, fn
-      {:gate_c_reject, _}, _ -> :gate_c_reject
-      {:gate_d_reject, _}, _ -> :gate_d_reject
-      {:ci_red, _}, _ -> :ci_red
-      {:qa_blocked, _}, _ -> :qa_blocked
-      {:exhaust, _}, _ -> :exhaust
-      {:conflict_disclosure_reject, _}, _ -> :conflict_disclosure_reject
-      _, acc -> acc
-    end)
-  end
+      %{branch: "qa_blocked"} ->
+        [{"qa", :reject}]
 
-  defp classify_pr_outcome(events) do
-    cond do
-      Enum.any?(events, &match?({:pr_merged, _}, &1)) -> "merged"
-      Enum.any?(events, &match?({:pr_closed_unmerged, _}, &1)) -> "closed_unmerged"
-      Enum.any?(events, &match?({:pr_opened, _}, &1)) -> "pr_open"
-      Enum.any?(events, &match?({:pr_updated, _}, &1)) -> "pr_open"
-      true -> "no_pr"
+      _ ->
+        []
     end
   end
+
+  defp derive_error_class(events) do
+    cond do
+      route = last_route(events) ->
+        case route.branch do
+          "default_complete" -> nil
+          other -> String.to_atom(other)
+        end
+
+      terminate = last_terminate(events) ->
+        terminate_class(terminate)
+
+      skip = last_skip(events) ->
+        skip
+
+      true ->
+        nil
+    end
+  end
+
+  defp last_route(events) do
+    Enum.reduce(events, nil, fn
+      {:workpad_pr_sync_route, payload}, _ -> payload
+      _, acc -> acc
+    end)
+  end
+
+  defp last_terminate(events) do
+    Enum.reduce(events, nil, fn
+      {:reconcile_decision, %{action: "terminate"} = p}, _ -> p
+      _, acc -> acc
+    end)
+  end
+
+  defp last_skip(events) do
+    Enum.reduce(events, nil, fn
+      {:pr_reengagement_skip_no_pr, _}, _ -> :no_pr
+      {:pr_reengagement_skip_no_critical, _}, _ -> :no_critical
+      {:pr_reengagement_fetch_error, _}, _ -> :fetch_error
+      _, acc -> acc
+    end)
+  end
+
+  defp terminate_class(%{branch: "not_routable"}), do: :not_routable
+  defp terminate_class(%{branch: "non_active_state"}), do: :parked
+  defp terminate_class(%{branch: "terminal_state"}), do: :canceled
+  defp terminate_class(_), do: nil
 end
