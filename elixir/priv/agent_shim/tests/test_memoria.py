@@ -33,3 +33,31 @@ async def test_search_knowledge_returns_sources_for_valid_query():
     # Verify the project_id param was passed server-side
     last_request = route.calls.last.request
     assert "project_id=574d7d43" in str(last_request.url)
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_search_knowledge_returns_empty_on_503_after_retry():
+    route = respx.get("https://memoria.moonshot-apps.com/api/v1/search").mock(
+        return_value=httpx.Response(503, json={"error": "Search unavailable"})
+    )
+
+    client = MemoriaClient(api_key="test-key")
+    result = await client.search_knowledge("anything")
+
+    assert result == {"sources": [], "answer": None, "error": "memoria_http_503"}
+    assert route.call_count == 2  # first try + 1 retry
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_search_knowledge_returns_empty_on_404_no_retry():
+    route = respx.get("https://memoria.moonshot-apps.com/api/v1/search").mock(
+        return_value=httpx.Response(404, json={"error": "not found"})
+    )
+
+    client = MemoriaClient(api_key="test-key")
+    result = await client.search_knowledge("anything")
+
+    assert result == {"sources": [], "answer": None, "error": "memoria_http_404"}
+    assert route.call_count == 1  # no retry on 4xx

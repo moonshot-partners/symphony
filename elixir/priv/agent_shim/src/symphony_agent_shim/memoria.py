@@ -58,7 +58,17 @@ class MemoriaClient:
     ) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with httpx.AsyncClient(timeout=self._timeout_s) as http:
-            response = await http.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            return response.json()
+        last_error = "memoria_unavailable"
+        max_attempts = 2  # initial + 1 retry on 5xx/network
+        for _attempt in range(max_attempts):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout_s) as http:
+                    response = await http.get(url, params=params, headers=headers)
+                if 200 <= response.status_code < 300:
+                    return response.json()
+                if 400 <= response.status_code < 500:
+                    return {**empty_shape, "error": f"memoria_http_{response.status_code}"}
+                last_error = f"memoria_http_{response.status_code}"
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_error = f"memoria_network_{type(exc).__name__}"
+        return {**empty_shape, "error": last_error}
