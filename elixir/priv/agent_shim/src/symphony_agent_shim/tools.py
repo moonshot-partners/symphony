@@ -12,12 +12,13 @@ sends JSON-RPC response → Python tool returns to SDK → SDK continues.
 
 import asyncio
 import itertools
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from symphony_agent_shim import protocol
+from symphony_agent_shim import memoria, protocol
 
 Writer = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -64,6 +65,13 @@ def build_mcp_server_from_specs(specs: list[dict[str, Any]], *, bridge: ToolBrid
     sdk_tools = []
     for spec in specs:
         sdk_tools.append(_make_tool(spec, bridge))
+    sdk_tools.extend(
+        memoria.build_memoria_tools(
+            api_key=os.environ.get("MEMORIA_API_KEY"),
+            project_id=os.environ.get("MEMORIA_PROJECT_ID"),
+            project_tag=os.environ.get("MEMORIA_PROJECT_TAG"),
+        )
+    )
     return create_sdk_mcp_server(name="symphony", version="0.1.0", tools=sdk_tools)
 
 
