@@ -17,6 +17,7 @@ defmodule SymphonyElixir.Agent.AppServer.Turn do
 
   alias SymphonyElixir.Agent.AppServer.{Approval, Transport}
   alias SymphonyElixir.Config
+  alias SymphonyElixir.DecisionLog
 
   @spec await_completion(
           port(),
@@ -90,6 +91,18 @@ defmodule SymphonyElixir.Agent.AppServer.Turn do
         )
 
         {:error, {:turn_cancelled, Map.get(payload, "params")}}
+
+      {:ok, %{"method" => "notifications/memoria_call"} = payload} ->
+        DecisionLog.emit("memoria.call", Map.get(payload, "params", %{}))
+
+        emit_message(
+          on_message,
+          :notification,
+          %{payload: payload, raw: payload_string},
+          metadata_from_message(port, payload)
+        )
+
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
 
       {:ok, %{"method" => method} = payload}
       when is_binary(method) ->
