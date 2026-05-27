@@ -100,6 +100,30 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
     end
 
+    test "issue with an attached PR passes through even on a new turn-1 dispatch" do
+      memory_workflow()
+
+      ws = workspace_with("# Analysis\n\nNo grounded plan on a PR follow-up dispatch.\n")
+
+      issue = %Issue{
+        id: "issue-pg-1",
+        identifier: "ISS-1",
+        title: "test",
+        state: "In Development",
+        url: "https://linear.app/issues/ISS-1",
+        has_pr_attachment: true
+      }
+
+      entry = running_entry(%{workspace_path: ws, issue: issue})
+      state = empty_state(%{running: %{"issue-pg-1" => entry}})
+
+      assert {:continue, ^state, ^entry} =
+               PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
+
+      refute_receive {:terminate_called, _, _}, 100
+      refute_receive {:memory_tracker_state_update, _, _}, 100
+    end
+
     test "already-checked entry passes through without re-evaluating" do
       entry = running_entry(%{workspace_path: "/tmp/whatever", plan_grounding_checked: true})
       state = empty_state(%{running: %{"issue-pg-1" => entry}})
