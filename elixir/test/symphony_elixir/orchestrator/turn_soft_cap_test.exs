@@ -7,6 +7,18 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCapTest do
   alias SymphonyElixir.Orchestrator.TurnSoftCap
 
   describe "evaluate/2 — pure soft-cap decision" do
+    test "settings_from_agent/1 tolerates older agent structs without soft-cap keys" do
+      agent =
+        %SymphonyElixir.Config.Schema.Agent{}
+        |> Map.drop([:soft_cap_enabled, :soft_cap_ratio])
+
+      assert TurnSoftCap.settings_from_agent(agent) == %{
+               enabled: false,
+               ratio: 0.80,
+               max_turns: 20
+             }
+    end
+
     test "returns :noop when disabled in settings" do
       entry = %{turn_count: 19, identifier: "X-1"}
 
