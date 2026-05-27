@@ -420,14 +420,22 @@ defmodule SymphonyElixir.WorkpadTest do
       entry =
         pr_running_entry("https://github.com/schoolsoutapp/fe-next-app/pull/511")
         |> Map.put(:pinned_evidence_text, %{
-          "AC Evidence" => "## AC Evidence\n\n- AC 1: verified with test\n- AC 2: passed with screenshot"
+          "AC Evidence" => """
+          ## AC Evidence
+
+          - AC 1 — file exists: `fe-next-app/SYMPHONY_WORKPAD_UX_CANARY.md:1`
+          - AC 2 — file contains expected line: `fe-next-app/SYMPHONY_WORKPAD_UX_CANARY.md:1`
+          - AC 3 — no other files modified: `git diff --stat origin/dev..HEAD`
+          - AC 4 — Canary test exits 0: `test "$(cat SYMPHONY_WORKPAD_UX_CANARY.md)" = "expected"` → **PASS**
+          - AC 5 — Exactly one PR against `dev`: https://github.com/schoolsoutapp/fe-next-app/pull/607
+          """
         })
 
       Workpad.maybe_sync(entry, update, self())
 
       assert_receive {:memory_tracker_comment_update, _, body}, 1_000
       assert body =~ "Status: Ready for review"
-      assert body =~ "Acceptance criteria: 2 items documented in AC Evidence."
+      assert body =~ "Acceptance criteria: 5 items documented in AC Evidence."
       assert body =~ "Visual evidence: attached in the thread when the task produced screenshots or video."
     end
 
