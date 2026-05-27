@@ -36,7 +36,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
   require Logger
 
   alias SymphonyElixir.{Config, PlanGrounding, Tracker}
-  alias SymphonyElixir.Orchestrator.{State, StateTransition, TurnArtifacts}
+  alias SymphonyElixir.Orchestrator.{DispatchGate, State, StateTransition, TurnArtifacts}
 
   @type opts :: [terminate_fn: (State.t(), String.t(), boolean() -> State.t())]
 
@@ -49,6 +49,9 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
         {:continue, state, running_entry}
 
       Map.get(running_entry, :turn_count) != 1 ->
+        {:continue, state, running_entry}
+
+      DispatchGate.has_pr_attachment?(Map.get(running_entry, :issue)) ->
         {:continue, state, running_entry}
 
       not is_binary(Map.get(running_entry, :workspace_path)) ->
