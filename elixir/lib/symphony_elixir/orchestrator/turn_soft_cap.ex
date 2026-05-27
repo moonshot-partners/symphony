@@ -102,12 +102,17 @@ defmodule SymphonyElixir.Orchestrator.TurnSoftCap do
   def maybe_emit(running_entry, _update, _issue_id), do: running_entry
 
   defp current_settings do
-    settings = Config.settings!().agent
+    Config.settings!().agent
+    |> settings_from_agent()
+  end
 
+  @doc false
+  @spec settings_from_agent(map()) :: settings()
+  def settings_from_agent(settings) when is_map(settings) do
     %{
-      enabled: settings.soft_cap_enabled,
-      ratio: settings.soft_cap_ratio,
-      max_turns: settings.max_turns
+      enabled: Map.get(settings, :soft_cap_enabled, false),
+      ratio: Map.get(settings, :soft_cap_ratio, 0.80),
+      max_turns: Map.get(settings, :max_turns, 0)
     }
   end
 
