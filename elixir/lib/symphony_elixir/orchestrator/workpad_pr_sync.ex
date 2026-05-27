@@ -242,8 +242,12 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     body = GitHubPrBody.pr_body(issue)
     workspace_path = Map.get(running_entry, :workspace_path)
     issue_id = Map.get(issue, :id)
+    changed_files = GitHubPrFiles.changed_files(issue)
 
-    QaArtifactGate.validate(body, workspace_path, issue_id, subpaths: Config.qa_evidence_subpaths())
+    QaArtifactGate.validate(body, workspace_path, issue_id,
+      subpaths: Config.qa_evidence_subpaths(),
+      changed_files: changed_files
+    )
   end
 
   defp read_understanding_md(workspace_path) when is_binary(workspace_path) do

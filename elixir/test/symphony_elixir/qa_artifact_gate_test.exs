@@ -75,6 +75,59 @@ defmodule SymphonyElixir.QaArtifactGateTest do
       assert QaArtifactGate.validate(body, ws, "issue-6") == {:fail, :no_artifact}
     end
 
+    test "returns :ok for root-level Markdown-only PRs without runtime artifacts", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = pass_body()
+
+      assert QaArtifactGate.validate(body, ws, "issue-doc", changed_files: ["SYMPHONY_GREEN_CANARY.md"]) ==
+               :ok
+    end
+
+    test "returns :ok for root-level .markdown files without runtime artifacts", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = pass_body()
+
+      assert QaArtifactGate.validate(body, ws, "issue-markdown", changed_files: ["README.markdown"]) == :ok
+    end
+
+    test "still requires artifacts for root-level non-Markdown changes", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = pass_body()
+
+      assert QaArtifactGate.validate(body, ws, "issue-json", changed_files: ["package.json"]) ==
+               {:fail, :no_artifact}
+    end
+
+    test "still requires artifacts for nested Markdown changes", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = pass_body()
+
+      assert QaArtifactGate.validate(body, ws, "issue-docs", changed_files: ["docs/feature.md"]) ==
+               {:fail, :no_artifact}
+    end
+
+    test "still requires artifacts when changed_files is malformed", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = pass_body()
+
+      assert QaArtifactGate.validate(body, ws, "issue-bad-files", changed_files: :unknown) ==
+               {:fail, :no_artifact}
+    end
+
+    test "still requires artifacts when changed_files contains non-string paths", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = pass_body()
+
+      assert QaArtifactGate.validate(body, ws, "issue-non-string-file", changed_files: [nil]) ==
+               {:fail, :no_artifact}
+    end
+
     test "returns {:fail, :no_artifact} when artifact file is zero bytes", %{tmp: tmp} do
       ws = setup_workspace(tmp, "fe-next-app/qa-evidence", "shot.png", "")
       body = pass_body()
