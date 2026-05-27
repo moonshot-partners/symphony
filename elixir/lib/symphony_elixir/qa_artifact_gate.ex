@@ -58,16 +58,37 @@ defmodule SymphonyElixir.QaArtifactGate do
       `["fe-next-app/qa-evidence", "qa-evidence"]`). The caller normally
       passes `SymphonyElixir.Config.qa_evidence_subpaths/0` so the gate
       tracks the active workflow.
+    * `:changed_files` — when present, root-level Markdown-only PRs do not
+      require runtime QA artifacts.
   """
   @spec validate(String.t() | nil, String.t() | nil, String.t() | nil, keyword()) :: result()
   def validate(body, workspace_path, issue_id, opts \\ []) do
-    if claims_pass?(body) do
-      subpaths = Keyword.get(opts, :subpaths, @default_subpaths)
-      check_artifacts(workspace_path, issue_id, subpaths)
-    else
-      :ok
+    cond do
+      not claims_pass?(body) ->
+        :ok
+
+      root_markdown_only?(Keyword.get(opts, :changed_files, [])) ->
+        :ok
+
+      true ->
+        subpaths = Keyword.get(opts, :subpaths, @default_subpaths)
+        check_artifacts(workspace_path, issue_id, subpaths)
     end
   end
+
+  defp root_markdown_only?([]), do: false
+
+  defp root_markdown_only?(files) when is_list(files) do
+    Enum.all?(files, &root_markdown?/1)
+  end
+
+  defp root_markdown_only?(_), do: false
+
+  defp root_markdown?(path) when is_binary(path) do
+    Path.dirname(path) == "." and String.downcase(Path.extname(path)) in [".md", ".markdown"]
+  end
+
+  defp root_markdown?(_), do: false
 
   defp check_artifacts(workspace_path, issue_id, subpaths) do
     dirs = candidate_dirs(workspace_path, issue_id, subpaths)
