@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Workpad do
   """
 
   require Logger
+  alias SymphonyElixir.GitHubPr
   alias SymphonyElixir.RunLedger
   alias SymphonyElixir.Tracker
 
@@ -224,13 +225,15 @@ defmodule SymphonyElixir.Workpad do
     out_tok = Map.get(running_entry, :agent_output_tokens, 0)
     total_tok = Map.get(running_entry, :agent_total_tokens, 0)
     error_reason = Map.get(running_entry, :last_error_reason)
+    evidence_text = pinned_evidence_text(running_entry)
 
     tokens = format_tokens(in_tok, out_tok, total_tok)
     pr_link = format_pr_link(issue)
     outcome = format_outcome(last_event, issue)
+    phase = phase(last_event, issue)
 
     header =
-      format_header(last_event, %{
+      format_header(phase, last_event, %{
         turn: turn,
         retry: retry,
         tokens: tokens,
@@ -239,35 +242,221 @@ defmodule SymphonyElixir.Workpad do
       })
 
     sections =
-      [header, format_error_section(error_reason), format_primary_text(last_event, last_text)]
+      [
+        header,
+        format_live_activity(phase, last_event, turn),
+        format_trust_summary(phase, issue, evidence_text),
+        format_error_section(error_reason),
+        format_primary_text(last_event, last_text)
+      ]
       |> Enum.reject(fn s -> s == "" or s == nil end)
 
     Enum.join(sections, "\n\n") <> "\n"
   end
 
-  defp format_header(:pr_attached, %{tokens: tok, turn: t, retry: r, pr_link: link, outcome: outcome}) do
-    parts = ["PR opened" <> link, tok, "#{t} turns"]
+  defp phase(:pr_attached, issue) do
+    case GitHubPr.required_checks_status(issue) do
+      :pending -> :waiting_for_ci
+      {:red, _names} -> :needs_attention
+      _ -> :ready_for_review
+    end
+  end
+
+  defp phase(nil, _issue), do: :starting
+  defp phase(:session_started, _issue), do: :starting
+  defp phase(:turn_completed, _issue), do: :working
+  defp phase(:notification, _issue), do: :working
+  defp phase(:turn_input_required, _issue), do: :needs_human_reply
+  defp phase(:approval_required, _issue), do: :needs_approval
+  defp phase(:turn_failed, _issue), do: :failed
+  defp phase(:turn_ended_with_error, _issue), do: :failed
+  defp phase(:turn_cancelled, _issue), do: :cancelled
+  defp phase(_event, _issue), do: :working
+
+  defp format_header(:waiting_for_ci, :pr_attached, %{tokens: tok, turn: t, retry: r, pr_link: link}) do
+    parts = ["Status: Waiting for CI" <> link, tok, "#{t} turns"]
+    parts = if r > 0, do: parts ++ ["#{r} retries"], else: parts
+    Enum.join(parts, " · ")
+  end
+
+  defp format_header(:ready_for_review, :pr_attached, %{
+         tokens: tok,
+         turn: t,
+         retry: r,
+         pr_link: link,
+         outcome: outcome
+       }) do
+    parts = ["Status: Ready for review" <> link, tok, "#{t} turns"]
     parts = if r > 0, do: parts ++ ["#{r} retries"], else: parts
     parts = if outcome != "", do: parts ++ [outcome], else: parts
     Enum.join(parts, " · ")
   end
 
-  defp format_header(nil, _meta), do: "Starting…"
-  defp format_header(:session_started, _meta), do: "Starting…"
-
-  defp format_header(event, meta) do
-    "#{status_label(event)} — turn #{meta.turn} · #{meta.tokens}"
+  defp format_header(:needs_attention, :pr_attached, %{tokens: tok, turn: t, retry: r, pr_link: link}) do
+    parts = ["Status: Needs attention" <> link, tok, "#{t} turns"]
+    parts = if r > 0, do: parts ++ ["#{r} retries"], else: parts
+    Enum.join(parts, " · ")
   end
 
-  defp status_label(:turn_completed), do: "Working"
-  defp status_label(:notification), do: "Working"
-  defp status_label(:turn_input_required), do: "Needs human reply"
-  defp status_label(:approval_required), do: "Needs approval"
-  defp status_label(:turn_failed), do: "Failed"
-  defp status_label(:turn_ended_with_error), do: "Failed"
-  defp status_label(:turn_cancelled), do: "Cancelled"
-  defp status_label(event) when is_atom(event), do: Atom.to_string(event)
-  defp status_label(event), do: inspect(event)
+  defp format_header(:starting, _event, _meta), do: "Status: Starting"
+
+  defp format_header(phase, _event, meta) do
+    "Status: #{status_label(phase)} · turn #{meta.turn} · #{meta.tokens}"
+  end
+
+  defp status_label(:working), do: "Working"
+  defp status_label(:needs_human_reply), do: "Needs human reply"
+  defp status_label(:needs_approval), do: "Needs approval"
+  defp status_label(:failed), do: "Failed"
+  defp status_label(:cancelled), do: "Cancelled"
+  defp status_label(phase) when is_atom(phase), do: phase |> Atom.to_string() |> String.replace("_", " ")
+
+  defp format_live_activity(:starting, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Starting the agent.
+    Last update: just now.
+    Next: understand the request and plan the change.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:working, _event, turn) do
+    """
+    Live activity
+
+    Current step: Working on the requested change.
+    Last update: just now.
+    Progress: turn #{turn} is active.
+    Next: verify the change and open a PR.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:waiting_for_ci, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Waiting for GitHub checks.
+    Last update: just now.
+    What this means: the agent opened a PR and is waiting on external CI.
+    Next: move to review when checks pass, or surface the failing check.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:ready_for_review, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Ready for human review.
+    Last update: just now.
+    Next: review and approve the PR if it matches the request.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:needs_attention, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Needs attention.
+    Last update: just now.
+    What this means: a required check or quality gate needs review.
+    Next: inspect the PR checks before approving.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:needs_human_reply, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Waiting for a human reply.
+    Last update: just now.
+    Next: answer the agent's question so work can continue.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:needs_approval, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Waiting for approval.
+    Last update: just now.
+    Next: approve or reject the requested action.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:failed, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Stopped with an error.
+    Last update: just now.
+    What this means: no code was merged by this run.
+    Next: inspect the error below.
+    """
+    |> String.trim()
+  end
+
+  defp format_live_activity(:cancelled, _event, _turn) do
+    """
+    Live activity
+
+    Current step: Cancelled.
+    Last update: just now.
+    What this means: no code was merged by this run.
+    """
+    |> String.trim()
+  end
+
+  defp format_trust_summary(:ready_for_review, issue, evidence_text) do
+    [
+      "Trust summary",
+      "",
+      "What changed: PR opened for human review.",
+      "Scope control: Symphony checked the PR before moving this ticket to review.",
+      "Acceptance criteria: #{evidence_summary(evidence_text)}",
+      "Visual evidence: attached in the thread when the task produced screenshots or video.",
+      "Pull request: #{plain_pr_link(issue)}"
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
+
+  defp format_trust_summary(:waiting_for_ci, issue, evidence_text) do
+    [
+      "Trust summary",
+      "",
+      "What changed: PR opened and waiting for checks.",
+      "Scope control: PR checks are still running.",
+      "Acceptance criteria: #{evidence_summary(evidence_text)}",
+      "Visual evidence: attached in the thread when the task produced screenshots or video.",
+      "Pull request: #{plain_pr_link(issue)}"
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
+
+  defp format_trust_summary(:needs_attention, issue, evidence_text) do
+    [
+      "Trust summary",
+      "",
+      "What changed: PR opened, but a check needs attention.",
+      "Scope control: Symphony did not mark the work ready while checks are failing.",
+      "Acceptance criteria: #{evidence_summary(evidence_text)}",
+      "Visual evidence: attached in the thread when the task produced screenshots or video.",
+      "Pull request: #{plain_pr_link(issue)}"
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
+
+  defp format_trust_summary(_phase, _issue, _evidence_text), do: ""
 
   defp format_outcome(:pr_attached, issue) do
     if RunLedger.enabled?() do
@@ -279,6 +468,30 @@ defmodule SymphonyElixir.Workpad do
   end
 
   defp format_outcome(_event, _issue), do: ""
+
+  defp pinned_evidence_text(%{pinned_evidence_text: %{} = evidence}) do
+    Map.get(evidence, "AC Evidence")
+  end
+
+  defp pinned_evidence_text(_), do: nil
+
+  defp evidence_summary(text) when is_binary(text) do
+    count =
+      text
+      |> String.split("\n")
+      |> Enum.count(&String.match?(&1, ~r/^\s*(?:[-*]|\d+\.)\s+.*\b(?:verified|passed|done|pass)\b/i))
+
+    cond do
+      count > 0 -> "#{count} item#{plural(count)} documented in AC Evidence."
+      String.trim(text) != "" -> "documented in AC Evidence."
+      true -> "not posted yet."
+    end
+  end
+
+  defp evidence_summary(_), do: "not posted yet."
+
+  defp plural(1), do: ""
+  defp plural(_), do: "s"
 
   defp pr_url_from_issue(%{repos: repos}) when is_list(repos) do
     Enum.find_value(repos, fn
@@ -319,6 +532,13 @@ defmodule SymphonyElixir.Workpad do
   end
 
   defp format_pr_link(_), do: ""
+
+  defp plain_pr_link(issue) do
+    case pr_url_from_issue(issue) do
+      url when is_binary(url) -> url
+      _ -> "not available yet"
+    end
+  end
 
   defp render_pr_link(url, repo_name) do
     short_repo =

@@ -363,6 +363,74 @@ defmodule SymphonyElixir.WorkpadTest do
       refute body =~ "Last event"
     end
 
+    test "pr_attached shows live activity while CI is still pending" do
+      previous = Application.get_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :pending end)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+          value -> Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, value)
+        end
+      end)
+
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/schoolsoutapp/fe-next-app/pull/511"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Status: Waiting for CI"
+      assert body =~ "Current step: Waiting for GitHub checks."
+      assert body =~ "What this means: the agent opened a PR and is waiting on external CI."
+      assert body =~ "PR opened and waiting for checks."
+    end
+
+    test "pr_attached shows needs attention when checks are red" do
+      previous = Application.get_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> {:red, ["Test"]} end)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+          value -> Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, value)
+        end
+      end)
+
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+      Workpad.maybe_sync(pr_running_entry("https://github.com/schoolsoutapp/fe-next-app/pull/511"), update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Status: Needs attention"
+      assert body =~ "a required check or quality gate needs review"
+      assert body =~ "Symphony did not mark the work ready while checks are failing"
+    end
+
+    test "ready for review summarizes pinned AC evidence count" do
+      previous = Application.get_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+          value -> Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, value)
+        end
+      end)
+
+      update = %{event: :pr_attached, timestamp: DateTime.utc_now()}
+
+      entry =
+        pr_running_entry("https://github.com/schoolsoutapp/fe-next-app/pull/511")
+        |> Map.put(:pinned_evidence_text, %{
+          "AC Evidence" => "## AC Evidence\n\n- AC 1: verified with test\n- AC 2: passed with screenshot"
+        })
+
+      Workpad.maybe_sync(entry, update, self())
+
+      assert_receive {:memory_tracker_comment_update, _, body}, 1_000
+      assert body =~ "Status: Ready for review"
+      assert body =~ "Acceptance criteria: 2 items documented in AC Evidence."
+      assert body =~ "Visual evidence: attached in the thread when the task produced screenshots or video."
+    end
+
     test "status line maps turn_completed to 'Working'" do
       update = %{event: :turn_completed, timestamp: DateTime.utc_now()}
 
