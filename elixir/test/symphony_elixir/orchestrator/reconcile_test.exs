@@ -135,6 +135,36 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       assert_received {:terminate, "issue-1", true}
     end
 
+    test "ready PR attachment refreshes cached issue before terminate" do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+
+      stale_issue = build_issue(has_pr_attachment: false, repos: [])
+
+      fresh_issue =
+        build_issue(
+          has_pr_attachment: true,
+          repos: [%{name: "r", pr: %{url: "https://github.com/x/y/pull/840"}}]
+        )
+
+      state = running_state(stale_issue)
+
+      terminate_fn = fn state, issue_id, cleanup ->
+        send(self(), {:terminate_issue, Map.fetch!(state.running, issue_id).issue, cleanup})
+        %{state | running: Map.delete(state.running, issue_id)}
+      end
+
+      Reconcile.run(state, %{
+        terminate_fn: terminate_fn,
+        pr_sync_fn: record_pr_sync(self()),
+        fetch_fn: fn _ids -> {:ok, [fresh_issue]} end
+      })
+
+      assert_received {:pr_sync, "issue-1"}
+      assert_received {:terminate_issue, terminated_issue, true}
+      assert terminated_issue.repos == fresh_issue.repos
+      assert terminated_issue.has_pr_attachment == true
+    end
+
     test "stale (not-ready) PR attachment + active state -> keep agent running, refresh issue" do
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
 

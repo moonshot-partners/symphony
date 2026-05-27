@@ -117,6 +117,7 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
         Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
 
         state
+        |> refresh_running_issue_state(issue)
         |> pr_sync_fn.(issue.id)
         |> terminate_fn.(issue.id, true)
 
