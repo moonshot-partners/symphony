@@ -22,7 +22,11 @@ defmodule SymphonyElixir.GateDValidator do
     * an http(s) URL — treated as `:ok` here (CI run cross-check is a
       deferred follow-up, kept out of scope to ship the substance check now).
     * a workspace-relative file path (with optional `:line` suffix) that
-      exists and is non-empty when `workspace_path` is provided.
+      exists and is non-empty when `workspace_path` is provided. For
+      multi-repo workspaces, bare filenames are also checked one directory
+      below the workspace root so repo-root command evidence like
+      `test "$(cat SENTINEL.md)" = ...` can resolve when the checkout lives in
+      `<workspace_path>/<repo>/SENTINEL.md`.
 
   Injection point for tests: `:gate_d_ref_resolver_fn` (same shape as the
   `:pr_ready_fn` / `:pr_qa_blocked_fn` / `:pr_required_checks_status_fn`
@@ -171,13 +175,20 @@ defmodule SymphonyElixir.GateDValidator do
 
   def default_ref_resolver(ref, ctx) when is_binary(ref) do
     case Map.get(ctx, :workspace_path) do
-      nil ->
-        {:error, :no_workspace}
-
-      ws when is_binary(ws) ->
-        path = ref |> strip_line_suffix() |> then(&Path.join(ws, &1))
-        check_file(path)
+      nil -> {:error, :no_workspace}
+      ws when is_binary(ws) -> resolve_file_ref(ref, ws)
     end
+  end
+
+  defp resolve_file_ref(ref, workspace_path) do
+    ref
+    |> candidate_paths(workspace_path)
+    |> Enum.reduce_while({:error, :missing}, fn path, _last_error ->
+      case check_file(path) do
+        :ok -> {:halt, :ok}
+        error -> {:cont, error}
+      end
+    end)
   end
 
   defp strip_line_suffix(ref) do
@@ -185,6 +196,24 @@ defmodule SymphonyElixir.GateDValidator do
       [_full, path] -> path
       _ -> ref
     end
+  end
+
+  defp candidate_paths(ref, workspace_path) do
+    path = strip_line_suffix(ref)
+    direct = Path.join(workspace_path, path)
+
+    nested =
+      if bare_filename?(path) do
+        Path.wildcard(Path.join([workspace_path, "*", path]))
+      else
+        []
+      end
+
+    Enum.uniq([direct | nested])
+  end
+
+  defp bare_filename?(path) do
+    Path.split(path) == [path]
   end
 
   defp check_file(path) do

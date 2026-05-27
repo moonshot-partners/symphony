@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Workpad do
   """
 
   require Logger
+  alias SymphonyElixir.GateDValidator
   alias SymphonyElixir.GitHubPr
   alias SymphonyElixir.RunLedger
   alias SymphonyElixir.Tracker
@@ -476,10 +477,7 @@ defmodule SymphonyElixir.Workpad do
   defp pinned_evidence_text(_), do: nil
 
   defp evidence_summary(text) when is_binary(text) do
-    count =
-      text
-      |> String.split("\n")
-      |> Enum.count(&String.match?(&1, ~r/^\s*(?:[-*]|\d+\.)\s+.*\b(?:verified|passed|done|pass)\b/i))
+    count = evidence_count(text)
 
     cond do
       count > 0 -> "#{count} item#{plural(count)} documented in AC Evidence."
@@ -489,6 +487,18 @@ defmodule SymphonyElixir.Workpad do
   end
 
   defp evidence_summary(_), do: "not posted yet."
+
+  defp evidence_count(text) do
+    case GateDValidator.parse_ac_evidence_section(text) do
+      [] ->
+        text
+        |> String.split("\n")
+        |> Enum.count(&String.match?(&1, ~r/^\s*(?:[-*]|\d+\.)\s+AC[\s#]*\d+\b/i))
+
+      claims ->
+        length(claims)
+    end
+  end
 
   defp plural(1), do: ""
   defp plural(_), do: "s"

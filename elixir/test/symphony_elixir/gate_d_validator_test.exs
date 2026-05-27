@@ -193,6 +193,26 @@ defmodule SymphonyElixir.GateDValidatorTest do
       assert GateDValidator.validate(text, %{workspace_path: "/tmp/ws"}) == :ok
     end
 
+    test "resolves bare filename evidence inside a nested repo checkout" do
+      workspace_path =
+        Path.join(System.tmp_dir!(), "gate-d-nested-repo-#{System.unique_integer([:positive])}")
+
+      file_path = Path.join([workspace_path, "fe-next-app", "SYMPHONY_WORKPAD_UX_CANARY.md"])
+
+      File.mkdir_p!(Path.dirname(file_path))
+      File.write!(file_path, "symphony workpad ux canary\n")
+
+      on_exit(fn -> File.rm_rf(workspace_path) end)
+
+      text = """
+      ## AC Evidence
+
+      - AC 4 — Canary test exits 0: `test "$(cat SYMPHONY_WORKPAD_UX_CANARY.md)" = "symphony workpad ux canary"` → **PASS**
+      """
+
+      assert GateDValidator.validate(text, %{workspace_path: workspace_path}) == :ok
+    end
+
     test "skipped and blocked claims do not require artifacts" do
       Application.put_env(:symphony_elixir, :gate_d_ref_resolver_fn, fn _, _ ->
         raise "should not be called"
