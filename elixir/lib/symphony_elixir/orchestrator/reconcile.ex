@@ -113,13 +113,7 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
         terminate_fn.(state, issue.id, true)
 
       DispatchGate.has_pr_attachment?(issue) and GitHubPr.ready?(issue) ->
-        emit_decision(issue, "pr_ready_short_circuit", "pr_sync+terminate")
-        Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
-
-        state
-        |> refresh_running_issue_state(issue)
-        |> pr_sync_fn.(issue.id)
-        |> terminate_fn.(issue.id, true)
+        reconcile_ready_pr(state, issue, terminate_fn, pr_sync_fn)
 
       DispatchGate.has_pr_attachment?(issue) ->
         Logger.debug("Issue has PR attachment(s) but none ready (stale closed, or OPEN with failing/pending CI): #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
@@ -153,6 +147,33 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
 
   defp reconcile_issue_state(state, _issue, _active, _terminal, _terminate_fn, _pr_sync_fn) do
     state
+  end
+
+  defp reconcile_ready_pr(%State{} = state, %Issue{} = issue, terminate_fn, pr_sync_fn) do
+    if critical_review_pending?(issue) do
+      emit_decision(issue, "pr_ready_with_critical_review", "refresh")
+
+      Logger.info("Issue has a ready PR attachment but claude-pr-review requested changes: #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
+
+      refresh_running_issue_state(state, issue)
+    else
+      emit_decision(issue, "pr_ready_short_circuit", "pr_sync+terminate")
+      Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
+
+      state
+      |> refresh_running_issue_state(issue)
+      |> pr_sync_fn.(issue.id)
+      |> terminate_fn.(issue.id, true)
+      |> mark_completed(issue.id)
+    end
+  end
+
+  defp critical_review_pending?(%Issue{} = issue) do
+    match?({:critical, _}, GitHubPr.critical_review_pending?(issue))
+  end
+
+  defp mark_completed(%State{} = state, issue_id) when is_binary(issue_id) do
+    %{state | completed: MapSet.put(state.completed, issue_id)}
   end
 
   defp emit_decision(%Issue{} = issue, branch, action) do

@@ -12,7 +12,10 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       tracker_on_complete_state: "In QA / Review"
     )
 
-    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_ready_fn) end)
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :pr_ready_fn)
+      Application.delete_env(:symphony_elixir, :pr_critical_review_fn)
+    end)
 
     :ok
   end
@@ -125,14 +128,44 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
 
       state = running_state(issue)
 
-      Reconcile.run(state, %{
-        terminate_fn: record_terminate(self()),
-        pr_sync_fn: record_pr_sync(self()),
-        fetch_fn: fn _ids -> {:ok, [issue]} end
-      })
+      result =
+        Reconcile.run(state, %{
+          terminate_fn: record_terminate(self()),
+          pr_sync_fn: record_pr_sync(self()),
+          fetch_fn: fn _ids -> {:ok, [issue]} end
+        })
 
       assert_received {:pr_sync, "issue-1"}
       assert_received {:terminate, "issue-1", true}
+      assert MapSet.member?(result.completed, "issue-1")
+    end
+
+    test "ready PR attachment with critical review stays active for rework" do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+
+      Application.put_env(:symphony_elixir, :pr_critical_review_fn, fn _issue ->
+        {:critical, %{count: 2, items: ["bad field"], head_sha: "abc123"}}
+      end)
+
+      issue =
+        build_issue(
+          has_pr_attachment: true,
+          repos: [%{name: "r", pr: %{url: "https://github.com/x/y/pull/1"}}]
+        )
+
+      state = running_state(issue)
+
+      result =
+        Reconcile.run(state, %{
+          terminate_fn: record_terminate(self()),
+          pr_sync_fn: record_pr_sync(self()),
+          fetch_fn: fn _ids -> {:ok, [issue]} end
+        })
+
+      refute_received {:pr_sync, "issue-1"}
+      refute_received {:terminate, "issue-1", true}
+      assert Map.has_key?(result.running, "issue-1")
+      refute MapSet.member?(result.completed, "issue-1")
     end
 
     test "ready PR attachment refreshes cached issue before terminate" do
