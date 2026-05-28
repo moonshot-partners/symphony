@@ -191,10 +191,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
        ) do
     case qa_artifact_verdict(issue, running_entry) do
       {:fail, :no_artifact} when is_binary(reject_state) ->
-        # SYM-34: the agent's PR body claims `- Result: PASS` under
-        # `## QA self-review` but no Playwright artifact (screenshot,
-        # webm, zip) exists on disk. Park in on_reject_state — the agent
-        # skipped the QA run and only wrote prose.
+        # SYM-34: the agent's PR body or ticket contract requires visual
+        # QA evidence, but no Playwright artifact (screenshot, webm, zip)
+        # exists on disk. Park in on_reject_state — the agent skipped the
+        # QA run and only wrote prose.
         emit_route("qa_artifact_missing", issue, reject_state, pr_engagements)
         post_qa_artifact_missing_comment(issue, parent_comment_id)
         apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
@@ -246,7 +246,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
 
     QaArtifactGate.validate(body, workspace_path, issue_id,
       subpaths: Config.qa_evidence_subpaths(),
-      changed_files: changed_files
+      changed_files: changed_files,
+      issue_description: Map.get(issue, :description)
     )
   end
 
@@ -339,7 +340,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     """
     ## QA artifact — substance verification failed
 
-    The PR body declares `- Result: PASS` under `## QA self-review`, but no real Playwright artifact (`*.png`, `*.webm`, `*.zip`) was found in the workspace `qa-evidence/` directory or the staged retry snapshot. The agent likely wrote the QA prose without running the spec. Parking in `on_reject_state` so the retry loop or a human can re-run the QA harness end-to-end.
+    The PR body or ticket contract requires visual QA evidence, but no real Playwright artifact (`*.png`, `*.webm`, `*.zip`) was found in the workspace `qa-evidence/` directory or the staged retry snapshot. The agent likely wrote QA prose without running the spec. Parking in `on_reject_state` so the retry loop or a human can re-run the QA harness end-to-end.
 
     _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-34)._
     """

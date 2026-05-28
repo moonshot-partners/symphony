@@ -40,6 +40,44 @@ defmodule SymphonyElixir.QaArtifactGateTest do
       body = "## QA self-review\n\n- Result: FAIL\n"
       assert QaArtifactGate.validate(body, "/nonexistent", "issue-1") == :ok
     end
+
+    test "returns :ok for NOT REQUIRED when the ticket is not visual" do
+      body = "## QA self-review\n\nNo browser QA needed.\n\n- Result: NOT REQUIRED\n"
+
+      assert QaArtifactGate.validate(body, "/nonexistent", "issue-1", issue_description: "Update a TypeScript helper return value.") == :ok
+    end
+
+    test "requires artifacts for NOT REQUIRED when the ticket has visual AC", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+      body = "## QA self-review\n\nNo browser QA needed.\n\n- Result: NOT REQUIRED\n"
+
+      assert QaArtifactGate.validate(body, ws, "issue-visual", issue_description: "The availability badge shows Last Spots on the activity page.") == {:fail, :no_artifact}
+    end
+
+    test "requires artifacts when the PR body describes visual behavior even without PASS", %{tmp: tmp} do
+      ws = Path.join(tmp, "ws")
+      File.mkdir_p!(ws)
+
+      body = """
+      ## Summary
+
+      The public activity page now shows the Last Spots badge.
+
+      ## QA self-review
+
+      - Result: NOT REQUIRED
+      """
+
+      assert QaArtifactGate.validate(body, ws, "issue-body-visual") == {:fail, :no_artifact}
+    end
+
+    test "visual NOT REQUIRED passes when an artifact exists", %{tmp: tmp} do
+      ws = setup_workspace(tmp, "fe-next-app/qa-evidence", "last-spots.png", "fakepngbytes")
+      body = "## QA self-review\n\n- Result: NOT REQUIRED\n"
+
+      assert QaArtifactGate.validate(body, ws, "issue-visual-ok", issue_description: "The availability badge shows Last Spots on the activity page.") == :ok
+    end
   end
 
   describe "validate/3 — body claims PASS, workspace evidence" do
@@ -208,6 +246,22 @@ defmodule SymphonyElixir.QaArtifactGateTest do
 
     test "false when no Result line at all" do
       assert QaArtifactGate.claims_pass?("## Summary\n\nNo QA section.\n") == false
+    end
+  end
+
+  describe "qa_artifact_required?/2" do
+    test "true for PASS claims" do
+      assert QaArtifactGate.qa_artifact_required?(pass_body()) == true
+    end
+
+    test "true for visual issue descriptions without PASS" do
+      assert QaArtifactGate.qa_artifact_required?("- Result: NOT REQUIRED", "Badge is visible on the page") ==
+               true
+    end
+
+    test "false for non-visual NOT REQUIRED" do
+      assert QaArtifactGate.qa_artifact_required?("- Result: NOT REQUIRED", "Rename an internal helper") ==
+               false
     end
   end
 

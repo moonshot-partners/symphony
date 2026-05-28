@@ -1,9 +1,10 @@
 defmodule SymphonyElixir.QaArtifactGate do
   @moduledoc """
   QA artifact substance check — when an agent's PR body claims
-  `- Result: PASS` under the `## QA self-review` section, verify a real
-  qa-evidence artifact (screenshot/webm/zip) exists on disk before the
-  orchestrator routes the ticket to `on_complete_state`.
+  `- Result: PASS` under the `## QA self-review` section, or the ticket/PR
+  contract describes visual UI behavior, verify a real qa-evidence artifact
+  (screenshot/webm/zip) exists on disk before the orchestrator routes the
+  ticket to `on_complete_state`.
 
   SYM-34 closes the gap surfaced on SODEV-892 (2026-05-23): the fe-next-app
   CI gate (`qa-evidence` workflow in fe-next-app PR #519/#521) only checks
@@ -17,9 +18,11 @@ defmodule SymphonyElixir.QaArtifactGate do
 
   ## The contract
 
-    * If the PR body has no `- Result: PASS` line → `:ok` (other routes
-      handle FAIL / BLOCKED / missing-section).
-    * If it does, look for at least one non-empty artifact file in:
+    * If the PR body has no `- Result: PASS` line and the ticket/PR does not
+      describe visual UI behavior → `:ok` (other routes handle FAIL / BLOCKED /
+      missing-section).
+    * If it does, or the ticket/PR describes visual UI behavior, look for at
+      least one non-empty artifact file in:
       - the staged snapshot at `/tmp/symphony-qa-staged-<issue_id>` (the
         retry-survival dir written by `QaEvidence.stage_pending_publish/2`),
         OR
@@ -38,6 +41,7 @@ defmodule SymphonyElixir.QaArtifactGate do
   @artifact_exts ~w(.png .jpg .jpeg .gif .webm .mp4 .zip)
 
   @pass_pattern ~r/^[\s-]*Result:\s*PASS\b/m
+  @visual_contract_pattern ~r/\b(badge|button|cta|displays?|renders?|screens?|screenshots?|shows?|visible|visual|page|tab|modal|dialog|component|layout|header|footer|sidebar)\b/i
 
   @doc """
   Returns true when the PR body claims a passing QA self-review.
@@ -50,8 +54,9 @@ defmodule SymphonyElixir.QaArtifactGate do
 
   @doc """
   Validate the PR body against the agent's workspace + staged evidence
-  directory. Returns `:ok` when the body does not claim PASS OR a real
-  artifact file is found, else `{:fail, :no_artifact}`.
+  directory. Returns `:ok` when neither the PR body nor the ticket contract
+  requires runtime visual proof, or when a real artifact file is found.
+  Returns `{:fail, :no_artifact}` when visual proof is required but missing.
 
   `opts`:
     * `:subpaths` — overrides the qa evidence subpath list (defaults to
@@ -60,11 +65,13 @@ defmodule SymphonyElixir.QaArtifactGate do
       tracks the active workflow.
     * `:changed_files` — when present, root-level Markdown-only PRs do not
       require runtime QA artifacts.
+    * `:issue_description` — ticket text used to detect visual UI acceptance
+      criteria even when the PR body claims QA is not required.
   """
   @spec validate(String.t() | nil, String.t() | nil, String.t() | nil, keyword()) :: result()
   def validate(body, workspace_path, issue_id, opts \\ []) do
     cond do
-      not claims_pass?(body) ->
+      not qa_artifact_required?(body, Keyword.get(opts, :issue_description)) ->
         :ok
 
       root_markdown_only?(Keyword.get(opts, :changed_files, [])) ->
@@ -75,6 +82,21 @@ defmodule SymphonyElixir.QaArtifactGate do
         check_artifacts(workspace_path, issue_id, subpaths)
     end
   end
+
+  @doc """
+  Returns true when the PR body or ticket contract requires runtime visual
+  evidence. A `- Result: PASS` claim always requires artifacts; visual UI
+  language also requires artifacts even when the PR body says QA was not
+  required.
+  """
+  @spec qa_artifact_required?(String.t() | nil, String.t() | nil) :: boolean()
+  def qa_artifact_required?(body, issue_description \\ nil) do
+    claims_pass?(body) or visual_contract?(body) or visual_contract?(issue_description)
+  end
+
+  @spec visual_contract?(String.t() | nil) :: boolean()
+  def visual_contract?(nil), do: false
+  def visual_contract?(text) when is_binary(text), do: Regex.match?(@visual_contract_pattern, text)
 
   defp root_markdown_only?([]), do: false
 
