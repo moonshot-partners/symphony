@@ -6,7 +6,7 @@ projects get their dominant runner; the hook does not chain runners.
 
 Detection table (first match wins):
 
-    Makefile           → make test
+    Makefile with test target → make test
     pyproject.toml     → pytest -q
     package.json       → npm test --silent
     mix.exs            → mix test
@@ -77,9 +77,30 @@ def _override_for(marker: str) -> str | None:
     return os.environ.get(key)
 
 
+def _makefile_has_test_target(path: Path) -> bool:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or line.startswith(("\t", " ")):
+            continue
+        target, separator, _deps = line.partition(":")
+        if separator and target.strip() == "test":
+            return True
+    return False
+
+
 def _detect_runner(cwd: Path) -> tuple[str, str] | None:
     for marker, default_cmd in _RUNNERS:
-        if (cwd / marker).exists():
+        marker_path = cwd / marker
+        if not marker_path.exists():
+            continue
+        if marker == "Makefile" and not _makefile_has_test_target(marker_path):
+            continue
+        if marker_path.exists():
             return marker, _override_for(marker) or default_cmd
     return None
 
