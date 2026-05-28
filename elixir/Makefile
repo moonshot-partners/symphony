@@ -34,7 +34,7 @@ dialyzer:
 	$(MIX) dialyzer --format short
 
 e2e:
-	SYMPHONY_RUN_LIVE_E2E=1 $(MIX) test test/symphony_elixir/live_e2e_test.exs
+	$(MIX) test --include integration test/symphony_elixir/agent_shim_integration_test.exs test/symphony_elixir/app_server_test.exs test/symphony_elixir/orchestrator/reconcile_test.exs test/symphony_elixir/orchestrator/pr_reengagement_test.exs test/symphony_elixir/orchestrator/workpad_pr_sync_test.exs
 
 ci:
 	$(MAKE) setup
