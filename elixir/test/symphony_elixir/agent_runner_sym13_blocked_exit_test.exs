@@ -76,9 +76,10 @@ defmodule SymphonyElixir.AgentRunnerSym13BlockedExitTest do
       assert AgentRunner.continuation_decision_for_test(issue) == :done
     end
 
-    test "PR with non-BLOCKED body + pending CI + active state → :done (wait for CI)" do
-      # Pending CI is not actionable by the agent. Stop the continuation loop
-      # and let reconciliation resume only if checks turn red.
+    test "PR with non-BLOCKED body + pending CI + active state → :wait_pr_checks" do
+      # Pending CI is not actionable by another model turn, but it is also not
+      # completion. The runner must wait for a GitHub verdict without letting
+      # AgentExit mark the issue completed.
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
 
       Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
@@ -91,7 +92,7 @@ defmodule SymphonyElixir.AgentRunnerSym13BlockedExitTest do
       end)
 
       issue = make_issue()
-      assert AgentRunner.continuation_decision_for_test(issue) == :done
+      assert AgentRunner.continuation_decision_for_test(issue) == :wait_pr_checks
     end
 
     test "PR with non-BLOCKED body + red CI + active state → :continue" do

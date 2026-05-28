@@ -101,7 +101,7 @@ defmodule SymphonyElixir.AgentRunner do
            ) do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
-      case continue_with_issue?(issue, issue_state_fetcher) do
+      case continue_with_issue?(issue, issue_state_fetcher, opts) do
         {:continue, refreshed_issue} when turn_number < max_turns ->
           Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
@@ -144,10 +144,10 @@ defmodule SymphonyElixir.AgentRunner do
     """
   end
 
-  defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do
+  defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher, opts) when is_binary(issue_id) do
     case issue_state_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        decide_continuation(refreshed_issue)
+        decide_continuation(refreshed_issue, issue_state_fetcher, opts)
 
       {:ok, []} ->
         {:done, issue}
@@ -157,12 +157,51 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
+  defp continue_with_issue?(issue, _issue_state_fetcher, _opts), do: {:done, issue}
 
-  defp decide_continuation(%Issue{} = refreshed_issue) do
+  defp decide_continuation(%Issue{} = refreshed_issue, issue_state_fetcher, opts) do
     case continuation_decision(refreshed_issue) do
       :continue -> {:continue, refreshed_issue}
       :done -> done_with_log(refreshed_issue)
+      :wait_pr_checks -> wait_for_pending_pr_checks(refreshed_issue, issue_state_fetcher, opts)
+    end
+  end
+
+  defp wait_for_pending_pr_checks(%Issue{} = issue, issue_state_fetcher, opts) do
+    poll_ms = Keyword.get(opts, :pr_pending_poll_ms, 30_000)
+    max_polls = Keyword.get(opts, :pr_pending_max_polls, 240)
+
+    wait_for_pending_pr_checks(issue, issue_state_fetcher, opts, poll_ms, max_polls, 0)
+  end
+
+  defp wait_for_pending_pr_checks(%Issue{} = issue, _issue_state_fetcher, _opts, _poll_ms, max_polls, poll_count)
+       when is_integer(max_polls) and max_polls >= 0 and poll_count >= max_polls do
+    {:error, {:pr_checks_pending_timeout, issue.id}}
+  end
+
+  defp wait_for_pending_pr_checks(%Issue{id: issue_id} = issue, issue_state_fetcher, opts, poll_ms, max_polls, poll_count) do
+    Logger.info("PR checks pending for #{issue_context(issue)}; waiting before deciding continuation poll=#{poll_count + 1}/#{max_polls} wait_ms=#{poll_ms}")
+
+    if poll_ms > 0, do: Process.sleep(poll_ms)
+
+    case issue_state_fetcher.([issue_id]) do
+      {:ok, [%Issue{} = refreshed_issue | _]} ->
+        case continuation_decision(refreshed_issue) do
+          :wait_pr_checks ->
+            wait_for_pending_pr_checks(refreshed_issue, issue_state_fetcher, opts, poll_ms, max_polls, poll_count + 1)
+
+          :continue ->
+            {:continue, refreshed_issue}
+
+          :done ->
+            done_with_log(refreshed_issue)
+        end
+
+      {:ok, []} ->
+        {:done, issue}
+
+      {:error, reason} ->
+        {:error, {:issue_state_refresh_failed, reason}}
     end
   end
 
@@ -173,7 +212,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp done_with_log(%Issue{} = issue), do: {:done, issue}
 
-  @spec continuation_decision_for_test(Issue.t()) :: :continue | :done
+  @spec continuation_decision_for_test(Issue.t()) :: :continue | :done | :wait_pr_checks
   def continuation_decision_for_test(%Issue{} = issue), do: continuation_decision(issue)
 
   defp continuation_decision(%Issue{has_pr_attachment: true} = issue) do
@@ -192,10 +231,12 @@ defmodule SymphonyElixir.AgentRunner do
       SymphonyElixir.GitHubPr.qa_blocked?(issue) ->
         :done
 
-      # Pending CI is not actionable by the agent. Stop this continuation loop;
-      # reconciliation/re-engagement can resume if checks later turn red.
+      # Pending CI is not actionable by the agent, but treating it as `:done`
+      # marks the issue completed before GitHub has produced a verdict. Wait
+      # inside the current worker instead: no extra model turns, no false
+      # completion.
       SymphonyElixir.GitHubPr.required_checks_status(issue) == :pending ->
-        :done
+        :wait_pr_checks
 
       active_issue_state?(issue.state) ->
         :continue
