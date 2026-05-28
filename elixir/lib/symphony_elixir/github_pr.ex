@@ -26,6 +26,7 @@ defmodule SymphonyElixir.GitHubPr do
   require Logger
 
   alias SymphonyElixir.GitHubPr.ChecksClassifier
+  alias SymphonyElixir.GitHubPr.ReviewVerdict
 
   @github_pr_regex ~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}
 
@@ -270,13 +271,155 @@ defmodule SymphonyElixir.GitHubPr do
     with [_, owner, repo, number] <- Regex.run(@github_pr_regex, url),
          {:ok, head_sha, head_at} <- fetch_head_meta(owner, repo, number, url),
          {:ok, comments} <- fetch_pr_comments(owner, repo, number, url) do
-      critical_review_from_comments(comments, head_sha, head_at)
+      case fetch_pr_review_verdict(owner, repo, number, url) do
+        {:ok, verdict} -> critical_review_from_structured_verdict(verdict, head_sha)
+        :missing -> critical_review_from_comments(comments, head_sha, head_at)
+        {:error, reason} -> unknown_review_result(head_sha, "artifact read failed: #{inspect(reason)}")
+      end
     else
       _ -> :none
     end
   end
 
   defp detect_critical_review_for_url(_), do: :none
+
+  defp fetch_pr_review_verdict(owner, repo, number, url) do
+    fetch_fn =
+      Application.get_env(
+        :symphony_elixir,
+        :pr_review_verdict_artifact_fn,
+        &__MODULE__.default_fetch_pr_review_verdict/4
+      )
+
+    fetch_fn.(owner, repo, number, url)
+  end
+
+  @doc false
+  @spec default_fetch_pr_review_verdict(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, map()} | :missing | {:error, term()}
+  def default_fetch_pr_review_verdict(owner, repo, number, url) do
+    with {:ok, rollup} <- fetch_status_rollup_entries(owner, repo, number, url),
+         {:ok, run_id} <- review_workflow_run_id(rollup),
+         {:ok, artifact_id} <- review_verdict_artifact_id(owner, repo, run_id),
+         {:ok, payload} <- download_review_verdict_artifact(owner, repo, artifact_id) do
+      {:ok, payload}
+    else
+      :missing -> :missing
+      {:error, reason} when reason in [:artifact_download_failed, :malformed_artifact_zip] -> {:error, reason}
+      {:error, _} -> :missing
+    end
+  end
+
+  defp fetch_status_rollup_entries(owner, repo, number, url) do
+    case System.cmd(
+           "gh",
+           ["pr", "view", number, "--repo", "#{owner}/#{repo}", "--json", "statusCheckRollup"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        case Jason.decode(output) do
+          {:ok, %{"statusCheckRollup" => entries}} when is_list(entries) -> {:ok, entries}
+          _ -> {:error, :malformed_status_rollup}
+        end
+
+      {output, code} ->
+        Logger.debug("gh pr view statusCheckRollup failed for review verdict #{url} exit=#{code} output=#{inspect(output)}")
+        {:error, :status_rollup_failed}
+    end
+  end
+
+  defp review_workflow_run_id(entries) do
+    entries
+    |> Enum.filter(&review_check_run?/1)
+    |> Enum.sort_by(&check_started_at/1, :desc)
+    |> Enum.find_value(:missing, &run_id_from_details_url/1)
+    |> case do
+      :missing -> :missing
+      run_id -> {:ok, run_id}
+    end
+  end
+
+  defp review_check_run?(entry) when is_map(entry) do
+    check_name = String.downcase(to_string(entry["name"] || entry["context"] || ""))
+    workflow_name = String.downcase(to_string(entry["workflowName"] || entry["workflow_name"] || ""))
+
+    String.contains?(check_name, "claude-pr-review") or
+      String.contains?(workflow_name, "claude-pr-review")
+  end
+
+  defp review_check_run?(_), do: false
+
+  defp check_started_at(%{"startedAt" => at}) when is_binary(at), do: at
+  defp check_started_at(%{"started_at" => at}) when is_binary(at), do: at
+  defp check_started_at(_), do: ""
+
+  defp run_id_from_details_url(%{"detailsUrl" => url}) when is_binary(url) do
+    parse_workflow_run_id(url)
+  end
+
+  defp run_id_from_details_url(%{"details_url" => url}) when is_binary(url) do
+    parse_workflow_run_id(url)
+  end
+
+  defp run_id_from_details_url(_), do: false
+
+  defp parse_workflow_run_id(url) do
+    case Regex.run(~r{/actions/runs/(\d+)}, url) do
+      [_, run_id] -> run_id
+      _ -> false
+    end
+  end
+
+  defp review_verdict_artifact_id(owner, repo, run_id) do
+    path = "/repos/#{owner}/#{repo}/actions/runs/#{run_id}/artifacts?name=claude-pr-review-verdict"
+
+    case System.cmd("gh", ["api", path], stderr_to_stdout: true) do
+      {output, 0} ->
+        case Jason.decode(output) do
+          {:ok, %{"artifacts" => [%{"id" => artifact_id} | _]}} -> {:ok, to_string(artifact_id)}
+          {:ok, %{"artifacts" => []}} -> :missing
+          _ -> {:error, :malformed_artifact_list}
+        end
+
+      {output, code} ->
+        Logger.debug("gh api artifact list failed for #{owner}/#{repo} run=#{run_id} exit=#{code} output=#{inspect(output)}")
+        {:error, :artifact_list_failed}
+    end
+  end
+
+  defp download_review_verdict_artifact(owner, repo, artifact_id) do
+    tmp_dir = Path.join(System.tmp_dir!(), "symphony-review-verdict-#{System.unique_integer([:positive])}")
+    zip_path = Path.join(tmp_dir, "artifact.zip")
+
+    try do
+      with :ok <- File.mkdir_p(tmp_dir),
+           {_, 0} <-
+             System.cmd(
+               "gh",
+               [
+                 "api",
+                 "/repos/#{owner}/#{repo}/actions/artifacts/#{artifact_id}/zip",
+                 "--output",
+                 zip_path
+               ],
+               stderr_to_stdout: true
+             ),
+           {:ok, _files} <- :zip.extract(String.to_charlist(zip_path), cwd: String.to_charlist(tmp_dir)),
+           {:ok, json} <- File.read(Path.join(tmp_dir, "claude-pr-review-verdict.json")),
+           {:ok, payload} <- Jason.decode(json) do
+        {:ok, payload}
+      else
+        {output, code} when is_integer(code) ->
+          Logger.debug("gh api artifact download failed for #{owner}/#{repo} artifact=#{artifact_id} exit=#{code} output=#{inspect(output)}")
+          {:error, :artifact_download_failed}
+
+        {:error, _reason} ->
+          {:error, :malformed_artifact_zip}
+      end
+    after
+      File.rm_rf(tmp_dir)
+    end
+  end
 
   defp fetch_head_meta(owner, repo, number, url) do
     case System.cmd(
@@ -363,6 +506,34 @@ defmodule SymphonyElixir.GitHubPr do
   end
 
   def critical_review_from_comments(_, _, _), do: :none
+
+  @doc """
+  Pure decision over a decoded `claude-pr-review-verdict.json` artifact.
+
+  A present artifact is authoritative. Malformed, stale, or internally
+  inconsistent artifacts map to a blocking `unknown` result; only a missing
+  artifact falls back to PR comment parsing at the caller.
+  """
+  @spec critical_review_from_structured_verdict(map() | term(), String.t()) ::
+          critical_review_result()
+  def critical_review_from_structured_verdict(payload, head_sha) when is_binary(head_sha) do
+    case ReviewVerdict.evaluate(payload, head_sha) do
+      {:blocking, info} -> {:critical, info}
+      {:unknown, reason} -> unknown_review_result(head_sha, reason)
+      :clear -> :none
+    end
+  end
+
+  def critical_review_from_structured_verdict(_, _), do: :none
+
+  defp unknown_review_result(head_sha, reason) do
+    {:critical,
+     %{
+       count: 0,
+       items: ["claude-pr-review structured verdict is unknown: #{reason}"],
+       head_sha: head_sha
+     }}
+  end
 
   defp critical_review_from_comment(comment, head_sha, head_committed_at) do
     if fresh_enough?(comment, head_committed_at) do
