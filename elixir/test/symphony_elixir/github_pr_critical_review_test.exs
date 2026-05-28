@@ -6,7 +6,7 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
   The five fixtures in `critical_review_from_comments/3` are the contract:
     - critical-against-HEAD       → {:critical, ...}
     - critical-against-older-commit → :none  (stale review, predates current HEAD)
-    - importants-only             → :none  (verdict is request_changes but 0 critical)
+    - importants-only             → {:critical, ...}  (the verdict is still request_changes)
     - suggestions-only            → :none  (verdict is "comment", not request_changes)
     - no-review-yet               → :none  (no workflow-bot verdict comment present)
 
@@ -43,7 +43,7 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
       assert Enum.any?(items, &String.contains?(&1, "pr-test-analyzer"))
     end
 
-    test "returns :none for request_changes verdict with 0 critical issues" do
+    test "returns {:request_changes, 0, []} for request_changes verdict with 0 critical issues" do
       body = """
       # claude-pr-review: request_changes
 
@@ -53,7 +53,7 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
       - some: important
       """
 
-      assert GitHubPr.parse_critical_review_body(body) == :none
+      assert GitHubPr.parse_critical_review_body(body) == {:request_changes, 0, []}
     end
 
     test "returns :none for 'comment' verdict (suggestions only)" do
@@ -147,7 +147,7 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
                :none
     end
 
-    test "fixture 3: importants-only → :none (zero critical)" do
+    test "fixture 3: importants-only → {:critical, ...} because verdict is request_changes" do
       comments = [
         %{
           "body" => """
@@ -165,8 +165,8 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
         }
       ]
 
-      assert GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at) ==
-               :none
+      assert {:critical, %{count: 0, items: [], head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at)
     end
 
     test "fixture 4: suggestions-only → :none (verdict is 'comment')" do

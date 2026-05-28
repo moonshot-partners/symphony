@@ -210,6 +210,10 @@ defmodule SymphonyElixir.GitHubPr do
   `{:critical, info}` carries the `count`, `items`, and `head_sha` so the
   caller can dedup auto-engagement attempts by `(pr_url, commit_sha)` per
   SYM-16 §3.3 and post a meaningful workpad comment.
+
+  Historical name note: this covers any fresh `claude-pr-review:
+  request_changes` verdict. Some review runs report `Critical Issues (0)` but
+  still use the blocking verdict for important issues.
   """
   @type critical_review_result ::
           {:critical, %{count: non_neg_integer(), items: [String.t()], head_sha: String.t()}}
@@ -218,10 +222,9 @@ defmodule SymphonyElixir.GitHubPr do
   @doc """
   Returns `{:critical, %{count: n, items: list, head_sha: sha}}` when the latest
   `claude-pr-review` verdict comment on any of the issue's PRs is
-  `request_changes` with at least one Critical Issue and is fresher than the
-  PR's HEAD commit. Returns `:none` otherwise (including when no PR is
-  attached, the latest verdict is `approve` / `comment`, the verdict has zero
-  criticals, or the verdict predates the current HEAD — i.e. a new commit was
+  `request_changes` and is fresher than the PR's HEAD commit. Returns `:none`
+  otherwise (including when no PR is attached, the latest verdict is `approve` /
+  `comment`, or the verdict predates the current HEAD — i.e. a new commit was
   pushed since the review ran).
 
   Tests inject a pure function via
@@ -338,8 +341,8 @@ defmodule SymphonyElixir.GitHubPr do
 
   @doc """
   Pure decision over a list of PR comments. Returns `{:critical, info}` when
-  the most-recent workflow-bot verdict comment is `request_changes` with at
-  least one Critical Issue and was posted at/after `head_committed_at` (or
+  the most-recent workflow-bot verdict comment is `request_changes` and was
+  posted at/after `head_committed_at` (or
   when `head_committed_at` is nil — a conservative fallback that prefers
   flagging over silence). Returns `:none` otherwise.
 
@@ -368,7 +371,7 @@ defmodule SymphonyElixir.GitHubPr do
           {:critical, %{count: count, items: items, head_sha: head_sha}}
 
         :none ->
-          # Latest verdict explicitly clears the alarm (approve / comment / zero critical).
+          # Latest verdict explicitly clears the alarm (approve / comment).
           :none
       end
     end
@@ -405,10 +408,9 @@ defmodule SymphonyElixir.GitHubPr do
 
   @doc """
   Pure parser: extracts the `claude-pr-review` verdict + Critical Issues count
-  from a comment body. Returns `{:request_changes, count, items}` only when
-  the verdict is `request_changes` AND the count is > 0. Returns `:none` for
-  every other shape (nil body, no header, `approve`, `comment`, zero
-  criticals).
+  from a comment body. Returns `{:request_changes, count, items}` when the
+  verdict is `request_changes`, including `Critical Issues (0)`. Returns
+  `:none` for every other shape (nil body, no header, `approve`, `comment`).
   """
   @spec parse_critical_review_body(String.t() | nil) ::
           {:request_changes, non_neg_integer(), [String.t()]} | :none
@@ -419,7 +421,7 @@ defmodule SymphonyElixir.GitHubPr do
     with [_, verdict] <- Regex.run(~r/^# claude-pr-review:\s*(\w+)/m, body),
          "request_changes" <- verdict,
          [_, count_str] <- Regex.run(~r/^##\s+Critical Issues\s+\((\d+)\)/m, body),
-         {count, ""} when count > 0 <- Integer.parse(count_str) do
+         {count, ""} <- Integer.parse(count_str) do
       {:request_changes, count, extract_critical_items(body)}
     else
       _ -> :none

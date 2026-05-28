@@ -228,11 +228,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     items = Map.get(info, :items, [])
 
     """
-    Auto re-engaging agent — claude-pr-review flagged #{count} critical issue(s).
+    Auto re-engaging agent — claude-pr-review requested changes#{critical_count_suffix(count)}.
 
     #{format_items(items)}
 
-    Counter K=1: this is the only automatic re-engagement that will fire on this PR. Next critical verdict on the same PR will park the issue for human review.
+    Counter K=1: this is the only automatic re-engagement that will fire on this PR. Next request_changes verdict on the same PR will park the issue for human review.
     """
   end
 
@@ -242,7 +242,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     items = Map.get(info, :items, [])
 
     """
-    Cap reached (K=1) — claude-pr-review still flagging #{count} critical issue(s) on commit `#{head_sha}`.
+    Cap reached (K=1) — claude-pr-review still requests changes#{critical_count_suffix(count)} on commit `#{head_sha}`.
 
     #{format_items(items)}
 
@@ -255,4 +255,9 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
   defp format_items(items) when is_list(items) do
     Enum.map_join(items, "\n", fn item -> "- " <> to_string(item) end)
   end
+
+  defp critical_count_suffix(count) when is_integer(count) and count > 0,
+    do: " (#{count} critical issue(s))"
+
+  defp critical_count_suffix(_), do: " (0 critical issues; see the PR review comment)"
 end
