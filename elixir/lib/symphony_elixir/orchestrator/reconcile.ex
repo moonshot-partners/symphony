@@ -150,27 +150,74 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
   end
 
   defp reconcile_ready_pr(%State{} = state, %Issue{} = issue, terminate_fn, pr_sync_fn) do
-    if critical_review_pending?(issue) do
-      emit_decision(issue, "pr_ready_with_critical_review", "refresh")
+    case critical_review_result(issue) do
+      {:critical, info} ->
+        if already_auto_reengaged?(state, issue, info) do
+          emit_decision(issue, "pr_ready_with_critical_review_after_reengagement", "pr_sync+terminate")
 
-      Logger.info("Issue has a ready PR attachment but claude-pr-review requested changes: #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
+          Logger.info(
+            "Issue has a ready PR attachment with claude-pr-review request_changes after auto re-engagement: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent so PrReengagement can enforce K=1 cap"
+          )
 
-      refresh_running_issue_state(state, issue)
-    else
-      emit_decision(issue, "pr_ready_short_circuit", "pr_sync+terminate")
-      Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
+          state
+          |> refresh_running_issue_state(issue)
+          |> pr_sync_fn.(issue.id)
+          |> terminate_fn.(issue.id, true)
+          |> mark_completed(issue.id)
+        else
+          emit_decision(issue, "pr_ready_with_critical_review", "refresh")
 
-      state
-      |> refresh_running_issue_state(issue)
-      |> pr_sync_fn.(issue.id)
-      |> terminate_fn.(issue.id, true)
-      |> mark_completed(issue.id)
+          Logger.info("Issue has a ready PR attachment but claude-pr-review requested changes: #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping agent running")
+
+          refresh_running_issue_state(state, issue)
+        end
+
+      _ ->
+        emit_decision(issue, "pr_ready_short_circuit", "pr_sync+terminate")
+        Logger.info("Issue has a ready PR attachment (MERGED or OPEN+CI-green): #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent without retry")
+
+        state
+        |> refresh_running_issue_state(issue)
+        |> pr_sync_fn.(issue.id)
+        |> terminate_fn.(issue.id, true)
+        |> mark_completed(issue.id)
     end
   end
 
-  defp critical_review_pending?(%Issue{} = issue) do
-    match?({:critical, _}, GitHubPr.critical_review_pending?(issue))
+  defp critical_review_result(%Issue{} = issue) do
+    GitHubPr.critical_review_pending?(issue)
   end
+
+  defp already_auto_reengaged?(%State{} = state, %Issue{} = issue, info) when is_map(info) do
+    issue
+    |> review_pr_urls(info)
+    |> Enum.any?(fn pr_url ->
+      case Map.get(state.pr_engagements, pr_url) do
+        %{count: count} when is_integer(count) and count >= 1 -> true
+        _ -> false
+      end
+    end)
+  end
+
+  defp review_pr_urls(%Issue{} = issue, info) do
+    info_pr_url =
+      case Map.get(info, :pr_url) do
+        url when is_binary(url) -> [url]
+        _ -> []
+      end
+
+    (info_pr_url ++ pr_urls_for(issue))
+    |> Enum.uniq()
+  end
+
+  defp pr_urls_for(%Issue{repos: repos}) when is_list(repos) do
+    Enum.flat_map(repos, fn
+      %{pr: %{url: url}} when is_binary(url) -> [url]
+      _ -> []
+    end)
+  end
+
+  defp pr_urls_for(_), do: []
 
   defp mark_completed(%State{} = state, issue_id) when is_binary(issue_id) do
     %{state | completed: MapSet.put(state.completed, issue_id)}

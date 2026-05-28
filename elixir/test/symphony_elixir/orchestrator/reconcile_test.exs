@@ -168,6 +168,43 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       refute MapSet.member?(result.completed, "issue-1")
     end
 
+    test "ready PR attachment with critical review after auto reengagement completes so cap loop can park it" do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+
+      fe_pr_url = "https://github.com/schoolsoutapp/fe-next-app/pull/617"
+      rails_pr_url = "https://github.com/schoolsoutapp/schools-out/pull/936"
+
+      Application.put_env(:symphony_elixir, :pr_critical_review_fn, fn _issue ->
+        {:critical, %{count: 5, items: ["still broken"], head_sha: "sha-2", pr_url: fe_pr_url}}
+      end)
+
+      issue =
+        build_issue(
+          has_pr_attachment: true,
+          repos: [
+            %{name: "schools-out", pr: %{url: rails_pr_url}},
+            %{name: "fe-next-app", pr: %{url: fe_pr_url}}
+          ]
+        )
+
+      state =
+        issue
+        |> running_state()
+        |> Map.put(:pr_engagements, %{fe_pr_url => %{count: 1, cap_hit_shas: MapSet.new()}})
+
+      result =
+        Reconcile.run(state, %{
+          terminate_fn: record_terminate(self()),
+          pr_sync_fn: record_pr_sync(self()),
+          fetch_fn: fn _ids -> {:ok, [issue]} end
+        })
+
+      assert_received {:pr_sync, "issue-1"}
+      assert_received {:terminate, "issue-1", true}
+      refute Map.has_key?(result.running, "issue-1")
+      assert MapSet.member?(result.completed, "issue-1")
+    end
+
     test "ready PR attachment refreshes cached issue before terminate" do
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
