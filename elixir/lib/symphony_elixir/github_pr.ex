@@ -261,7 +261,7 @@ defmodule SymphonyElixir.GitHubPr do
     |> Enum.find_value(:none, fn url ->
       case detect_critical_review_for_url(url) do
         :none -> false
-        {:critical, _info} = hit -> hit
+        {:critical, info} -> {:critical, Map.put_new(info, :pr_url, url)}
       end
     end)
   end
