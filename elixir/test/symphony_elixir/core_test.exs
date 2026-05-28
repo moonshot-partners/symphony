@@ -1,6 +1,11 @@
 defmodule SymphonyElixir.CoreTest do
   use SymphonyElixir.TestSupport
 
+  defmodule FakeDebugBundleUpload do
+    @moduledoc false
+    def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}
+  end
+
   test "config defaults and validation checks" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -285,6 +290,11 @@ defmodule SymphonyElixir.CoreTest do
     workspace = Path.join(test_root, issue_identifier)
 
     Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
+    Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue -> "" end)
+    Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue -> [] end)
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+    Application.put_env(:symphony_elixir, :debug_bundle_upload_module, FakeDebugBundleUpload)
 
     try do
       write_workflow_file!(Workflow.workflow_file_path(),
@@ -341,6 +351,11 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
       Application.delete_env(:symphony_elixir, :pr_ready_fn)
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_body_fn)
+      Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+      Application.delete_env(:symphony_elixir, :debug_bundle_upload_module)
     end
   end
 
@@ -349,6 +364,11 @@ defmodule SymphonyElixir.CoreTest do
     Application.put_env(:symphony_elixir, :workpad_enabled, true)
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
     Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
+    Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue -> "" end)
+    Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue -> [] end)
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+    Application.put_env(:symphony_elixir, :debug_bundle_upload_module, FakeDebugBundleUpload)
 
     test_root =
       Path.join(
@@ -418,6 +438,11 @@ defmodule SymphonyElixir.CoreTest do
       File.rm_rf(test_root)
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
       Application.delete_env(:symphony_elixir, :pr_ready_fn)
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_body_fn)
+      Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+      Application.delete_env(:symphony_elixir, :debug_bundle_upload_module)
 
       case previous_enabled do
         nil -> Application.delete_env(:symphony_elixir, :workpad_enabled)

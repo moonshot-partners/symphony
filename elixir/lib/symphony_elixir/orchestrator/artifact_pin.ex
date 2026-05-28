@@ -1,18 +1,18 @@
 defmodule SymphonyElixir.Orchestrator.ArtifactPin do
   @moduledoc """
-  Pins a section of the agent's turn message as a fixed tracker comment.
+  Captures a section of the agent's turn message into the running entry.
 
   Gate C and Gate D validate the `## AC Extracted` / `## AC Evidence`
   headers against `running_entry.last_agent_text`. Those headers otherwise
   live only in the rolling workpad comment, which is overwritten every
-  turn. This module snapshots the section into a permanent comment,
-  threaded under the workpad comment when available.
+  turn. This module snapshots the section into the persisted running entry
+  so downstream gates and the final debug bundle can read it.
 
   Sourced from the turn text Symphony already holds — no dependency on the
   agent writing a file to a path Symphony has to guess.
 
-  Idempotent per run: each header is pinned at most once. `pin/3` returns
-  the running entry with the pinned header recorded under
+  Idempotent per run: each header is captured at most once. `pin/3` returns
+  the running entry with the captured header recorded under
   `:pinned_artifacts`; the caller must store that entry back into state so
   the next turn sees the marker. A header already in `:pinned_artifacts`,
   or absent from the turn text, is a no-op — callers can invoke it
@@ -20,7 +20,6 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPin do
   """
 
   require Logger
-  alias SymphonyElixir.Tracker
 
   @spec pin(map(), String.t(), String.t()) :: map()
   def pin(running_entry, issue_id, header) do
@@ -33,7 +32,7 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPin do
           running_entry
 
         section ->
-          publish(section, header, running_entry, issue_id)
+          Logger.info("ArtifactPin captured '#{header}' issue=#{Map.get(running_entry, :identifier, issue_id)}")
 
           running_entry
           |> mark_pinned(header)
@@ -75,28 +74,6 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPin do
     case Regex.run(pattern, text) do
       [section] -> String.trim(section)
       nil -> nil
-    end
-  end
-
-  defp publish(section, header, running_entry, issue_id) do
-    identifier = Map.get(running_entry, :identifier, issue_id)
-    parent_id = Map.get(running_entry, :workpad_comment_id)
-    opts = if is_binary(parent_id), do: [parent_id: parent_id], else: []
-
-    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-      publish_comment(issue_id, section, opts, header, identifier)
-    end)
-
-    :ok
-  end
-
-  defp publish_comment(issue_id, body, opts, header, identifier) do
-    case Tracker.create_comment(issue_id, body, opts) do
-      {:ok, comment_id} ->
-        Logger.info("ArtifactPin posted '#{header}' comment=#{comment_id} issue=#{identifier}")
-
-      {:error, reason} ->
-        Logger.warning("ArtifactPin post failed header='#{header}' issue=#{identifier} reason=#{inspect(reason)}")
     end
   end
 end
