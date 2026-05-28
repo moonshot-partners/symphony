@@ -60,6 +60,24 @@ defmodule SymphonyElixir.OrchestratorDrainTest do
       assert Enum.sort(decoded["running"]) == ["SODEV-1", "SODEV-2"]
     end
 
+    test "writes resumable completed ids and PR engagement counters", ctx do
+      %{drain_flag: drain_flag, status: status} = paths(ctx)
+      pr_url = "https://github.com/org/repo/pull/1"
+
+      state = %State{
+        running: %{},
+        drain: false,
+        completed: MapSet.new(["issue-done"]),
+        pr_engagements: %{pr_url => %{count: 1, cap_hit_shas: MapSet.new(["sha-1"])}}
+      }
+
+      Orchestrator.sync_drain_status_for_test(state, status, drain_flag)
+
+      decoded = status |> File.read!() |> Jason.decode!()
+      assert decoded["completed"] == ["issue-done"]
+      assert decoded["pr_engagements"][pr_url] == %{"count" => 1, "cap_hit_shas" => ["sha-1"]}
+    end
+
     test "status file reflects empty running map", ctx do
       %{drain_flag: drain_flag, status: status} = paths(ctx)
       state = %State{running: %{}, drain: false}
@@ -67,7 +85,10 @@ defmodule SymphonyElixir.OrchestratorDrainTest do
       Orchestrator.sync_drain_status_for_test(state, status, drain_flag)
 
       decoded = status |> File.read!() |> Jason.decode!()
-      assert decoded == %{"drain" => false, "running" => []}
+      assert decoded["drain"] == false
+      assert decoded["running"] == []
+      assert decoded["completed"] == []
+      assert decoded["pr_engagements"] == %{}
     end
   end
 

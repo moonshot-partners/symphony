@@ -66,6 +66,7 @@ defmodule SymphonyElixir.Orchestrator do
   def init(_opts) do
     now_ms = System.monotonic_time(:millisecond)
     config = Config.settings!()
+    runtime_state = StatusFile.load_runtime_state(status_path())
 
     state = %State{
       poll_interval_ms: config.polling.interval_ms,
@@ -76,7 +77,9 @@ defmodule SymphonyElixir.Orchestrator do
       tick_token: nil,
       workpads: WorkpadStore.load(workpads_path()),
       agent_totals: @empty_agent_totals,
-      agent_rate_limits: nil
+      agent_rate_limits: nil,
+      completed: runtime_state.completed,
+      pr_engagements: runtime_state.pr_engagements
     }
 
     WorkspaceCleanup.run_terminal()
@@ -114,7 +117,14 @@ defmodule SymphonyElixir.Orchestrator do
     end
 
     new_state = %{state | drain: drain}
-    StatusFile.save(status_path, %{running: Map.keys(new_state.running), drain: drain})
+
+    StatusFile.save(status_path, %{
+      running: Map.keys(new_state.running),
+      drain: drain,
+      completed: new_state.completed,
+      pr_engagements: new_state.pr_engagements
+    })
+
     new_state
   end
 
