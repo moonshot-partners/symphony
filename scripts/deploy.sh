@@ -53,6 +53,9 @@ if (( SECONDS >= deadline )); then
   log "drain timeout reached — proceeding anyway; systemd TimeoutStopSec is the safety net"
 fi
 
+log "stop symphony before git update"
+sudo systemctl stop symphony
+
 log "git pull"
 cd "$SYMPHONY_DIR"
 git fetch --quiet origin main
