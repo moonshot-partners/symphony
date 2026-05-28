@@ -14,7 +14,7 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
   use SymphonyElixir.TestSupport
 
   defp start_orchestrator(name) do
-    {:ok, pid} = Orchestrator.start_link(name: name)
+    {:ok, pid} = Orchestrator.start_link(name: name, schedule_initial_tick: false)
 
     on_exit(fn ->
       if Process.alive?(pid), do: Process.exit(pid, :normal)

@@ -63,7 +63,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     now_ms = System.monotonic_time(:millisecond)
     config = Config.settings!()
     runtime_state = StatusFile.load_runtime_state(status_path())
@@ -83,7 +83,13 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     WorkspaceCleanup.run_terminal()
-    state = TickScheduler.schedule_tick(state, 0, self())
+
+    state =
+      if Keyword.get(opts, :schedule_initial_tick, true) do
+        TickScheduler.schedule_tick(state, 0, self())
+      else
+        state
+      end
 
     {:ok, state}
   end
