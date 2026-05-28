@@ -3,9 +3,9 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
   SYM-16 auto re-engagement loop, capped at K=1 per PR.
 
   `run/2` walks `state.completed`, refreshes the issue payloads through
-  the injected `:issue_fetch_fn`, and for each issue that carries a
-  fresh `claude-pr-review: request_changes` verdict on its PR (decided
-  by the injected `:detector_fn`) it either:
+  the injected `:issue_fetch_fn`, and for each issue that carries fresh
+  blocking PR-review feedback on its PR (decided by the injected
+  `:detector_fn`) it either:
 
     * DISPATCH (count == 0) — increments `state.pr_engagements[pr_url].count`
       to 1, removes the id from `state.completed`, transitions the issue
@@ -228,11 +228,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     items = Map.get(info, :items, [])
 
     """
-    Auto re-engaging agent — claude-pr-review requested changes#{critical_count_suffix(count)}.
+    Auto re-engaging agent — PR review gate requested changes#{critical_count_suffix(count)}.
 
     #{format_items(items)}
 
-    Counter K=1: this is the only automatic re-engagement that will fire on this PR. Next request_changes verdict on the same PR will park the issue for human review.
+    Counter K=1: this is the only automatic re-engagement that will fire on this PR. Next blocking verdict on the same PR will park the issue for human review.
     """
   end
 
@@ -242,7 +242,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     items = Map.get(info, :items, [])
 
     """
-    Cap reached (K=1) — claude-pr-review still requests changes#{critical_count_suffix(count)} on commit `#{head_sha}`.
+    Cap reached (K=1) — PR review gate still requests changes#{critical_count_suffix(count)} on commit `#{head_sha}`.
 
     #{format_items(items)}
 

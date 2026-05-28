@@ -212,9 +212,10 @@ defmodule SymphonyElixir.GitHubPr do
   caller can dedup auto-engagement attempts by `(pr_url, commit_sha)` per
   SYM-16 §3.3 and post a meaningful workpad comment.
 
-  Historical name note: this covers any fresh `claude-pr-review:
-  request_changes` verdict. Some review runs report `Critical Issues (0)` but
-  still use the blocking verdict for important issues.
+  Historical name note: this covers any fresh blocking PR-review verdict. Some
+  `claude-pr-review` runs report `Critical Issues (0)` but still use the
+  blocking verdict for important issues; `scope-discipline: FAIL` comments are
+  also blocking until a fresher PASS or a new commit clears them.
   """
   @type critical_review_result ::
           {:critical, %{count: non_neg_integer(), items: [String.t()], head_sha: String.t()}}
@@ -222,11 +223,10 @@ defmodule SymphonyElixir.GitHubPr do
 
   @doc """
   Returns `{:critical, %{count: n, items: list, head_sha: sha}}` when the latest
-  `claude-pr-review` verdict comment on any of the issue's PRs is
-  `request_changes` and is fresher than the PR's HEAD commit. Returns `:none`
-  otherwise (including when no PR is attached, the latest verdict is `approve` /
-  `comment`, or the verdict predates the current HEAD — i.e. a new commit was
-  pushed since the review ran).
+  blocking PR-review verdict comment on any of the issue's PRs is fresher than
+  the PR's HEAD commit. Returns `:none` otherwise (including when no PR is
+  attached, the latest verdict is clear/pass, or the verdict predates the
+  current HEAD — i.e. a new commit was pushed since the review ran).
 
   Tests inject a pure function via
   `Application.put_env(:symphony_elixir, :pr_critical_review_fn, fn issue -> result end)`.
@@ -484,15 +484,15 @@ defmodule SymphonyElixir.GitHubPr do
 
   @doc """
   Pure decision over a list of PR comments. Returns `{:critical, info}` when
-  the most-recent workflow-bot verdict comment is `request_changes` and was
-  posted at/after `head_committed_at` (or
-  when `head_committed_at` is nil — a conservative fallback that prefers
-  flagging over silence). Returns `:none` otherwise.
+  the most-recent workflow-bot verdict comment is blocking and was posted
+  at/after `head_committed_at` (or when `head_committed_at` is nil — a
+  conservative fallback that prefers flagging over silence). Returns `:none`
+  otherwise.
 
   Comments are expected to be a list of maps with `"body"` plus a GitHub
   timestamp key (`"created_at"`, `"createdAt"`, or `"submittedAt"`).
-  Comments whose body does NOT contain `# claude-pr-review:` are ignored; the
-  latest matching verdict wins (an `approve` posted after a `request_changes`
+  Comments whose body does NOT contain a known verdict prefix are ignored; the
+  latest matching verdict wins (an `approve` or `PASS` posted after a failure
   correctly clears the alarm).
   """
   @spec critical_review_from_comments([map()], String.t(), DateTime.t() | nil) ::
@@ -542,14 +542,15 @@ defmodule SymphonyElixir.GitHubPr do
           {:critical, %{count: count, items: items, head_sha: head_sha}}
 
         :none ->
-          # Latest verdict explicitly clears the alarm (approve / comment).
+          # Latest verdict explicitly clears the alarm (approve / comment / pass).
           :none
       end
     end
   end
 
   defp verdict_comment?(%{"body" => body}) when is_binary(body) do
-    String.contains?(body, "# claude-pr-review:")
+    String.contains?(body, "# claude-pr-review:") or
+      String.contains?(body, "scope-discipline:")
   end
 
   defp verdict_comment?(_), do: false
@@ -589,13 +590,26 @@ defmodule SymphonyElixir.GitHubPr do
   def parse_critical_review_body(""), do: :none
 
   def parse_critical_review_body(body) when is_binary(body) do
+    parse_claude_pr_review_body(body) || parse_scope_discipline_body(body) || :none
+  end
+
+  defp parse_claude_pr_review_body(body) do
     with [_, verdict] <- Regex.run(~r/^# claude-pr-review:\s*(\w+)/m, body),
          "request_changes" <- verdict,
          [_, count_str] <- Regex.run(~r/^##\s+Critical Issues\s+\((\d+)\)/m, body),
          {count, ""} <- Integer.parse(count_str) do
       {:request_changes, count, extract_critical_items(body)}
     else
-      _ -> :none
+      _ -> nil
+    end
+  end
+
+  defp parse_scope_discipline_body(body) do
+    with [_, count_str] <- Regex.run(~r/^scope-discipline:\s*FAIL\s*-\s*(\d+)\s+violation/m, body),
+         {count, ""} when count > 0 <- Integer.parse(count_str) do
+      {:request_changes, count, extract_scope_discipline_items(body)}
+    else
+      _ -> nil
     end
   end
 
@@ -612,6 +626,12 @@ defmodule SymphonyElixir.GitHubPr do
       _ ->
         []
     end
+  end
+
+  defp extract_scope_discipline_items(body) do
+    body
+    |> String.split("\n", trim: true)
+    |> Enum.filter(&String.starts_with?(&1, "- "))
   end
 
   defp pr_urls(%{repos: repos}) when is_list(repos) do
