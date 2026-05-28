@@ -35,8 +35,12 @@ defmodule SymphonyElixir.AgentRunnerStalePrContinuationTest do
     test "returns :continue when all attached PRs are closed-not-merged" do
       configure_active_states()
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
 
-      on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_ready_fn) end)
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :pr_ready_fn)
+        Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      end)
 
       issue = make_issue()
       assert AgentRunner.continuation_decision_for_test(issue) == :continue
