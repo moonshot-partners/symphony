@@ -206,6 +206,39 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       assert MapSet.member?(result.completed, "issue-1")
     end
 
+    test "multi-repo PR attachment stays active until every attached PR is ready" do
+      rails_pr_url = "https://github.com/schoolsoutapp/schools-out/pull/936"
+      fe_pr_url = "https://github.com/schoolsoutapp/fe-next-app/pull/617"
+
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn
+        ^rails_pr_url -> true
+        ^fe_pr_url -> false
+      end)
+
+      issue =
+        build_issue(
+          has_pr_attachment: true,
+          repos: [
+            %{name: "schools-out", pr: %{url: rails_pr_url}},
+            %{name: "fe-next-app", pr: %{url: fe_pr_url}}
+          ]
+        )
+
+      state = running_state(issue)
+
+      result =
+        Reconcile.run(state, %{
+          terminate_fn: record_terminate(self()),
+          pr_sync_fn: record_pr_sync(self()),
+          fetch_fn: fn _ids -> {:ok, [issue]} end
+        })
+
+      refute_received {:pr_sync, "issue-1"}
+      refute_received {:terminate, "issue-1", true}
+      assert Map.has_key?(result.running, "issue-1")
+      refute MapSet.member?(result.completed, "issue-1")
+    end
+
     test "ready PR attachment refreshes cached issue before terminate" do
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 

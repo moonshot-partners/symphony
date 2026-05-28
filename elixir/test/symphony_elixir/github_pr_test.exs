@@ -115,7 +115,23 @@ defmodule SymphonyElixir.GitHubPrTest do
       assert GitHubPr.ready?(issue) == false
     end
 
-    test "short-circuits on first ready PR" do
+    test "returns false when only one of multiple attached PRs is ready" do
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn
+        "https://github.com/org/repo/pull/1" -> true
+        "https://github.com/org/repo/pull/2" -> false
+      end)
+
+      issue = %{
+        repos: [
+          %{name: "schools-out", pr: %{url: "https://github.com/org/repo/pull/1"}},
+          %{name: "fe-next-app", pr: %{url: "https://github.com/org/repo/pull/2"}}
+        ]
+      }
+
+      assert GitHubPr.ready?(issue) == false
+    end
+
+    test "checks every attached PR before returning true" do
       pid = self()
 
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn url ->
@@ -132,7 +148,7 @@ defmodule SymphonyElixir.GitHubPrTest do
 
       assert GitHubPr.ready?(issue) == true
       assert_receive {:checked, "https://github.com/org/repo/pull/1"}
-      refute_receive {:checked, "https://github.com/org/repo/pull/2"}, 50
+      assert_receive {:checked, "https://github.com/org/repo/pull/2"}
     end
   end
 

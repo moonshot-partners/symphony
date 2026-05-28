@@ -30,9 +30,13 @@ defmodule SymphonyElixir.GitHubPr do
   @github_pr_regex ~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}
 
   @doc """
-  Returns true if any of the issue's attached GitHub PRs is ready
-  (MERGED, or OPEN with all CI checks green). Returns false otherwise,
-  including when no PR URLs are attached.
+  Returns true only when every attached GitHub PR is ready (MERGED, or OPEN
+  with all CI checks green). Returns false otherwise, including when no PR
+  URLs are attached.
+
+  Multi-repo issues are not complete until every attached PR is ready. Treating
+  "any ready PR" as complete lets a green backend PR mask a pending frontend PR,
+  which can stop the agent before the actual changed repo clears review/CI.
 
   When `gh` cannot answer for a URL (network failure, missing auth, pending
   checks), the URL resolves to NOT ready. The agent keeps running on
@@ -41,9 +45,10 @@ defmodule SymphonyElixir.GitHubPr do
   """
   @spec ready?(SymphonyElixir.Linear.Issue.t() | map()) :: boolean()
   def ready?(issue) do
-    issue
-    |> pr_urls()
-    |> Enum.any?(&ready_url?/1)
+    case pr_urls(issue) do
+      [] -> false
+      urls -> Enum.all?(urls, &ready_url?/1)
+    end
   end
 
   @doc """
