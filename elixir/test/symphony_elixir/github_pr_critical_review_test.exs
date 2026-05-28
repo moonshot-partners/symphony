@@ -18,6 +18,7 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
   use ExUnit.Case, async: true
 
   alias SymphonyElixir.GitHubPr
+  alias SymphonyElixir.GitHubPr.ReviewVerdict
 
   describe "parse_critical_review_body/1" do
     test "returns {:request_changes, n, items} for verdict with critical issues" do
@@ -318,6 +319,195 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
 
       assert {:critical, %{count: 1, head_sha: @head_sha}} =
                GitHubPr.critical_review_from_comments(comments, @head_sha, nil)
+    end
+  end
+
+  describe "critical_review_from_structured_verdict/2" do
+    @head_sha "30422a3b239044561c73e9229dbc9a5a86651dfb"
+
+    defp verdict(overrides) do
+      Map.merge(
+        %{
+          "schema_version" => 1,
+          "verdict" => "approve",
+          "blocking" => false,
+          "severity_counts" => %{"critical" => 0, "important" => 0, "nit" => 0, "suggestion" => 0},
+          "findings" => [],
+          "repository" => "schoolsoutapp/fe-next-app",
+          "pr_url" => "https://github.com/schoolsoutapp/fe-next-app/pull/616",
+          "pr_number" => 616,
+          "head_sha" => @head_sha,
+          "base_sha" => "base-sha",
+          "workflow_run_id" => "123",
+          "workflow_job_id" => "456",
+          "source" => "claude-pr-review",
+          "generated_at" => "2026-05-28T12:00:00Z"
+        },
+        overrides
+      )
+    end
+
+    test "blocks request_changes from the structured verdict even when critical count is zero" do
+      payload =
+        verdict(%{
+          "verdict" => "request_changes",
+          "blocking" => true,
+          "severity_counts" => %{"critical" => 0, "important" => 1},
+          "findings" => [
+            %{
+              "agent" => "pr-test-analyzer",
+              "severity" => "important",
+              "blocking" => true,
+              "file" => "src/app.ts",
+              "line" => 42,
+              "title" => "missing regression coverage"
+            }
+          ]
+        })
+
+      assert {:critical, %{count: 0, items: [item], head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_structured_verdict(payload, @head_sha)
+
+      assert item =~ "pr-test-analyzer"
+      assert item =~ "src/app.ts:42"
+      assert item =~ "missing regression coverage"
+    end
+
+    test "does not block nit-only comment verdicts" do
+      payload =
+        verdict(%{
+          "verdict" => "comment",
+          "blocking" => false,
+          "severity_counts" => %{"critical" => 0, "nit" => 2},
+          "findings" => [
+            %{"severity" => "nit", "blocking" => false, "title" => "rename local variable"}
+          ]
+        })
+
+      assert GitHubPr.critical_review_from_structured_verdict(payload, @head_sha) == :none
+    end
+
+    test "treats stale artifact sha as unknown and blocking" do
+      payload = verdict(%{"head_sha" => "older-sha"})
+
+      assert {:critical, %{count: 0, items: [item], head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_structured_verdict(payload, @head_sha)
+
+      assert item =~ "stale head_sha"
+    end
+
+    test "treats malformed artifacts as unknown and blocking" do
+      assert {:critical, %{count: 0, items: [item], head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_structured_verdict(%{"verdict" => "approve"}, @head_sha)
+
+      assert item =~ "missing schema_version"
+    end
+
+    test "treats approve with blocking findings as unknown and blocking" do
+      payload =
+        verdict(%{
+          "verdict" => "approve",
+          "blocking" => false,
+          "findings" => [%{"blocking" => true, "title" => "inconsistent blocker"}]
+        })
+
+      assert {:critical, %{items: [item]}} =
+               GitHubPr.critical_review_from_structured_verdict(payload, @head_sha)
+
+      assert item =~ "contains blocking findings"
+    end
+  end
+
+  describe "ReviewVerdict.evaluate/2 edge cases" do
+    @head_sha "30422a3b239044561c73e9229dbc9a5a86651dfb"
+
+    defp artifact(overrides) do
+      Map.merge(
+        %{
+          "schema_version" => 1,
+          "verdict" => "approve",
+          "blocking" => false,
+          "severity_counts" => %{"critical" => 0},
+          "findings" => [],
+          "head_sha" => @head_sha
+        },
+        overrides
+      )
+    end
+
+    test "rejects non-object payloads" do
+      assert ReviewVerdict.evaluate([], @head_sha) == {:unknown, "artifact is not a JSON object"}
+    end
+
+    test "rejects unsupported and missing schema versions" do
+      assert ReviewVerdict.evaluate(artifact(%{"schema_version" => 2}), @head_sha) ==
+               {:unknown, "unsupported schema_version"}
+
+      assert ReviewVerdict.evaluate(Map.delete(artifact(%{}), "schema_version"), @head_sha) ==
+               {:unknown, "missing schema_version"}
+    end
+
+    test "rejects missing head sha" do
+      assert ReviewVerdict.evaluate(Map.delete(artifact(%{}), "head_sha"), @head_sha) ==
+               {:unknown, "missing head_sha"}
+    end
+
+    test "rejects unsupported and missing verdicts" do
+      assert ReviewVerdict.evaluate(artifact(%{"verdict" => "block"}), @head_sha) ==
+               {:unknown, "unsupported verdict"}
+
+      assert ReviewVerdict.evaluate(Map.delete(artifact(%{}), "verdict"), @head_sha) ==
+               {:unknown, "missing verdict"}
+    end
+
+    test "rejects missing blocking, findings, and severity counts" do
+      assert ReviewVerdict.evaluate(Map.delete(artifact(%{}), "blocking"), @head_sha) ==
+               {:unknown, "missing blocking"}
+
+      assert ReviewVerdict.evaluate(Map.delete(artifact(%{}), "findings"), @head_sha) ==
+               {:unknown, "missing findings"}
+
+      assert ReviewVerdict.evaluate(Map.delete(artifact(%{}), "severity_counts"), @head_sha) ==
+               {:unknown, "missing severity_counts"}
+    end
+
+    test "treats unknown verdict as unknown" do
+      assert ReviewVerdict.evaluate(artifact(%{"verdict" => "unknown"}), @head_sha) ==
+               {:unknown, "verdict unknown"}
+    end
+
+    test "rejects request_changes without blocking signal" do
+      payload = artifact(%{"verdict" => "request_changes", "blocking" => false})
+
+      assert ReviewVerdict.evaluate(payload, @head_sha) ==
+               {:unknown, "request_changes without blocking findings"}
+    end
+
+    test "uses blocking finding count when critical severity count is missing" do
+      payload =
+        artifact(%{
+          "verdict" => "request_changes",
+          "blocking" => true,
+          "severity_counts" => %{},
+          "findings" => [
+            %{"blocking" => true, "agent" => "", "file" => "src/app.ts", "title" => ""},
+            %{"blocking" => true, "agent" => "reviewer", "title" => "no location"}
+          ]
+        })
+
+      assert {:blocking, %{count: 2, items: items, head_sha: @head_sha}} =
+               ReviewVerdict.evaluate(payload, @head_sha)
+
+      assert "claude-pr-review: src/app.ts: blocking finding" in items
+      assert "reviewer: no location" in items
+    end
+
+    test "rejects approve or comment verdicts marked blocking" do
+      assert ReviewVerdict.evaluate(artifact(%{"verdict" => "approve", "blocking" => true}), @head_sha) ==
+               {:unknown, "approve verdict marked blocking"}
+
+      assert ReviewVerdict.evaluate(artifact(%{"verdict" => "comment", "blocking" => true}), @head_sha) ==
+               {:unknown, "comment verdict marked blocking"}
     end
   end
 
