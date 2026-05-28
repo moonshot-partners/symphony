@@ -55,6 +55,22 @@ defmodule SymphonyElixir.AgentRunnerStalePrContinuationTest do
       issue = make_issue()
       assert AgentRunner.continuation_decision_for_test(issue) == :done
     end
+
+    test "returns :wait_pr_checks when attached PR is open but CI is still pending" do
+      configure_active_states()
+      Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> false end)
+      Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
+      Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :pending end)
+
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :pr_ready_fn)
+        Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
+        Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      end)
+
+      issue = make_issue()
+      assert AgentRunner.continuation_decision_for_test(issue) == :wait_pr_checks
+    end
   end
 
   describe "continuation_decision_for_test/1 — has_pr_attachment=false" do
