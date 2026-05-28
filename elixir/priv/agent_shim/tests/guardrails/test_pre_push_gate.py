@@ -107,6 +107,31 @@ async def test_failing_tests_deny(tmp_path: Path) -> None:
         os.environ.pop("SYMPHONY_PRE_PUSH_GATE_OVERRIDE_MAKEFILE", None)
 
 
+async def test_makefile_without_test_target_falls_through_to_next_stack(tmp_path: Path) -> None:
+    (tmp_path / "Makefile").write_text("lint:\n\tfalse\n")
+    (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\n")
+    os.environ["SYMPHONY_PRE_PUSH_GATE_OVERRIDE_GEMFILE"] = "true"
+    try:
+        out = await pre_push_gate(
+            _hook_input(tmp_path, "git push origin main"),
+            None,
+            {"signal": None},
+        )
+        assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    finally:
+        os.environ.pop("SYMPHONY_PRE_PUSH_GATE_OVERRIDE_GEMFILE", None)
+
+
+async def test_makefile_without_test_target_does_not_force_make_test(tmp_path: Path) -> None:
+    (tmp_path / "Makefile").write_text("lint:\n\ttrue\n")
+    out = await pre_push_gate(
+        _hook_input(tmp_path, "git push origin main"),
+        None,
+        {"signal": None},
+    )
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
 async def test_real_makefile_target_runs(tmp_path: Path) -> None:
     """Smoke: no override, hook actually shells out to `make test`."""
     (tmp_path / "Makefile").write_text("test:\n\t@true\n")
