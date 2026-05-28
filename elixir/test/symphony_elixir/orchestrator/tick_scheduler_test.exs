@@ -9,6 +9,8 @@ defmodule SymphonyElixir.Orchestrator.TickSchedulerTest do
       max_concurrent_agents: 7
     )
 
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :runtime_config_fn) end)
+
     :ok
   end
 
@@ -73,6 +75,14 @@ defmodule SymphonyElixir.Orchestrator.TickSchedulerTest do
 
       assert refreshed.poll_interval_ms == 12_345
       assert refreshed.max_concurrent_agents == 7
+    end
+
+    test "keeps existing values when config refresh exits" do
+      Application.put_env(:symphony_elixir, :runtime_config_fn, fn -> exit(:timeout) end)
+
+      state = empty_state(%{poll_interval_ms: 98_765, max_concurrent_agents: 3})
+
+      assert ^state = TickScheduler.refresh_runtime_config(state)
     end
   end
 end

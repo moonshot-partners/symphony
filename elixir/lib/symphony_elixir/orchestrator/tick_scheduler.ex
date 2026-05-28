@@ -18,6 +18,8 @@ defmodule SymphonyElixir.Orchestrator.TickScheduler do
   capture `self()` and remains testable with an arbitrary process.
   """
 
+  require Logger
+
   alias SymphonyElixir.Config
   alias SymphonyElixir.Orchestrator.State
 
@@ -66,12 +68,27 @@ defmodule SymphonyElixir.Orchestrator.TickScheduler do
   """
   @spec refresh_runtime_config(State.t()) :: State.t()
   def refresh_runtime_config(%State{} = state) do
-    config = Config.settings!()
+    case runtime_config() do
+      {:ok, config} ->
+        %{
+          state
+          | poll_interval_ms: config.polling.interval_ms,
+            max_concurrent_agents: config.agent.max_concurrent_agents
+        }
 
-    %{
-      state
-      | poll_interval_ms: config.polling.interval_ms,
-        max_concurrent_agents: config.agent.max_concurrent_agents
-    }
+      {:error, reason} ->
+        Logger.warning("TickScheduler: keeping previous runtime config after refresh failure: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp runtime_config do
+    settings_fn = Application.get_env(:symphony_elixir, :runtime_config_fn, &Config.settings!/0)
+
+    try do
+      {:ok, settings_fn.()}
+    catch
+      kind, reason -> {:error, {kind, reason}}
+    end
   end
 end
