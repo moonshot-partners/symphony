@@ -153,17 +153,13 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
     case critical_review_result(issue) do
       {:critical, info} ->
         if already_auto_reengaged?(state, issue, info) do
-          emit_decision(issue, "pr_ready_with_critical_review_after_reengagement", "pr_sync+terminate")
+          emit_decision(issue, "pr_ready_with_critical_review_after_reengagement", "refresh")
 
           Logger.info(
-            "Issue has a ready PR attachment with claude-pr-review request_changes after auto re-engagement: #{RunningEntry.format_context(issue)} state=#{issue.state}; stopping active agent so PrReengagement can enforce K=1 cap"
+            "Issue has a ready PR attachment with claude-pr-review request_changes after auto re-engagement: #{RunningEntry.format_context(issue)} state=#{issue.state}; keeping active agent running for the rework attempt"
           )
 
-          state
-          |> refresh_running_issue_state(issue)
-          |> pr_sync_fn.(issue.id)
-          |> terminate_fn.(issue.id, true)
-          |> mark_completed(issue.id)
+          refresh_running_issue_state(state, issue)
         else
           emit_decision(issue, "pr_ready_with_critical_review", "refresh")
 
