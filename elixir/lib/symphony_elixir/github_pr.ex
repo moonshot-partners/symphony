@@ -338,11 +338,11 @@ defmodule SymphonyElixir.GitHubPr do
   when `head_committed_at` is nil — a conservative fallback that prefers
   flagging over silence). Returns `:none` otherwise.
 
-  Comments are expected to be a list of maps with `"body"` and `"created_at"`
-  keys (the shape returned by `gh api /repos/.../issues/<n>/comments`).
-  Comments whose body does NOT start with `# claude-pr-review:` are ignored;
-  the latest matching verdict wins (an `approve` posted after a
-  `request_changes` correctly clears the alarm).
+  Comments are expected to be a list of maps with `"body"` plus a GitHub
+  timestamp key (`"created_at"`, `"createdAt"`, or `"submittedAt"`).
+  Comments whose body does NOT contain `# claude-pr-review:` are ignored; the
+  latest matching verdict wins (an `approve` posted after a `request_changes`
+  correctly clears the alarm).
   """
   @spec critical_review_from_comments([map()], String.t(), DateTime.t() | nil) ::
           critical_review_result()
@@ -370,19 +370,27 @@ defmodule SymphonyElixir.GitHubPr do
   end
 
   defp verdict_comment?(%{"body" => body}) when is_binary(body) do
-    String.starts_with?(body, "# claude-pr-review:")
+    String.contains?(body, "# claude-pr-review:")
   end
 
   defp verdict_comment?(_), do: false
 
-  defp comment_created_at(%{"created_at" => at}) when is_binary(at) do
+  defp comment_created_at(comment) when is_map(comment) do
+    at = comment["created_at"] || comment["createdAt"] || comment["submittedAt"]
+
+    parse_comment_created_at(at)
+  end
+
+  defp comment_created_at(_), do: ~U[1970-01-01 00:00:00Z]
+
+  defp parse_comment_created_at(at) when is_binary(at) do
     case DateTime.from_iso8601(at) do
       {:ok, dt, _} -> dt
       _ -> ~U[1970-01-01 00:00:00Z]
     end
   end
 
-  defp comment_created_at(_), do: ~U[1970-01-01 00:00:00Z]
+  defp parse_comment_created_at(_), do: ~U[1970-01-01 00:00:00Z]
 
   defp fresh_enough?(_comment, nil), do: true
 

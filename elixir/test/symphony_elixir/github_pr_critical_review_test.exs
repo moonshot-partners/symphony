@@ -258,6 +258,50 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
                GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at)
     end
 
+    test "detects request_changes when GitHub wraps the verdict body" do
+      comments = [
+        %{
+          "body" => """
+          Automated code review (claude-pr-review):
+
+          # claude-pr-review: request_changes
+
+          ## Critical Issues (2)
+          - code-reviewer: real contract gap
+          - pr-test-analyzer: missing mounted-path test
+
+          ## Important Issues (1)
+          - another finding
+          """,
+          "createdAt" => "2026-05-21T14:00:00Z",
+          "user" => %{"login" => "github-actions"}
+        }
+      ]
+
+      assert {:critical, %{count: 2, items: items, head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at)
+
+      assert length(items) == 2
+    end
+
+    test "detects request_changes with review submittedAt timestamp" do
+      comments = [
+        %{
+          "body" => """
+          # claude-pr-review: request_changes
+
+          ## Critical Issues (1)
+          - silent-failure-hunter: review body verdict
+          """,
+          "submittedAt" => "2026-05-21T14:00:00Z",
+          "author" => %{"login" => "github-actions"}
+        }
+      ]
+
+      assert {:critical, %{count: 1, head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at)
+    end
+
     test "nil head_committed_at treats every verdict as fresh (conservative fallback)" do
       comments = [
         %{
