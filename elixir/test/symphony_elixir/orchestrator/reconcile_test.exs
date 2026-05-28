@@ -168,7 +168,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
       refute MapSet.member?(result.completed, "issue-1")
     end
 
-    test "ready PR attachment with critical review after auto reengagement completes so cap loop can park it" do
+    test "ready PR attachment with critical review after auto reengagement stays active for the rework attempt" do
       Application.put_env(:symphony_elixir, :pr_ready_fn, fn _url -> true end)
 
       fe_pr_url = "https://github.com/schoolsoutapp/fe-next-app/pull/617"
@@ -200,10 +200,10 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
           fetch_fn: fn _ids -> {:ok, [issue]} end
         })
 
-      assert_received {:pr_sync, "issue-1"}
-      assert_received {:terminate, "issue-1", true}
-      refute Map.has_key?(result.running, "issue-1")
-      assert MapSet.member?(result.completed, "issue-1")
+      refute_received {:pr_sync, "issue-1"}
+      refute_received {:terminate, "issue-1", true}
+      assert Map.has_key?(result.running, "issue-1")
+      refute MapSet.member?(result.completed, "issue-1")
     end
 
     test "multi-repo PR attachment stays active until every attached PR is ready" do
