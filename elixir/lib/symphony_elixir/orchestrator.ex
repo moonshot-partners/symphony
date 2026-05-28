@@ -83,13 +83,7 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     WorkspaceCleanup.run_terminal()
-
-    state =
-      if Keyword.get(opts, :schedule_initial_tick, true) do
-        TickScheduler.schedule_tick(state, 0, self())
-      else
-        state
-      end
+    state = if Keyword.get(opts, :schedule_initial_tick, true), do: TickScheduler.schedule_tick(state, 0, self()), else: state
 
     {:ok, state}
   end
