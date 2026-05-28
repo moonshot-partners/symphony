@@ -88,6 +88,24 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
       assert GitHubPr.parse_critical_review_body(body) == :none
     end
 
+    test "returns {:request_changes, n, items} for scope-discipline FAIL comments" do
+      body = """
+      scope-discipline: FAIL - 3 violations
+
+      - RULE 1 (x2): `Makefile` and `spec/models/vendor_spec.rb` are in the diff but absent from the AC-trace mapping table.
+      - RULE 2 (x1): `Makefile` `test:` target is a drive-by change unrelated to any AC item.
+      """
+
+      assert {:request_changes, 3, items} = GitHubPr.parse_critical_review_body(body)
+      assert length(items) == 2
+      assert Enum.any?(items, &String.contains?(&1, "RULE 1"))
+      assert Enum.any?(items, &String.contains?(&1, "RULE 2"))
+    end
+
+    test "returns :none for scope-discipline PASS comments" do
+      assert GitHubPr.parse_critical_review_body("scope-discipline: PASS") == :none
+    end
+
     test "returns :none for nil body" do
       assert GitHubPr.parse_critical_review_body(nil) == :none
     end
@@ -234,6 +252,48 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
       # Latest verdict is `approve` → :none, regardless of an earlier critical review.
       assert GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at) ==
                :none
+    end
+
+    test "scope-discipline PASS after FAIL clears the alarm" do
+      comments = [
+        %{
+          "body" => """
+          scope-discipline: FAIL - 1 violation
+
+          - RULE 2: drive-by Makefile change
+          """,
+          "created_at" => "2026-05-21T13:30:00Z",
+          "user" => %{"login" => "claude[bot]"}
+        },
+        %{
+          "body" => "scope-discipline: PASS",
+          "created_at" => "2026-05-21T14:00:00Z",
+          "user" => %{"login" => "claude[bot]"}
+        }
+      ]
+
+      assert GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at) ==
+               :none
+    end
+
+    test "fresh scope-discipline FAIL blocks the PR" do
+      comments = [
+        %{
+          "body" => """
+          scope-discipline: FAIL - 2 violations
+
+          - RULE 1: missing AC mapping
+          - RULE 2: drive-by change
+          """,
+          "created_at" => "2026-05-21T14:00:00Z",
+          "user" => %{"login" => "claude[bot]"}
+        }
+      ]
+
+      assert {:critical, %{count: 2, items: items, head_sha: @head_sha}} =
+               GitHubPr.critical_review_from_comments(comments, @head_sha, @head_committed_at)
+
+      assert length(items) == 2
     end
 
     test "ignores non-verdict comments mixed in" do
