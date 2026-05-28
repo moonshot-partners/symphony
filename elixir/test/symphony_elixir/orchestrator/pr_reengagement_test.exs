@@ -211,6 +211,61 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       assert body =~ "newsha456" or body =~ "human"
     end
 
+    test "CAP-HIT uses detector pr_url when multi-repo issue first PR is not the critical PR" do
+      parent = self()
+      rails_pr = "https://github.com/org/rails/pull/936"
+      fe_pr = "https://github.com/org/fe-next-app/pull/617"
+
+      issue = %Issue{
+        id: "i-multi",
+        identifier: "ISS-MULTI",
+        state: "Done",
+        repos: [
+          %{name: "schools-out", pr: %{url: rails_pr}},
+          %{name: "fe-next-app", pr: %{url: fe_pr}}
+        ]
+      }
+
+      state =
+        build_state(
+          %{"i-multi" => issue},
+          %{fe_pr => %{count: 1, cap_hit_shas: MapSet.new()}}
+        )
+
+      verdict =
+        {:critical,
+         %{
+           count: 5,
+           items: ["critical frontend review"],
+           head_sha: "fe-sha-2",
+           pr_url: fe_pr
+         }}
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [issue]} end,
+          detector_fn: fn ^issue -> verdict end,
+          state_transition_fn: fn ^issue, target ->
+            send(parent, {:transitioned, target})
+            :ok
+          end,
+          comment_fn: fn issue_id, body, parent_id ->
+            send(parent, {:commented, issue_id, body, parent_id})
+            {:ok, "c-multi"}
+          end
+        })
+
+      new_state = PrReengagement.run(state, opts)
+
+      refute Map.has_key?(new_state.pr_engagements, rails_pr)
+      assert %{count: 1, cap_hit_shas: shas} = new_state.pr_engagements[fe_pr]
+      assert MapSet.member?(shas, "fe-sha-2")
+
+      assert_receive {:transitioned, "On Hold / Blocked"}, 500
+      assert_receive {:commented, "i-multi", body, "wp-i-multi"}, 500
+      assert body =~ "fe-sha-2"
+    end
+
     test "CAP-HIT DEDUP (count >= 1, sha already recorded): no transition, no comment" do
       parent = self()
       pr_url = "https://github.com/org/repo/pull/77"

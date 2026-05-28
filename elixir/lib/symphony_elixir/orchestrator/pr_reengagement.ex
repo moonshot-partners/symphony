@@ -106,7 +106,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
         case detector_fn.(issue) do
           {:critical, info} when is_map(info) ->
-            handle_critical(state, issue, pr_url, info, opts)
+            handle_critical(state, issue, critical_pr_url(info, pr_url), info, opts)
 
           verdict ->
             DecisionLog.emit("pr_reengagement.skip_no_critical", %{
@@ -207,6 +207,13 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
             cap_hit_shas: MapSet.put(engagement.cap_hit_shas, head_sha)
           })
     }
+  end
+
+  defp critical_pr_url(info, fallback) do
+    case Map.get(info, :pr_url) do
+      pr_url when is_binary(pr_url) and pr_url != "" -> pr_url
+      _ -> fallback
+    end
   end
 
   defp pr_url_for(%Issue{repos: repos}) when is_list(repos) do
