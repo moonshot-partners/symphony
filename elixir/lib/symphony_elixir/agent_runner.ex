@@ -192,6 +192,11 @@ defmodule SymphonyElixir.AgentRunner do
       SymphonyElixir.GitHubPr.qa_blocked?(issue) ->
         :done
 
+      # Pending CI is not actionable by the agent. Stop this continuation loop;
+      # reconciliation/re-engagement can resume if checks later turn red.
+      SymphonyElixir.GitHubPr.required_checks_status(issue) == :pending ->
+        :done
+
       active_issue_state?(issue.state) ->
         :continue
 
