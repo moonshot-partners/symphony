@@ -183,6 +183,7 @@ defmodule SymphonyElixir.Orchestrator.ReconcileTest do
           has_pr_attachment: true,
           repos: [
             %{name: "schools-out", pr: %{url: rails_pr_url}},
+            %{name: "rollcall", pr: nil},
             %{name: "fe-next-app", pr: %{url: fe_pr_url}}
           ]
         )

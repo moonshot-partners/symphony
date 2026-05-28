@@ -217,8 +217,6 @@ defmodule SymphonyElixir.Orchestrator.Reconcile do
     end)
   end
 
-  defp pr_urls_for(_), do: []
-
   defp mark_completed(%State{} = state, issue_id) when is_binary(issue_id) do
     %{state | completed: MapSet.put(state.completed, issue_id)}
   end
