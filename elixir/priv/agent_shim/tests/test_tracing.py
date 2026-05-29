@@ -166,6 +166,24 @@ def test_turn_context_propagates_session_and_turn(monkeypatch):
     assert "symphony-agent" in recorder[0]["tags"]
 
 
+def test_turn_context_records_thread_id_metadata(monkeypatch):
+    """The ticket is the session id; the per-process thread id rides as metadata
+    so a single attempt within a ticket's journey stays cross-referenceable."""
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    recorder: list[dict] = []
+    client = _FakeClient()
+    _install_fake_langfuse(client=client, recorder=recorder)
+    assert tracing.setup() is True
+
+    with tracing.turn_context(session_id="SODEV-430", turn_id="turn-1", thread_id="shim-abc"):
+        pass
+
+    assert recorder[0]["session_id"] == "SODEV-430"
+    assert recorder[0]["metadata"]["thread_id"] == "shim-abc"
+    assert recorder[0]["metadata"]["turn_id"] == "turn-1"
+
+
 def test_flush_calls_client_when_enabled(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")

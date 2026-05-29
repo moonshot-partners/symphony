@@ -276,6 +276,9 @@ defmodule SymphonyElixir.Agent.AppServer do
         ],
         "cwd" => Transport.shim_cwd(workspace),
         "title" => "#{issue.identifier}: #{issue.title}",
+        # Ticket identifier for the shim's Langfuse session grouping (the whole
+        # journey of one ticket, across turns and re-dispatches, in one session).
+        "ticket" => issue.identifier,
         "approvalPolicy" => approval_policy,
         "sandboxPolicy" => turn_sandbox_policy
       }

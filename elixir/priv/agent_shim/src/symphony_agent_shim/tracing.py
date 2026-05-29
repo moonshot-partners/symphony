@@ -74,11 +74,14 @@ def setup() -> bool:
 
 
 @contextmanager
-def turn_context(*, session_id: str, turn_id: str) -> Iterator[None]:
+def turn_context(*, session_id: str, turn_id: str, thread_id: str | None = None) -> Iterator[None]:
     """Attach session/turn attributes to all spans created within the block.
 
-    ``session_id`` groups every turn of one agent thread into a Langfuse
-    Session. No-op passthrough when tracing is disabled.
+    ``session_id`` is the Linear ticket (e.g. ``SODEV-430``) so every turn and
+    every re-dispatch of one ticket groups into a single Langfuse Session —
+    the whole journey of a ticket in one view. ``thread_id`` (the per-process
+    shim id) is recorded as metadata to cross-reference a single attempt.
+    No-op passthrough when tracing is disabled.
     """
     if not _enabled:
         yield
@@ -99,10 +102,13 @@ def turn_context(*, session_id: str, turn_id: str) -> Iterator[None]:
     try:
         from langfuse import propagate_attributes
 
+        metadata = {"turn_id": turn_id}
+        if thread_id:
+            metadata["thread_id"] = thread_id
         cm = propagate_attributes(
             session_id=session_id,
             tags=["symphony-agent"],
-            metadata={"turn_id": turn_id},
+            metadata=metadata,
         )
         cm.__enter__()
     except Exception as exc:  # noqa: BLE001 — tracing must never crash the shim

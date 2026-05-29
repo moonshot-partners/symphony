@@ -6,6 +6,10 @@ from symphony_agent_shim.thread import ThreadRegistry, ThreadSession
 from symphony_agent_shim.turn import TurnTracker, handle_turn_start
 
 
+async def _aw(_msg: dict) -> None:
+    """Async no-op writer for tests that don't assert on emitted messages."""
+
+
 @pytest.mark.asyncio
 async def test_turn_start_returns_turn_id_then_emits_completed():
     sent: list[dict] = []
@@ -465,6 +469,118 @@ async def test_turn_flushes_tracing_even_on_sdk_failure(monkeypatch):
     await session.active_task
 
     assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_turn_uses_ticket_as_langfuse_session(monkeypatch):
+    """turn/start carries the Linear ticket; it must become the Langfuse
+    session id (grouping a ticket's whole journey), with the per-process thread
+    id recorded as metadata."""
+    import contextlib
+
+    from symphony_agent_shim import tracing
+
+    rec: dict = {}
+
+    @contextlib.contextmanager
+    def fake_ctx(*, session_id, turn_id, thread_id=None):
+        rec["session_id"] = session_id
+        rec["thread_id"] = thread_id
+        yield
+
+    monkeypatch.setattr(tracing, "turn_context", fake_ctx)
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import ResultMessage
+
+        yield ResultMessage(
+            subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+            num_turns=1, session_id="s", total_cost_usd=0.0, usage=None, result="ok",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="shim-t1", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+                "threadId": "shim-t1",
+                "ticket": "SODEV-430",
+                "input": [{"type": "text", "text": "go"}],
+                "cwd": "/tmp",
+            },
+        },
+        writer=_aw,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    assert rec["session_id"] == "SODEV-430"
+    assert rec["thread_id"] == "shim-t1"
+
+
+@pytest.mark.asyncio
+async def test_turn_session_falls_back_to_thread_when_no_ticket(monkeypatch):
+    """No ticket in turn/start must not leave the turn ungrouped: session id
+    falls back to the thread id."""
+    import contextlib
+
+    from symphony_agent_shim import tracing
+
+    rec: dict = {}
+
+    @contextlib.contextmanager
+    def fake_ctx(*, session_id, turn_id, thread_id=None):
+        rec["session_id"] = session_id
+        yield
+
+    monkeypatch.setattr(tracing, "turn_context", fake_ctx)
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import ResultMessage
+
+        yield ResultMessage(
+            subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+            num_turns=1, session_id="s", total_cost_usd=0.0, usage=None, result="ok",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="shim-t9", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+                "threadId": "shim-t9",
+                "input": [{"type": "text", "text": "go"}],
+                "cwd": "/tmp",
+            },
+        },
+        writer=_aw,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    assert rec["session_id"] == "shim-t9"
 
 
 @pytest.mark.asyncio

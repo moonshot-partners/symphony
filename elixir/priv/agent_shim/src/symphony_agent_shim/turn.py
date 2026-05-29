@@ -64,9 +64,12 @@ async def handle_turn_start(
 
     prompt = _flatten_input(params.get("input", []))
     turn_id = f"turn-{uuid.uuid4().hex[:12]}"
+    # Linear ticket (e.g. SODEV-430), sent by the orchestrator in turn/start.
+    # Used as the Langfuse session id so a ticket's whole journey groups together.
+    ticket = params.get("ticket")
 
     session.active_task = asyncio.create_task(
-        _drive_turn(session.client, prompt, turn_id, writer, tracker, session.thread_id),
+        _drive_turn(session.client, prompt, turn_id, writer, tracker, session.thread_id, ticket),
         name=f"drive-turn-{turn_id}",
     )
 
@@ -91,12 +94,16 @@ async def _drive_turn(
     writer: Writer,
     tracker: TurnTracker,
     thread_id: str,
+    ticket: str | None = None,
 ) -> None:
     tracker.register(turn_id)
+    # Group the Langfuse session by ticket when known; fall back to the
+    # per-process thread id so a turn is never left ungrouped.
+    session_id = ticket or thread_id
     accumulated: dict[str, int] = {}
     try:
         try:
-            with tracing.turn_context(session_id=thread_id, turn_id=turn_id):
+            with tracing.turn_context(session_id=session_id, turn_id=turn_id, thread_id=thread_id):
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, AssistantMessage) and isinstance(message.usage, dict):
