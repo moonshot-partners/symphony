@@ -96,7 +96,14 @@ mix escript.build </dev/null >/dev/null
 # silently runs old QA harness code in newly dispatched agent containers
 # (SODEV-879 reproduced this: PR shipped, deploy succeeded, image stale,
 # agent kept running `npm run dev`).
-if git -C "$SYMPHONY_DIR" diff --name-only "$old_sha" "$new_sha" | grep -q '^docker/schoolsout-base/'; then
+#
+# Also rebuild on agent_shim changes: the Dockerfile bakes the shim via
+# `COPY elixir/priv/agent_shim` + `pip install`, so a shim-only change never
+# reaches the agent without an image rebuild (cost three deploys to learn this
+# while wiring Langfuse tracing — host-side shim deploys are inert in Docker
+# mode, the agent only ever runs the image's baked shim).
+if git -C "$SYMPHONY_DIR" diff --name-only "$old_sha" "$new_sha" \
+  | grep -qE '^(docker/schoolsout-base/|elixir/priv/agent_shim/)'; then
   log "rebuild schoolsout-base image (source changed)"
   cd "$SYMPHONY_DIR"
   docker build --quiet -t schoolsout-base:latest -f docker/schoolsout-base/Dockerfile . >/dev/null
