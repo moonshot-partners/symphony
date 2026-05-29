@@ -67,9 +67,21 @@ async def handle_turn_start(
     # Linear ticket (e.g. SODEV-430), sent by the orchestrator in turn/start.
     # Used as the Langfuse session id so a ticket's whole journey groups together.
     ticket = params.get("ticket")
+    cwd = params.get("cwd")
+    title = params.get("title")
 
     session.active_task = asyncio.create_task(
-        _drive_turn(session.client, prompt, turn_id, writer, tracker, session.thread_id, ticket),
+        _drive_turn(
+            session.client,
+            prompt,
+            turn_id,
+            writer,
+            tracker,
+            session.thread_id,
+            ticket,
+            cwd=cwd if isinstance(cwd, str) else None,
+            title=title if isinstance(title, str) else None,
+        ),
         name=f"drive-turn-{turn_id}",
     )
 
@@ -95,6 +107,8 @@ async def _drive_turn(
     tracker: TurnTracker,
     thread_id: str,
     ticket: str | None = None,
+    cwd: str | None = None,
+    title: str | None = None,
 ) -> None:
     tracker.register(turn_id)
     # Group the Langfuse session by ticket when known; fall back to the
@@ -103,21 +117,52 @@ async def _drive_turn(
     accumulated: dict[str, int] = {}
     try:
         try:
-            with tracing.turn_context(session_id=session_id, turn_id=turn_id, thread_id=thread_id):
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage) and isinstance(message.usage, dict):
-                        for key, val in message.usage.items():
-                            if isinstance(val, int):
-                                accumulated[key] = accumulated.get(key, 0) + val
-                    await _emit_message(message, turn_id, writer, accumulated)
+            metadata = {
+                "ticket": ticket,
+                "cwd": cwd,
+                "title": title,
+            }
+            with tracing.turn_context(
+                session_id=session_id,
+                turn_id=turn_id,
+                thread_id=thread_id,
+                metadata=metadata,
+                input=prompt,
+            ):
+                with tracing.operation(
+                    "symphony.turn.query",
+                    as_type="span",
+                    metadata={"ticket": ticket, "turnId": turn_id},
+                    input=prompt,
+                ):
+                    await client.query(prompt)
+
+                with tracing.operation(
+                    "symphony.turn.stream",
+                    as_type="span",
+                    metadata={"ticket": ticket, "turnId": turn_id},
+                ):
+                    async for message in client.receive_response():
+                        if isinstance(message, AssistantMessage) and isinstance(
+                            message.usage, dict
+                        ):
+                            for key, val in message.usage.items():
+                                if isinstance(val, int):
+                                    accumulated[key] = accumulated.get(key, 0) + val
+                        await _emit_message(message, turn_id, writer, accumulated, cwd=cwd)
         except Exception as exc:  # noqa: BLE001 — surface SDK error as JSON-RPC failure
-            await writer(
-                protocol.notification(
-                    protocol.METHOD_TURN_FAILED,
-                    {"turn_id": turn_id, "error": str(exc)},
+            with tracing.operation(
+                "symphony.turn.failed",
+                as_type="span",
+                metadata={"ticket": ticket, "turnId": turn_id, "errorType": type(exc).__name__},
+                output=str(exc),
+            ):
+                await writer(
+                    protocol.notification(
+                        protocol.METHOD_TURN_FAILED,
+                        {"turn_id": turn_id, "error": str(exc)},
+                    )
                 )
-            )
     finally:
         tracker.unregister(turn_id)
         # Export this turn's spans now, while the process is alive. The shim is
@@ -129,12 +174,17 @@ async def _drive_turn(
 
 
 async def _emit_message(
-    message: Any, turn_id: str, writer: Writer, accumulated: dict[str, int]
+    message: Any,
+    turn_id: str,
+    writer: Writer,
+    accumulated: dict[str, int],
+    *,
+    cwd: str | None = None,
 ) -> None:
     if isinstance(message, AssistantMessage):
         for block in message.content:
             if isinstance(block, ToolUseBlock):
-                await _emit_synthetic_approval(block, turn_id, writer)
+                await _emit_synthetic_approval(block, turn_id, writer, cwd=cwd)
         text_parts = [block.text for block in message.content if isinstance(block, TextBlock)]
         if text_parts:
             params: dict[str, Any] = {"turn_id": turn_id, "text": "\n".join(text_parts)}
@@ -147,40 +197,74 @@ async def _emit_message(
         # usage in the result JSON). Fall back to tokens accumulated from each
         # AssistantMessage.usage (per-API-call Anthropic usage dict).
         usage = dict(message.usage) if message.usage else accumulated
-        await writer(
-            protocol.notification(
-                protocol.METHOD_TURN_COMPLETED,
-                {
-                    "turn_id": turn_id,
-                    "usage": usage,
-                    "total_cost_usd": message.total_cost_usd,
-                    "stop_reason": message.subtype,
-                },
+        with tracing.operation(
+            "symphony.turn.completed",
+            as_type="span",
+            metadata={
+                "turnId": turn_id,
+                "stopReason": message.subtype,
+                "totalCostUsd": message.total_cost_usd,
+            },
+            output={"usage": usage, "stop_reason": message.subtype},
+        ):
+            await writer(
+                protocol.notification(
+                    protocol.METHOD_TURN_COMPLETED,
+                    {
+                        "turn_id": turn_id,
+                        "usage": usage,
+                        "total_cost_usd": message.total_cost_usd,
+                        "stop_reason": message.subtype,
+                    },
+                )
             )
-        )
 
 
-async def _emit_synthetic_approval(block: ToolUseBlock, turn_id: str, writer: Writer) -> None:
+async def _emit_synthetic_approval(
+    block: ToolUseBlock, turn_id: str, writer: Writer, *, cwd: str | None = None
+) -> None:
     inp = block.input or {}
     if block.name in _BASH_TOOLS:
-        await writer(
-            protocol.notification(
-                protocol.METHOD_ITEM_COMMAND_APPROVAL,
-                {
-                    "turn_id": turn_id,
-                    "tool_use_id": block.id,
-                    "command": inp.get("command", ""),
-                },
+        command = inp.get("command", "")
+        with tracing.operation(
+            "symphony.tool.bash",
+            as_type="tool",
+            metadata={
+                "turnId": turn_id,
+                "toolUseId": block.id,
+                **tracing.command_metadata(command, cwd=cwd),
+            },
+            input=command,
+        ):
+            await writer(
+                protocol.notification(
+                    protocol.METHOD_ITEM_COMMAND_APPROVAL,
+                    {
+                        "turn_id": turn_id,
+                        "tool_use_id": block.id,
+                        "command": command,
+                    },
+                )
             )
-        )
     elif block.name in _FILE_WRITE_TOOLS:
-        await writer(
-            protocol.notification(
-                protocol.METHOD_FILE_CHANGE_APPROVAL,
-                {
-                    "turn_id": turn_id,
-                    "tool_use_id": block.id,
-                    "path": inp.get("file_path", ""),
-                },
+        path = inp.get("file_path", "")
+        with tracing.operation(
+            "symphony.tool.file_change",
+            as_type="tool",
+            metadata={
+                "turnId": turn_id,
+                "toolUseId": block.id,
+                "toolName": block.name,
+                "path": path,
+            },
+        ):
+            await writer(
+                protocol.notification(
+                    protocol.METHOD_FILE_CHANGE_APPROVAL,
+                    {
+                        "turn_id": turn_id,
+                        "tool_use_id": block.id,
+                        "path": path,
+                    },
+                )
             )
-        )

@@ -33,6 +33,9 @@ defmodule SymphonyElixir.Agent.AppServer.Transport do
     LANGFUSE_SECRET_KEY
     LANGFUSE_HOST
     LANGFUSE_BASE_URL
+    LANGFUSE_CAPTURE_IO
+    LANGFUSE_TRACING_ENVIRONMENT
+    OTEL_SERVICE_NAME
   ]
 
   @doc """

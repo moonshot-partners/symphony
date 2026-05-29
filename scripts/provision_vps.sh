@@ -145,7 +145,7 @@ LC_ALL=C.UTF-8
 ELIXIR_ERL_OPTIONS=
 
 # --- OpenTelemetry ---
-OTEL_SERVICE_NAME=symphony
+OTEL_SERVICE_NAME=symphony-agent-shim
 OTEL_TRACES_EXPORTER=otlp
 OTEL_METRICS_EXPORTER=otlp
 OTEL_LOGS_EXPORTER=otlp
@@ -156,6 +156,12 @@ OTEL_LOG_USER_PROMPTS=false
 OTEL_TRACES_EXPORT_INTERVAL=10000
 OTEL_METRIC_EXPORT_INTERVAL=10000
 OTEL_LOGS_EXPORT_INTERVAL=10000
+
+# --- Langfuse tracing (optional; add real keys in /etc/symphony/symphony.env) ---
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_HOST=https://cloud.langfuse.com
+LANGFUSE_TRACING_ENVIRONMENT=production
+LANGFUSE_CAPTURE_IO=redacted
 EOF
   chmod 644 "${ENV_EXAMPLE}"
 }

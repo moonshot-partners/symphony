@@ -191,12 +191,22 @@ async def test_turn_completed_accumulates_usage_from_assistant_messages():
         yield AssistantMessage(
             content=[TextBlock(text="thinking")],
             model="claude-sonnet-4-6",
-            usage={"input_tokens": 300, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            usage={
+                "input_tokens": 300,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
         )
         yield AssistantMessage(
             content=[TextBlock(text="done")],
             model="claude-sonnet-4-6",
-            usage={"input_tokens": 200, "output_tokens": 30, "cache_read_input_tokens": 10, "cache_creation_input_tokens": 0},
+            usage={
+                "input_tokens": 200,
+                "output_tokens": 30,
+                "cache_read_input_tokens": 10,
+                "cache_creation_input_tokens": 0,
+            },
         )
         # ResultMessage with no usage (as Claude CLI emits in practice)
         yield ResultMessage(
@@ -481,14 +491,23 @@ async def test_turn_uses_ticket_as_langfuse_session(monkeypatch):
     from symphony_agent_shim import tracing
 
     rec: dict = {}
+    operations: list[str] = []
 
     @contextlib.contextmanager
-    def fake_ctx(*, session_id, turn_id, thread_id=None):
+    def fake_ctx(*, session_id, turn_id, thread_id=None, metadata=None, input=None):
         rec["session_id"] = session_id
         rec["thread_id"] = thread_id
+        rec["metadata"] = metadata
+        rec["input"] = input
+        yield
+
+    @contextlib.contextmanager
+    def fake_operation(name, **kwargs):
+        operations.append(name)
         yield
 
     monkeypatch.setattr(tracing, "turn_context", fake_ctx)
+    monkeypatch.setattr(tracing, "operation", fake_operation)
 
     fake_client = MagicMock()
 
@@ -527,6 +546,13 @@ async def test_turn_uses_ticket_as_langfuse_session(monkeypatch):
 
     assert rec["session_id"] == "SODEV-430"
     assert rec["thread_id"] == "shim-t1"
+    assert rec["metadata"]["ticket"] == "SODEV-430"
+    assert rec["input"] == "go"
+    assert operations == [
+        "symphony.turn.query",
+        "symphony.turn.stream",
+        "symphony.turn.completed",
+    ]
 
 
 @pytest.mark.asyncio
@@ -540,7 +566,7 @@ async def test_turn_session_falls_back_to_thread_when_no_ticket(monkeypatch):
     rec: dict = {}
 
     @contextlib.contextmanager
-    def fake_ctx(*, session_id, turn_id, thread_id=None):
+    def fake_ctx(*, session_id, turn_id, thread_id=None, metadata=None, input=None):
         rec["session_id"] = session_id
         yield
 

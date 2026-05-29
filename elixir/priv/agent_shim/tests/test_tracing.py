@@ -6,6 +6,7 @@ injects fake ``langfuse`` / ``openinference`` modules into ``sys.modules`` so
 hitting the Langfuse API.
 """
 
+import os
 import sys
 import types
 from contextlib import contextmanager
@@ -21,6 +22,9 @@ def reset_tracing_state(monkeypatch):
     any injected fake modules restored — no cross-test leakage."""
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_CAPTURE_IO", raising=False)
+    monkeypatch.delenv("LANGFUSE_TRACING_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("OTEL_SERVICE_NAME", raising=False)
     tracing._enabled = False
     tracing._client = None
     saved_modules = {
@@ -89,9 +93,25 @@ class _FakeClient:
     def __init__(self):
         self.flushed = 0
         self.instrumented = False
+        self.observations: list[dict] = []
 
     def flush(self):
         self.flushed += 1
+
+    @contextmanager
+    def start_as_current_observation(self, **kwargs):
+        obs = _FakeObservation(kwargs)
+        self.observations.append({"start": kwargs, "updates": obs.updates})
+        yield obs
+
+
+class _FakeObservation:
+    def __init__(self, kwargs):
+        self.kwargs = kwargs
+        self.updates: list[dict] = []
+
+    def update(self, **kwargs):
+        self.updates.append(kwargs)
 
 
 def test_disabled_without_keys():
@@ -114,19 +134,21 @@ def test_flush_noop_when_disabled():
 
 
 def test_setup_enables_and_instruments(monkeypatch):
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
     client = _FakeClient()
     _install_fake_langfuse(client=client)
 
     assert tracing.setup() is True
     assert tracing.enabled() is True
     assert client.instrumented is True
+    assert os.environ["OTEL_SERVICE_NAME"] == "symphony-agent-shim"
+    assert os.environ["LANGFUSE_TRACING_ENVIRONMENT"] == "production"
 
 
 def test_setup_is_idempotent(monkeypatch):
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
     client = _FakeClient()
     _install_fake_langfuse(client=client)
 
@@ -139,8 +161,8 @@ def test_setup_is_idempotent(monkeypatch):
 
 
 def test_setup_failure_keeps_disabled(monkeypatch):
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
     _install_fake_langfuse(client=None, raise_on_import=True)
 
     assert tracing.setup() is False
@@ -148,8 +170,8 @@ def test_setup_failure_keeps_disabled(monkeypatch):
 
 
 def test_turn_context_propagates_session_and_turn(monkeypatch):
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
     recorder: list[dict] = []
     client = _FakeClient()
     _install_fake_langfuse(client=client, recorder=recorder)
@@ -162,15 +184,17 @@ def test_turn_context_propagates_session_and_turn(monkeypatch):
     assert ran == [True]
     assert len(recorder) == 1
     assert recorder[0]["session_id"] == "shim-xyz"
-    assert recorder[0]["metadata"]["turn_id"] == "turn-42"
+    assert recorder[0]["metadata"]["turnId"] == "turn-42"
     assert "symphony-agent" in recorder[0]["tags"]
+    assert client.observations[0]["start"]["name"] == "symphony.turn"
+    assert client.observations[0]["start"]["as_type"] == "agent"
 
 
 def test_turn_context_records_thread_id_metadata(monkeypatch):
     """The ticket is the session id; the per-process thread id rides as metadata
     so a single attempt within a ticket's journey stays cross-referenceable."""
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
     recorder: list[dict] = []
     client = _FakeClient()
     _install_fake_langfuse(client=client, recorder=recorder)
@@ -180,13 +204,50 @@ def test_turn_context_records_thread_id_metadata(monkeypatch):
         pass
 
     assert recorder[0]["session_id"] == "SODEV-430"
-    assert recorder[0]["metadata"]["thread_id"] == "shim-abc"
-    assert recorder[0]["metadata"]["turn_id"] == "turn-1"
+    assert recorder[0]["metadata"]["threadId"] == "shim-abc"
+    assert recorder[0]["metadata"]["turnId"] == "turn-1"
+
+
+def test_operation_creates_named_observation_and_redacts_io(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
+    client = _FakeClient()
+    _install_fake_langfuse(client=client)
+    assert tracing.setup() is True
+
+    with tracing.operation(
+        "symphony.tool.bash",
+        as_type="tool",
+        metadata={"toolUseId": "tool-1", "bad_key!": "x"},
+        input="echo $SECRET_TOKEN",
+        output="done",
+    ):
+        pass
+
+    assert client.observations[0]["start"]["name"] == "symphony.tool.bash"
+    assert client.observations[0]["start"]["as_type"] == "tool"
+    assert client.observations[0]["start"]["metadata"] == {"toolUseId": "tool-1", "badkey": "x"}
+    assert client.observations[0]["start"]["input"] == {
+        "redacted": True,
+        "chars": 18,
+        "preview": "<redacted>",
+    }
+    assert client.observations[0]["updates"] == [
+        {"output": {"redacted": True, "chars": 4, "preview": "done"}}
+    ]
+
+
+def test_command_metadata_classifies_and_redacts_sensitive_commands():
+    assert tracing.command_metadata("git push -u origin HEAD")["commandKind"] == "gitPush"
+    assert tracing.command_metadata("CI=1 npm run e2e -- --project=anon")["commandKind"] == "qaE2e"
+    meta = tracing.command_metadata("curl -H 'Authorization: Bearer abc' https://example")
+    assert meta["commandKind"] == "shell"
+    assert meta["redacted"] == "true"
 
 
 def test_flush_calls_client_when_enabled(monkeypatch):
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
     client = _FakeClient()
     _install_fake_langfuse(client=client)
     assert tracing.setup() is True
@@ -200,8 +261,8 @@ def test_turn_context_yields_once_when_propagate_exit_raises(monkeypatch):
     token detached in a different context). turn_context must still yield exactly
     once and must not propagate the error — otherwise the generator crashes the
     caller with 'generator didn't stop' and the agent turn is falsely failed."""
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
 
     class RaisingExitPropagate:
         def __init__(self, **kwargs):
@@ -227,8 +288,8 @@ def test_turn_context_yields_once_when_propagate_exit_raises(monkeypatch):
 def test_turn_context_yields_once_when_propagate_enter_raises(monkeypatch):
     """If propagate_attributes.__enter__ raises, turn_context degrades to an
     untraced passthrough: body runs once, no error escapes."""
-    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
-    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")
 
     class RaisingEnterPropagate:
         def __init__(self, **kwargs):
