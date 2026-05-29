@@ -88,9 +88,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     if in_auto_engagement?(issue, pr_engagements) do
       # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
       # in on_reject_state on this run even if QA self-reports BLOCKED
-      # or CI is red — let the K=1 re-engagement land. If the next
-      # claude-pr-review verdict is still critical, PrReengagement caps
-      # at K=1 and parks for human review.
+      # or CI is red — let the bounded re-engagement land. Later blocking
+      # claude-pr-review verdicts are handled by PrReengagement.
       emit_route("auto_engagement_bypass", issue, complete_state, pr_engagements)
       apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
     else

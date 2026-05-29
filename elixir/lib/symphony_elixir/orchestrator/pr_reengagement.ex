@@ -1,23 +1,22 @@
 defmodule SymphonyElixir.Orchestrator.PrReengagement do
   @moduledoc """
-  SYM-16 auto re-engagement loop, capped at K=1 per PR.
+  SYM-16 auto re-engagement loop, capped at K=2 per PR.
 
   `run/2` walks `state.completed`, refreshes the issue payloads through
   the injected `:issue_fetch_fn`, and for each issue that carries fresh
   blocking PR-review feedback on its PR (decided by the injected
   `:detector_fn`) it either:
 
-    * DISPATCH (count == 0) — increments `state.pr_engagements[pr_url].count`
-      to 1, removes the id from `state.completed`, transitions the issue
-      back to the configured `:pickup_state` so DispatchGate re-picks it
-      on the next tick, and posts a threaded workpad comment.
+    * DISPATCH (count < 2) — increments `state.pr_engagements[pr_url].count`,
+      removes the id from `state.completed`, transitions the issue back to
+      the configured `:pickup_state` so DispatchGate re-picks it on the next
+      tick, and posts a threaded workpad comment.
 
-    * CAP-HIT (count >= 1, new head_sha) — transitions the issue to the
-      configured `:reject_state`, posts a threaded cap-hit comment, and
-      records the head_sha in `cap_hit_shas` so the same sha never
-      produces a second comment.
+    * CAP-IGNORE (count >= 2, new head_sha) — leaves Linear untouched and
+      records the head_sha in `cap_hit_shas` so the same sha never produces
+      a second decision-log event.
 
-    * CAP-HIT DEDUP (count >= 1, head_sha already in cap_hit_shas) —
+    * CAP-IGNORE DEDUP (count >= 2, head_sha already in cap_hit_shas) —
       no state transition, no comment. Idempotent across poll cycles.
 
   All Linear / GitHub side-effects are injected so the module stays
@@ -39,7 +38,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.State
 
-  @cap_k 1
+  @cap_k 2
 
   @type opts :: %{
           required(:issue_fetch_fn) => ([String.t()] -> {:ok, [Issue.t()]} | {:error, term()}),
@@ -47,11 +46,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
           required(:state_transition_fn) => (Issue.t(), String.t() -> :ok),
           required(:comment_fn) => (String.t(), String.t(), String.t() | nil -> term()),
           required(:pickup_state) => String.t(),
-          required(:reject_state) => String.t() | nil
+          optional(:reject_state) => String.t() | nil
         }
 
   @doc """
-  Walk `state.completed`, decide per-issue whether to re-engage or cap-hit,
+  Walk `state.completed`, decide per-issue whether to re-engage or ignore overflow,
   and return the updated `%State{}`.
   """
   @spec run(State.t(), opts()) :: State.t()
@@ -130,8 +129,8 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
         dispatch_reengagement(state, issue, pr_url, info, engagement, opts)
 
       MapSet.member?(engagement.cap_hit_shas, head_sha) ->
-        # Already cap-hit on this exact sha — stay silent, no state churn.
-        DecisionLog.emit("pr_reengagement.cap_hit_dedup", %{
+        # Already ignored on this exact sha — stay silent, no state churn.
+        DecisionLog.emit("pr_reengagement.cap_ignore_dedup", %{
           issue_id: issue.id,
           identifier: issue.identifier,
           pr_url: pr_url,
@@ -142,7 +141,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
         state
 
       true ->
-        cap_hit(state, issue, pr_url, info, engagement, opts)
+        ignore_cap_overflow(state, issue, pr_url, info, engagement)
     end
   end
 
@@ -153,7 +152,8 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
     state_transition_fn.(issue, pickup_state)
     parent_id = Map.get(state.workpads, issue.id)
-    _ = comment_fn.(issue.id, dispatch_body(info), parent_id)
+    next_count = engagement.count + 1
+    _ = comment_fn.(issue.id, dispatch_body(info, next_count), parent_id)
 
     DecisionLog.emit("pr_reengagement.dispatch", %{
       issue_id: issue.id,
@@ -162,7 +162,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
       head_sha: Map.get(info, :head_sha, ""),
       critical_count: Map.get(info, :count, 0),
       pickup_state: pickup_state,
-      next_count: engagement.count + 1
+      next_count: next_count
     })
 
     %{
@@ -170,32 +170,22 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
       | completed: MapSet.delete(state.completed, issue.id),
         pr_engagements:
           Map.put(state.pr_engagements, pr_url, %{
-            count: engagement.count + 1,
+            count: next_count,
             cap_hit_shas: engagement.cap_hit_shas
           })
     }
   end
 
-  defp cap_hit(state, %Issue{} = issue, pr_url, info, engagement, opts) do
-    state_transition_fn = Map.fetch!(opts, :state_transition_fn)
-    comment_fn = Map.fetch!(opts, :comment_fn)
-    reject_state = Map.fetch!(opts, :reject_state)
+  defp ignore_cap_overflow(state, %Issue{} = issue, pr_url, info, engagement) do
     head_sha = Map.get(info, :head_sha, "")
 
-    if is_binary(reject_state) and reject_state != "" do
-      state_transition_fn.(issue, reject_state)
-    end
-
-    parent_id = Map.get(state.workpads, issue.id)
-    _ = comment_fn.(issue.id, cap_hit_body(info), parent_id)
-
-    DecisionLog.emit("pr_reengagement.cap_hit", %{
+    DecisionLog.emit("pr_reengagement.cap_ignore", %{
       issue_id: issue.id,
       identifier: issue.identifier,
       pr_url: pr_url,
       head_sha: head_sha,
       critical_count: Map.get(info, :count, 0),
-      reject_state: reject_state,
+      action: "ignore",
       count: engagement.count
     })
 
@@ -223,7 +213,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
     end)
   end
 
-  defp dispatch_body(info) do
+  defp dispatch_body(info, next_count) do
     count = Map.get(info, :count, 0)
     items = Map.get(info, :items, [])
 
@@ -232,21 +222,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
     #{format_items(items)}
 
-    Counter K=1: this is the only automatic re-engagement that will fire on this PR. Next blocking verdict on the same PR will park the issue for human review.
-    """
-  end
-
-  defp cap_hit_body(info) do
-    count = Map.get(info, :count, 0)
-    head_sha = Map.get(info, :head_sha, "")
-    items = Map.get(info, :items, [])
-
-    """
-    Cap reached (K=1) — PR review gate still requests changes#{critical_count_suffix(count)} on commit `#{head_sha}`.
-
-    #{format_items(items)}
-
-    Parking for human review. Push a new commit to clear the alarm or close the loop manually.
+    Counter K=#{@cap_k}: automatic re-engagement #{next_count} of #{@cap_k}. Further blocking verdicts on this PR will be ignored by Symphony and left in the PR review thread.
     """
   end
 

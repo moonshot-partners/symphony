@@ -417,7 +417,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, _}, 200
   end
 
-  test "SYM-16 auto-engagement bypass overrides ci_red (lets K=1 re-engagement run)" do
+  test "SYM-16 auto-engagement bypass overrides ci_red (lets bounded re-engagement run)" do
     issue_id = "issue-sym16-vs-cired"
     pr_url = "https://github.com/org/repo/pull/202"
 
@@ -444,7 +444,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
       qa_evidence_subpath: "fe-next-app/qa-evidence"
     )
 
-    # Even with red CI, the SYM-16 bypass wins so the K=1 re-engagement
+    # Even with red CI, the SYM-16 bypass wins so the bounded re-engagement
     # has a chance to land instead of double-routing on every red check.
     Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ ->
       {:red, ["qa-evidence"]}
