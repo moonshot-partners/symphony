@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.DecisionLog do
   @moduledoc """
   Append-only JSONL ledger of orchestrator decisions — AI-first observability
-  for the K=1 PR re-engagement loop (SYM-16) and every other branch in the
+  for the bounded PR re-engagement loop (SYM-16) and every other branch in the
   reconcile pipeline.
 
   Each call to `emit/3` appends one line of the shape
@@ -14,7 +14,7 @@ defmodule SymphonyElixir.DecisionLog do
   this is debugging infra — set to "0" to silence). All write errors are
   swallowed: the ledger MUST NOT propagate into orchestrator state.
 
-  Why this exists: prior to SYM-16 bake, the K=1 loop branches in
+  Why this exists: prior to SYM-16 bake, the re-engagement loop branches in
   `PrReengagement`, `WorkpadPrSync.run_side_effects`, and the reconcile
   `pr_ready` short-circuit emitted zero log lines on the happy path, leaving
   the running orchestrator opaque to runtime investigation.

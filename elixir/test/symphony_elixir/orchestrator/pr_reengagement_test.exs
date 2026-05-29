@@ -6,17 +6,15 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
   detector whether each issue's PR carries a fresh critical review, and
   either:
 
-    * DISPATCH (count == 0) — increments `state.pr_engagements[pr_url].count`,
+    * DISPATCH (count < 2) — increments `state.pr_engagements[pr_url].count`,
       removes the id from `state.completed`, transitions the issue back to
       the configured `on_pickup_state` so DispatchGate picks it up on the
       next tick, and posts a threaded workpad comment.
 
-    * CAP-HIT (count >= 1, new head_sha) — transitions to
-      `on_reject_state`, posts a threaded cap-hit comment, and records
-      the head_sha in `cap_hit_shas` so the same sha never produces a
-      second cap-hit comment.
+    * CAP-IGNORE (count >= 2, new head_sha) — records the head_sha in
+      `cap_hit_shas` and leaves Linear untouched.
 
-    * CAP-HIT DEDUP (count >= 1, head_sha already in cap_hit_shas) —
+    * CAP-IGNORE DEDUP (count >= 2, head_sha already in cap_hit_shas) —
       no state transition, no comment. Idempotent across poll cycles.
 
   Detector and side-effects are injected through `opts`. No GenServer,
@@ -154,11 +152,12 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
 
       # Threaded workpad comment posted with the critical-issue summary.
       assert_receive {:commented, "i-77", body, "wp-i-77"}, 500
-      assert body =~ "claude-pr-review" or body =~ "critical"
+      assert body =~ "PR review gate"
+      assert body =~ "automatic re-engagement 1 of 2"
       assert body =~ "3"
     end
 
-    test "CAP-HIT (count >= 1, new sha): transitions to reject state, posts cap-hit comment, records sha" do
+    test "DISPATCH (count == 1): allows second re-engagement before the cap" do
       parent = self()
       pr_url = "https://github.com/org/repo/pull/77"
 
@@ -195,23 +194,64 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
 
       new_state = PrReengagement.run(state, opts)
 
-      # Counter unchanged (still 1) but sha is now recorded.
-      assert %{count: 1, cap_hit_shas: shas} = new_state.pr_engagements[pr_url]
-      assert MapSet.member?(shas, "newsha456")
+      assert %{count: 2, cap_hit_shas: shas} = new_state.pr_engagements[pr_url]
+      assert MapSet.size(shas) == 0
 
-      # Issue stays in completed; we're parking it for human review.
-      assert MapSet.member?(new_state.completed, "i-77")
+      refute MapSet.member?(new_state.completed, "i-77")
 
-      # Linear transition to reject state.
-      assert_receive {:transitioned, "On Hold / Blocked"}, 500
+      assert_receive {:transitioned, "Scheduled"}, 500
 
-      # Threaded cap-hit comment.
       assert_receive {:commented, "i-77", body, "wp-i-77"}, 500
-      assert body =~ "K=1" or body =~ "cap"
-      assert body =~ "newsha456" or body =~ "human"
+      assert body =~ "automatic re-engagement 2 of 2"
+      assert body =~ "ignored by Symphony"
     end
 
-    test "CAP-HIT uses detector pr_url when multi-repo issue first PR is not the critical PR" do
+    test "CAP-IGNORE (count >= 2, new sha): records sha without transition or comment" do
+      parent = self()
+      pr_url = "https://github.com/org/repo/pull/77"
+
+      issue = issue("i-77", pr_url)
+
+      state =
+        build_state(
+          %{"i-77" => issue},
+          %{pr_url => %{count: 2, cap_hit_shas: MapSet.new()}}
+        )
+
+      verdict =
+        {:critical,
+         %{
+           count: 2,
+           items: ["d", "e"],
+           head_sha: "newsha456",
+           pr_url: pr_url
+         }}
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [issue]} end,
+          detector_fn: fn ^issue -> verdict end,
+          state_transition_fn: fn ^issue, target ->
+            send(parent, {:transitioned, target})
+            :ok
+          end,
+          comment_fn: fn issue_id, body, parent_id ->
+            send(parent, {:commented, issue_id, body, parent_id})
+            {:ok, "c-cap-1"}
+          end
+        })
+
+      new_state = PrReengagement.run(state, opts)
+
+      assert %{count: 2, cap_hit_shas: shas} = new_state.pr_engagements[pr_url]
+      assert MapSet.member?(shas, "newsha456")
+      assert MapSet.member?(new_state.completed, "i-77")
+
+      refute_receive {:transitioned, _}, 50
+      refute_receive {:commented, _, _, _}, 50
+    end
+
+    test "CAP-IGNORE uses detector pr_url when multi-repo issue first PR is not the critical PR" do
       parent = self()
       rails_pr = "https://github.com/org/rails/pull/936"
       fe_pr = "https://github.com/org/fe-next-app/pull/617"
@@ -229,7 +269,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       state =
         build_state(
           %{"i-multi" => issue},
-          %{fe_pr => %{count: 1, cap_hit_shas: MapSet.new()}}
+          %{fe_pr => %{count: 2, cap_hit_shas: MapSet.new()}}
         )
 
       verdict =
@@ -258,15 +298,14 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       new_state = PrReengagement.run(state, opts)
 
       refute Map.has_key?(new_state.pr_engagements, rails_pr)
-      assert %{count: 1, cap_hit_shas: shas} = new_state.pr_engagements[fe_pr]
+      assert %{count: 2, cap_hit_shas: shas} = new_state.pr_engagements[fe_pr]
       assert MapSet.member?(shas, "fe-sha-2")
 
-      assert_receive {:transitioned, "On Hold / Blocked"}, 500
-      assert_receive {:commented, "i-multi", body, "wp-i-multi"}, 500
-      assert body =~ "fe-sha-2"
+      refute_receive {:transitioned, _}, 50
+      refute_receive {:commented, _, _, _}, 50
     end
 
-    test "CAP-HIT DEDUP (count >= 1, sha already recorded): no transition, no comment" do
+    test "CAP-IGNORE DEDUP (count >= 2, sha already recorded): no transition, no comment" do
       parent = self()
       pr_url = "https://github.com/org/repo/pull/77"
 
@@ -277,7 +316,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
           %{"i-77" => issue},
           %{
             pr_url => %{
-              count: 1,
+              count: 2,
               cap_hit_shas: MapSet.new(["already-seen-sha"])
             }
           }
@@ -541,13 +580,13 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       assert "pr_reengagement.skip_no_critical" in ledger_events(path)
     end
 
-    test "emits cap_hit and cap_hit_dedup", %{ledger_path: path} do
+    test "emits cap_ignore and cap_ignore_dedup", %{ledger_path: path} do
       pr_url = "https://github.com/o/r/pull/3"
       iss = issue("i-cap", pr_url)
 
       state =
         build_state(%{"i-cap" => iss}, %{
-          pr_url => %{count: 1, cap_hit_shas: MapSet.new()}
+          pr_url => %{count: 2, cap_hit_shas: MapSet.new()}
         })
 
       opts =
@@ -564,8 +603,8 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       _ = PrReengagement.run(state_after_first, opts)
 
       events = ledger_events(path)
-      assert "pr_reengagement.cap_hit" in events
-      assert "pr_reengagement.cap_hit_dedup" in events
+      assert "pr_reengagement.cap_ignore" in events
+      assert "pr_reengagement.cap_ignore_dedup" in events
     end
 
     test "emits fetch_error when issue_fetch_fn errors", %{ledger_path: path} do

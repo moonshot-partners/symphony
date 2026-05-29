@@ -756,7 +756,7 @@ defmodule SymphonyElixir.Orchestrator do
   # default 30s poll interval that gate is the difference between zero
   # JSONL lines and ~2,880/day forever. Diagnostic value only exists when
   # there is state worth observing — every claim-or-complete bumps the
-  # gate so the K=1 bake window stays fully covered.
+  # gate so the PR re-engagement bake window stays fully covered.
   defp emit_tick(%State{} = state) do
     if map_size(state.running) > 0 or MapSet.size(state.completed) > 0 or MapSet.size(state.claimed) > 0 do
       DecisionLog.emit("orchestrator.tick", %{
