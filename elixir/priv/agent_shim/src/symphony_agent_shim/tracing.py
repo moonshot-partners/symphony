@@ -83,18 +83,40 @@ def turn_context(*, session_id: str, turn_id: str) -> Iterator[None]:
     if not _enabled:
         yield
         return
+
+    # Drive propagate_attributes by hand instead of `with ...: yield`. As a
+    # generator-based context manager, turn_context MUST yield exactly once: a
+    # `with propagate_attributes(): yield` wrapped in try/except would yield a
+    # second time if `__exit__` raised, crashing the caller with "generator
+    # didn't stop". And `__exit__` *does* raise here — propagate_attributes sets
+    # an OTel contextvars Baggage token, and the Claude Agent SDK drives the
+    # response stream across anyio task groups, so the detach token can be
+    # reset in a different context ("Token was created in a different Context").
+    # Entering/exiting manually with isolated error handling keeps the single
+    # yield invariant and turns any propagation failure into an untraced-but-
+    # working turn rather than a failed one.
+    cm = None
     try:
         from langfuse import propagate_attributes
 
-        with propagate_attributes(
+        cm = propagate_attributes(
             session_id=session_id,
             tags=["symphony-agent"],
             metadata={"turn_id": turn_id},
-        ):
-            yield
+        )
+        cm.__enter__()
     except Exception as exc:  # noqa: BLE001 — tracing must never crash the shim
-        logger.warning("Langfuse turn_context failed: %s", exc)
+        logger.debug("Langfuse turn_context enter failed: %s", exc)
+        cm = None
+
+    try:
         yield
+    finally:
+        if cm is not None:
+            try:
+                cm.__exit__(None, None, None)
+            except Exception as exc:  # noqa: BLE001 — exit must never crash the turn
+                logger.debug("Langfuse turn_context exit failed: %s", exc)
 
 
 def flush() -> None:
