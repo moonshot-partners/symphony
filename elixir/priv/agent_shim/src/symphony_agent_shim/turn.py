@@ -113,6 +113,12 @@ async def _drive_turn(
             )
     finally:
         tracker.unregister(turn_id)
+        # Export this turn's spans now, while the process is alive. The shim is
+        # spawned per session and the orchestrator closes the port shortly after
+        # the turn completes — sooner than the Langfuse BatchSpanProcessor's
+        # periodic export — so without a flush here the turn's trace is lost when
+        # the process dies. No-op when tracing is disabled.
+        tracing.flush()
 
 
 async def _emit_message(

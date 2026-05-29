@@ -373,6 +373,101 @@ async def test_item_agent_message_omits_usage_when_assistant_message_has_no_usag
 
 
 @pytest.mark.asyncio
+async def test_turn_flushes_tracing_after_completion(monkeypatch):
+    """Each turn must flush tracing on completion so spans export before the
+    per-session shim process is killed by the orchestrator."""
+    from symphony_agent_shim import tracing
+
+    calls: list[int] = []
+    monkeypatch.setattr(tracing, "flush", lambda: calls.append(1))
+
+    async def writer(msg: dict) -> None:
+        pass
+
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import ResultMessage
+
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            total_cost_usd=0.0,
+            usage=None,
+            result="ok",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="tflush", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+                "threadId": "tflush",
+                "input": [{"type": "text", "text": "go"}],
+                "cwd": "/tmp",
+            },
+        },
+        writer=writer,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_turn_flushes_tracing_even_on_sdk_failure(monkeypatch):
+    """Flush must also run when the turn fails, so partial spans still export."""
+    from symphony_agent_shim import tracing
+
+    calls: list[int] = []
+    monkeypatch.setattr(tracing, "flush", lambda: calls.append(1))
+
+    async def writer(msg: dict) -> None:
+        pass
+
+    fake_client = MagicMock()
+    fake_client.query = AsyncMock(side_effect=RuntimeError("boom"))
+    fake_client.receive_response = lambda: iter(())
+
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id="tflush2", client=fake_client, auto_approve=True)
+    registry.register(session)
+
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+                "threadId": "tflush2",
+                "input": [{"type": "text", "text": "go"}],
+                "cwd": "/tmp",
+            },
+        },
+        writer=writer,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
 async def test_cancel_emits_turn_cancelled():
     from symphony_agent_shim.turn import TurnTracker
 
