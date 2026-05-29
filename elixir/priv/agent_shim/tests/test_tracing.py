@@ -42,10 +42,12 @@ def reset_tracing_state(monkeypatch):
             sys.modules[name] = mod
 
 
-def _install_fake_langfuse(*, client, recorder=None, raise_on_import=False):
+def _install_fake_langfuse(*, client, recorder=None, raise_on_import=False, propagate_factory=None):
     """Inject fake ``langfuse`` + ``openinference`` modules into sys.modules.
 
     ``recorder`` (a list) captures the kwargs passed to ``propagate_attributes``.
+    ``propagate_factory`` overrides the default ``propagate_attributes`` so a
+    test can inject one that raises on enter/exit.
     """
     if raise_on_import:
         broken = types.ModuleType("langfuse")
@@ -66,7 +68,7 @@ def _install_fake_langfuse(*, client, recorder=None, raise_on_import=False):
             recorder.append(kwargs)
         yield
 
-    lf.propagate_attributes = fake_propagate_attributes
+    lf.propagate_attributes = propagate_factory or fake_propagate_attributes
     sys.modules["langfuse"] = lf
 
     oi = types.ModuleType("openinference")
@@ -173,3 +175,58 @@ def test_flush_calls_client_when_enabled(monkeypatch):
 
     tracing.flush()
     assert client.flushed == 1
+
+
+def test_turn_context_yields_once_when_propagate_exit_raises(monkeypatch):
+    """propagate_attributes.__exit__ raises in async contexts (OTel contextvars
+    token detached in a different context). turn_context must still yield exactly
+    once and must not propagate the error — otherwise the generator crashes the
+    caller with 'generator didn't stop' and the agent turn is falsely failed."""
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+
+    class RaisingExitPropagate:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            raise ValueError("Token was created in a different Context")
+
+    client = _FakeClient()
+    _install_fake_langfuse(client=client, propagate_factory=RaisingExitPropagate)
+    assert tracing.setup() is True
+
+    ran = []
+    # Must not raise, and the body must execute exactly once.
+    with tracing.turn_context(session_id="shim-xyz", turn_id="turn-1"):
+        ran.append(True)
+    assert ran == [True]
+
+
+def test_turn_context_yields_once_when_propagate_enter_raises(monkeypatch):
+    """If propagate_attributes.__enter__ raises, turn_context degrades to an
+    untraced passthrough: body runs once, no error escapes."""
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
+
+    class RaisingEnterPropagate:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            raise RuntimeError("enter boom")
+
+        def __exit__(self, *exc):
+            return False
+
+    client = _FakeClient()
+    _install_fake_langfuse(client=client, propagate_factory=RaisingEnterPropagate)
+    assert tracing.setup() is True
+
+    ran = []
+    with tracing.turn_context(session_id="shim-xyz", turn_id="turn-1"):
+        ran.append(True)
+    assert ran == [True]
