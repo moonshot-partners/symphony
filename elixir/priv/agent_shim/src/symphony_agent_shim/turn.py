@@ -12,7 +12,7 @@ from typing import Any
 
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
 
-from symphony_agent_shim import protocol
+from symphony_agent_shim import protocol, tracing
 from symphony_agent_shim.thread import ThreadRegistry
 
 Writer = Callable[[dict[str, Any]], Awaitable[None]]
@@ -66,7 +66,7 @@ async def handle_turn_start(
     turn_id = f"turn-{uuid.uuid4().hex[:12]}"
 
     session.active_task = asyncio.create_task(
-        _drive_turn(session.client, prompt, turn_id, writer, tracker),
+        _drive_turn(session.client, prompt, turn_id, writer, tracker, session.thread_id),
         name=f"drive-turn-{turn_id}",
     )
 
@@ -85,19 +85,25 @@ def _flatten_input(blocks: list[dict[str, Any]]) -> str:
 
 
 async def _drive_turn(
-    client: Any, prompt: str, turn_id: str, writer: Writer, tracker: TurnTracker
+    client: Any,
+    prompt: str,
+    turn_id: str,
+    writer: Writer,
+    tracker: TurnTracker,
+    thread_id: str,
 ) -> None:
     tracker.register(turn_id)
     accumulated: dict[str, int] = {}
     try:
         try:
-            await client.query(prompt)
-            async for message in client.receive_response():
-                if isinstance(message, AssistantMessage) and isinstance(message.usage, dict):
-                    for key, val in message.usage.items():
-                        if isinstance(val, int):
-                            accumulated[key] = accumulated.get(key, 0) + val
-                await _emit_message(message, turn_id, writer, accumulated)
+            with tracing.turn_context(session_id=thread_id, turn_id=turn_id):
+                await client.query(prompt)
+                async for message in client.receive_response():
+                    if isinstance(message, AssistantMessage) and isinstance(message.usage, dict):
+                        for key, val in message.usage.items():
+                            if isinstance(val, int):
+                                accumulated[key] = accumulated.get(key, 0) + val
+                    await _emit_message(message, turn_id, writer, accumulated)
         except Exception as exc:  # noqa: BLE001 — surface SDK error as JSON-RPC failure
             await writer(
                 protocol.notification(
