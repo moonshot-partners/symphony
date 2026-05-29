@@ -18,7 +18,7 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPinTest do
   end
 
   describe "pin/3" do
-    test "pins the AC Extracted section as a comment threaded under the workpad" do
+    test "captures the AC Extracted section without posting a public comment" do
       text =
         "preamble noise\n\n## AC Extracted\n\n1. Directory renamed\n2. Imports updated\n\n## Notes\n\nignore me"
 
@@ -27,24 +27,22 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPinTest do
       result = ArtifactPin.pin(e, "issue-abc", "AC Extracted")
 
       assert MapSet.member?(result.pinned_artifacts, "AC Extracted")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "## AC Extracted"
-      assert body =~ "1. Directory renamed"
-      assert body =~ "2. Imports updated"
-      refute body =~ "ignore me"
-      refute body =~ "preamble noise"
+      assert result.pinned_evidence_text["AC Extracted"] =~ "## AC Extracted"
+      assert result.pinned_evidence_text["AC Extracted"] =~ "1. Directory renamed"
+      assert result.pinned_evidence_text["AC Extracted"] =~ "2. Imports updated"
+      refute result.pinned_evidence_text["AC Extracted"] =~ "ignore me"
+      refute result.pinned_evidence_text["AC Extracted"] =~ "preamble noise"
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
-    test "pins the AC Evidence section" do
+    test "captures the AC Evidence section" do
       e = entry(%{last_agent_text: "## AC Evidence\n\nAC#1 -> test_foo passes"})
 
       result = ArtifactPin.pin(e, "issue-abc", "AC Evidence")
 
       assert MapSet.member?(result.pinned_artifacts, "AC Evidence")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "AC#1 -> test_foo passes"
+      assert result.pinned_evidence_text["AC Evidence"] =~ "AC#1 -> test_foo passes"
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
     test "stores the extracted section text in pinned_evidence_text for downstream gates" do
@@ -64,7 +62,7 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPinTest do
       e = entry(%{last_agent_text: "## AC Extracted\n\nbody"})
 
       pinned = ArtifactPin.pin(e, "issue-abc", "AC Extracted")
-      assert_receive {:memory_tracker_comment, "issue-abc", _}, 2000
+      assert pinned.pinned_evidence_text["AC Extracted"] =~ "body"
 
       assert ^pinned = ArtifactPin.pin(pinned, "issue-abc", "AC Extracted")
       refute_receive {:memory_tracker_comment, _, _}, 200
@@ -75,12 +73,10 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPinTest do
       e = entry(%{last_agent_text: text})
 
       after_extracted = ArtifactPin.pin(e, "issue-abc", "AC Extracted")
-      assert_receive {:memory_tracker_comment, "issue-abc", b1}, 2000
-      assert b1 =~ "extracted body"
+      assert after_extracted.pinned_evidence_text["AC Extracted"] =~ "extracted body"
 
       after_evidence = ArtifactPin.pin(after_extracted, "issue-abc", "AC Evidence")
-      assert_receive {:memory_tracker_comment, "issue-abc", b2}, 2000
-      assert b2 =~ "evidence body"
+      assert after_evidence.pinned_evidence_text["AC Evidence"] =~ "evidence body"
 
       assert MapSet.member?(after_evidence.pinned_artifacts, "AC Extracted")
       assert MapSet.member?(after_evidence.pinned_artifacts, "AC Evidence")
@@ -107,41 +103,26 @@ defmodule SymphonyElixir.Orchestrator.ArtifactPinTest do
       refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
-    test "posts without parent_id when workpad_comment_id is nil" do
+    test "does not post even when workpad_comment_id is nil" do
       e = entry(%{last_agent_text: "## AC Extracted\n\nbody", workpad_comment_id: nil})
 
-      ArtifactPin.pin(e, "issue-abc", "AC Extracted")
+      result = ArtifactPin.pin(e, "issue-abc", "AC Extracted")
 
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "## AC Extracted"
-    end
-
-    test "logs a warning when Tracker.create_comment returns an error" do
-      Application.put_env(:symphony_elixir, :memory_tracker_create_comment_result, {:error, :boom})
-      on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_create_comment_result) end)
-
-      e = entry(%{last_agent_text: "## AC Extracted\n\nbody"})
-
-      log =
-        capture_log([level: :warning], fn ->
-          ArtifactPin.pin(e, "issue-abc", "AC Extracted")
-          Process.sleep(100)
-        end)
-
-      assert log =~ "ArtifactPin post failed"
-      assert log =~ "boom"
+      assert result.pinned_evidence_text["AC Extracted"] =~ "## AC Extracted"
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
     test "section stops at the next ## heading but keeps ### subheadings" do
       text = "## AC Extracted\n\n### Detail\n\nkept content\n\n## AC Evidence\n\ndropped content"
       e = entry(%{last_agent_text: text})
 
-      ArtifactPin.pin(e, "issue-abc", "AC Extracted")
+      result = ArtifactPin.pin(e, "issue-abc", "AC Extracted")
 
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
+      body = result.pinned_evidence_text["AC Extracted"]
       assert body =~ "### Detail"
       assert body =~ "kept content"
       refute body =~ "dropped content"
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
   end
 end

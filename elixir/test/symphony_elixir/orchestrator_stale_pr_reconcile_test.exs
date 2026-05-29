@@ -67,10 +67,18 @@ defmodule SymphonyElixir.OrchestratorStalePrReconcileTest do
 
   defp setup_memory_tracker do
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
+    Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue -> "" end)
+    Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue -> [] end)
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
 
     on_exit(fn ->
       Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
       Application.delete_env(:symphony_elixir, :pr_ready_fn)
+      Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_body_fn)
+      Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+      Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
     end)
   end
 
