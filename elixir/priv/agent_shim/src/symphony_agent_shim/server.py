@@ -4,7 +4,7 @@ import asyncio
 import sys
 from typing import Any
 
-from symphony_agent_shim import protocol
+from symphony_agent_shim import protocol, tracing
 from symphony_agent_shim.framing import LineFramer, write_frame
 from symphony_agent_shim.handshake import handle_initialize, is_initialized_notification
 from symphony_agent_shim.thread import ThreadRegistry, handle_thread_start
@@ -13,6 +13,7 @@ from symphony_agent_shim.turn import TurnTracker, handle_turn_start
 
 
 async def run_async(*, stdin: Any, stdout: Any) -> None:
+    tracing.setup()
     framer = LineFramer(stdin)
     out_lock = asyncio.Lock()
 
@@ -65,6 +66,9 @@ async def run_async(*, stdin: Any, stdout: Any) -> None:
             await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5.0)
         except TimeoutError:
             pass
+
+    # Export any spans buffered during this session before the process exits.
+    tracing.flush()
 
 
 def run() -> None:
