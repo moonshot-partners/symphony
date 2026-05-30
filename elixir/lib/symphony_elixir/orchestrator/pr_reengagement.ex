@@ -98,7 +98,13 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
           identifier: issue.identifier
         })
 
-        state
+        # A completed issue with no PR can never produce a review to
+        # re-engage on, so evict it from `state.completed` instead of
+        # re-scanning it every poll cycle — the dominant source of the
+        # decision-log flood (skip_no_pr fired ~2880x/day per lingering
+        # issue). If it is later re-dispatched and opens a PR, the normal
+        # completion path re-adds it. Safe: no PR means nothing to lose.
+        %{state | completed: MapSet.delete(state.completed, issue.id)}
 
       pr_url ->
         detector_fn = Map.fetch!(opts, :detector_fn)

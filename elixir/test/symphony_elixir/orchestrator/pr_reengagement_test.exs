@@ -355,7 +355,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       refute_receive :commented, 50
     end
 
-    test "no-op when fetched issue has no PR url (defensive)" do
+    test "evicts a completed issue that has no PR url" do
       parent = self()
 
       issue_no_pr = %Issue{
@@ -385,8 +385,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
           end
         })
 
-      assert ^state = PrReengagement.run(state, opts)
+      new_state = PrReengagement.run(state, opts)
 
+      # No PR means nothing to re-engage on, so the issue is dropped from
+      # state.completed and will not be re-scanned every poll cycle.
+      refute MapSet.member?(new_state.completed, "i-no-pr")
       refute_receive :detector_called, 50
       refute_receive :transitioned, 50
       refute_receive :commented, 50
@@ -422,7 +425,7 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       refute_receive :commented, 50
     end
 
-    test "no-op when fetched issue carries repos but none have a PR yet (defensive flat_map fallback)" do
+    test "evicts a completed issue whose repos carry no PR yet (defensive flat_map fallback)" do
       parent = self()
 
       issue_repo_no_pr = %Issue{
@@ -451,8 +454,9 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
           end
         })
 
-      assert ^state = PrReengagement.run(state, opts)
+      new_state = PrReengagement.run(state, opts)
 
+      refute MapSet.member?(new_state.completed, "i-pre-pr")
       refute_receive :detector_called, 50
       refute_receive :transitioned, 50
       refute_receive :commented, 50
