@@ -12,12 +12,11 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
       the configured `:pickup_state` so DispatchGate re-picks it on the next
       tick, and posts a threaded workpad comment.
 
-    * CAP-IGNORE (count >= 2, new head_sha) — leaves Linear untouched and
-      records the head_sha in `cap_hit_shas` so the same sha never produces
-      a second decision-log event.
+    * CAP REACHED (count >= 2) — re-engagement is permanently done for this
+      PR, so the issue is evicted from `state.completed` (the cap count
+      survives in `pr_engagements`) and stops being re-scanned every cycle.
 
-    * CAP-IGNORE DEDUP (count >= 2, head_sha already in cap_hit_shas) —
-      no state transition, no comment. Idempotent across poll cycles.
+  An issue with no PR is also evicted (nothing to re-engage on).
 
   All Linear / GitHub side-effects are injected so the module stays
   pure-transform under test. The orchestrator wires the production
@@ -128,26 +127,26 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
 
   defp handle_critical(state, issue, pr_url, info, opts) do
     engagement = Map.get(state.pr_engagements, pr_url, %{count: 0, cap_hit_shas: MapSet.new()})
-    head_sha = Map.get(info, :head_sha, "")
 
-    cond do
-      engagement.count < @cap_k ->
-        dispatch_reengagement(state, issue, pr_url, info, engagement, opts)
+    if engagement.count < @cap_k do
+      dispatch_reengagement(state, issue, pr_url, info, engagement, opts)
+    else
+      # Cap reached: re-engagement is permanently done for this PR (we never
+      # dispatch past @cap_k). Log once and evict the issue from
+      # state.completed so it stops being re-scanned every poll cycle — the
+      # former cap branches only logged and churned. The cap count survives
+      # in pr_engagements (keyed by PR url), so a later re-dispatch on the
+      # same PR stays capped.
+      DecisionLog.emit("pr_reengagement.cap_reached_evict", %{
+        issue_id: issue.id,
+        identifier: issue.identifier,
+        pr_url: pr_url,
+        head_sha: Map.get(info, :head_sha, ""),
+        critical_count: Map.get(info, :count, 0),
+        count: engagement.count
+      })
 
-      MapSet.member?(engagement.cap_hit_shas, head_sha) ->
-        # Already ignored on this exact sha — stay silent, no state churn.
-        DecisionLog.emit("pr_reengagement.cap_ignore_dedup", %{
-          issue_id: issue.id,
-          identifier: issue.identifier,
-          pr_url: pr_url,
-          head_sha: head_sha,
-          count: engagement.count
-        })
-
-        state
-
-      true ->
-        ignore_cap_overflow(state, issue, pr_url, info, engagement)
+      %{state | completed: MapSet.delete(state.completed, issue.id)}
     end
   end
 
@@ -178,29 +177,6 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
           Map.put(state.pr_engagements, pr_url, %{
             count: next_count,
             cap_hit_shas: engagement.cap_hit_shas
-          })
-    }
-  end
-
-  defp ignore_cap_overflow(state, %Issue{} = issue, pr_url, info, engagement) do
-    head_sha = Map.get(info, :head_sha, "")
-
-    DecisionLog.emit("pr_reengagement.cap_ignore", %{
-      issue_id: issue.id,
-      identifier: issue.identifier,
-      pr_url: pr_url,
-      head_sha: head_sha,
-      critical_count: Map.get(info, :count, 0),
-      action: "ignore",
-      count: engagement.count
-    })
-
-    %{
-      state
-      | pr_engagements:
-          Map.put(state.pr_engagements, pr_url, %{
-            count: engagement.count,
-            cap_hit_shas: MapSet.put(engagement.cap_hit_shas, head_sha)
           })
     }
   end
