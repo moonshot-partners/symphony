@@ -33,6 +33,7 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
       path = Path.join(System.tmp_dir!(), "cockpit_runs_#{System.unique_integer([:positive])}.jsonl")
       File.write!(path, ~s({"ticket":"SODEV-X","turns":2}\n))
       System.put_env("SYMPHONY_RUNS_PATH", path)
+
       on_exit(fn ->
         System.delete_env("SYMPHONY_RUNS_PATH")
         File.rm(path)

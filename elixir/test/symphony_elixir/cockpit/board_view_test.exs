@@ -71,11 +71,13 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
       assert ticket["title"] == "Fix search"
       assert ticket["state"] == "In Progress"
       assert ticket["url"] == "https://linear.app/x/issue/SODEV-1"
+
       assert ticket["pr"] == %{
                "number" => 642,
                "ci" => nil,
                "url" => "https://github.com/o/r/pull/642"
              }
+
       assert ticket["agent"]["turn"] == 3
       assert ticket["agent"]["status"] == "idle"
       assert ticket["agent"]["costUsd"] == nil
