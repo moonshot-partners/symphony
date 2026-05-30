@@ -171,7 +171,8 @@ defmodule SymphonyElixir.AppServerTest do
                    |> Jason.decode!()
                    |> then(fn payload ->
                      payload["method"] == "turn/start" &&
-                       get_in(payload, ["params", "sandboxPolicy"]) == configured_policy
+                       get_in(payload, ["params", "sandboxPolicy"]) == configured_policy &&
+                       get_in(payload, ["params", "ticket"]) == issue.identifier
                    end)
                  else
                    false

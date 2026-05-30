@@ -269,7 +269,7 @@ defmodule SymphonyElixir.GitHubPr do
 
   defp detect_critical_review_for_url(url) when is_binary(url) do
     with [_, owner, repo, number] <- Regex.run(@github_pr_regex, url),
-         {:ok, head_sha, head_at} <- fetch_head_meta(owner, repo, number, url),
+         {:ok, head_sha, head_at, "OPEN"} <- fetch_head_meta(owner, repo, number, url),
          {:ok, comments} <- fetch_pr_comments(owner, repo, number, url) do
       case fetch_pr_review_verdict(owner, repo, number, url) do
         {:ok, verdict} -> critical_review_from_structured_verdict(verdict, head_sha)
@@ -277,6 +277,9 @@ defmodule SymphonyElixir.GitHubPr do
         {:error, reason} -> unknown_review_result(head_sha, "artifact read failed: #{inspect(reason)}")
       end
     else
+      # A non-OPEN PR (CLOSED/MERGED) carries no actionable review: a stale
+      # request_changes comment on a closed PR must NOT re-engage the agent
+      # (it would re-attach the dead PR to the ticket). Treat as :none.
       _ -> :none
     end
   end
@@ -422,6 +425,20 @@ defmodule SymphonyElixir.GitHubPr do
   end
 
   defp fetch_head_meta(owner, repo, number, url) do
+    fetch_fn =
+      Application.get_env(
+        :symphony_elixir,
+        :pr_head_meta_fn,
+        &__MODULE__.default_fetch_head_meta/4
+      )
+
+    fetch_fn.(owner, repo, number, url)
+  end
+
+  @doc false
+  @spec default_fetch_head_meta(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, String.t(), DateTime.t() | nil, String.t()} | :error
+  def default_fetch_head_meta(owner, repo, number, url) do
     case System.cmd(
            "gh",
            [
@@ -431,16 +448,16 @@ defmodule SymphonyElixir.GitHubPr do
              "--repo",
              "#{owner}/#{repo}",
              "--json",
-             "headRefOid,commits",
+             "headRefOid,commits,state",
              "--jq",
-             "{head: .headRefOid, committed_at: (.commits | last.committedDate)}"
+             "{head: .headRefOid, committed_at: (.commits | last.committedDate), state: .state}"
            ],
            stderr_to_stdout: true
          ) do
       {output, 0} ->
         case Jason.decode(output) do
-          {:ok, %{"head" => head, "committed_at" => at}} when is_binary(head) ->
-            {:ok, head, parse_committed_at(at)}
+          {:ok, %{"head" => head, "committed_at" => at} = meta} when is_binary(head) ->
+            {:ok, head, parse_committed_at(at), normalize_pr_state(meta["state"])}
 
           _ ->
             Logger.debug("gh pr view returned no head meta for #{url} output=#{inspect(output)}")
@@ -454,6 +471,11 @@ defmodule SymphonyElixir.GitHubPr do
     end
   end
 
+  # Defaults to "OPEN" when the state field is absent so detection stays
+  # fail-open: only an explicit CLOSED/MERGED short-circuits re-engagement.
+  defp normalize_pr_state(state) when is_binary(state), do: state |> String.trim() |> String.upcase()
+  defp normalize_pr_state(_), do: "OPEN"
+
   defp parse_committed_at(nil), do: nil
 
   defp parse_committed_at(at) when is_binary(at) do
@@ -464,6 +486,20 @@ defmodule SymphonyElixir.GitHubPr do
   end
 
   defp fetch_pr_comments(owner, repo, number, url) do
+    fetch_fn =
+      Application.get_env(
+        :symphony_elixir,
+        :pr_comments_fn,
+        &__MODULE__.default_fetch_pr_comments/4
+      )
+
+    fetch_fn.(owner, repo, number, url)
+  end
+
+  @doc false
+  @spec default_fetch_pr_comments(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, [map()]} | :error
+  def default_fetch_pr_comments(owner, repo, number, url) do
     case System.cmd(
            "gh",
            ["api", "/repos/#{owner}/#{repo}/issues/#{number}/comments"],

@@ -9,10 +9,13 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     previous_recipient = Application.get_env(:symphony_elixir, :memory_tracker_recipient)
     Application.put_env(:symphony_elixir, :workpad_enabled, true)
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+    Application.put_env(:symphony_elixir, :debug_bundle_upload_module, __MODULE__.FakeUpload)
 
     # Default required-checks injection so existing tests (and new ones that
     # don't care about CI routing) don't shell out to `gh pr view`.
     Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _issue -> :all_green end)
+    Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue -> "" end)
+    Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue -> [] end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
@@ -35,6 +38,9 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
       end
 
       Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
+      Application.delete_env(:symphony_elixir, :pr_body_fn)
+      Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
+      Application.delete_env(:symphony_elixir, :debug_bundle_upload_module)
     end)
 
     :ok
@@ -361,8 +367,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
     # Linear comment naming the red checks lands on the workpad thread.
     assert_receive {:memory_tracker_comment, ^issue_id, comment_body}, 1_000
+    assert comment_body =~ "## Blocked by CI"
     assert comment_body =~ "qa-evidence"
     assert comment_body =~ "lint"
+    assert comment_body =~ "agent-debug.zip"
     assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-ci-red"}, 1_000
   end
 
@@ -409,7 +417,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, _}, 200
   end
 
-  test "SYM-16 auto-engagement bypass overrides ci_red (lets K=1 re-engagement run)" do
+  test "SYM-16 auto-engagement bypass overrides ci_red (lets bounded re-engagement run)" do
     issue_id = "issue-sym16-vs-cired"
     pr_url = "https://github.com/org/repo/pull/202"
 
@@ -436,7 +444,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
       qa_evidence_subpath: "fe-next-app/qa-evidence"
     )
 
-    # Even with red CI, the SYM-16 bypass wins so the K=1 re-engagement
+    # Even with red CI, the SYM-16 bypass wins so the bounded re-engagement
     # has a chance to land instead of double-routing on every red check.
     Application.put_env(:symphony_elixir, :pr_required_checks_status_fn, fn _ ->
       {:red, ["qa-evidence"]}
@@ -498,9 +506,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
 
     assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "Gate D — substance verification"
+    assert body =~ "## Blocked by AC evidence"
     assert body =~ "AC 1"
     assert body =~ "AC 2"
+    assert body =~ "agent-debug.zip"
     assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-gated-fail"}, 1_000
   end
 
@@ -542,6 +551,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
+    assert body =~ "## Ready for review"
+    assert body =~ "Moved to `In Code Review` after PR checks and Symphony gates passed."
+    assert body =~ "agent-debug.zip"
   end
 
   test "routes state to on_reject_state when ConflictDisclosure detects undisclosed extras (SYM-30)" do
@@ -597,9 +610,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
 
     assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "Conflict disclosure"
+    assert body =~ "## Blocked by scope disclosure"
     assert body =~ "app/controllers/users_controller.rb"
     assert body =~ "config/routes.rb"
+    assert body =~ "agent-debug.zip"
     assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-conflict"}, 1_000
   end
 
@@ -716,8 +730,9 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
 
     assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "QA artifact"
-    assert body =~ "SYM-34"
+    assert body =~ "## Blocked by missing visual QA evidence"
+    assert body =~ "no screenshot, video, or trace artifact was found"
+    assert body =~ "agent-debug.zip"
   end
 
   test "routes state to on_complete_state when PR claims PASS and qa-evidence artifact is present (SYM-34)" do

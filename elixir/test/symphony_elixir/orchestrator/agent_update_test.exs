@@ -68,6 +68,103 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
     end
   end
 
+  describe "integrate/2 — langfuse_trace_id" do
+    defp trace_completed_update(trace_id) do
+      params =
+        %{"turn_id" => "t-1", "usage" => %{}}
+        |> then(fn p -> if trace_id, do: Map.put(p, "langfuse_trace_id", trace_id), else: p end)
+
+      payload = %{"method" => "turn/completed", "params" => params}
+
+      %{
+        event: :turn_completed,
+        timestamp: ~U[2026-05-15 13:00:00Z],
+        payload: payload,
+        raw: "",
+        details: payload
+      }
+    end
+
+    test "latches the trace id from turn/completed params" do
+      {updated, _} =
+        AgentUpdate.integrate(
+          %{session_id: "sess-1"},
+          trace_completed_update("c3e398dcac560ff9301ccecff37d3e58")
+        )
+
+      assert updated.langfuse_trace_id == "c3e398dcac560ff9301ccecff37d3e58"
+    end
+
+    test "keeps an existing trace id when a later update carries none" do
+      {updated, _} =
+        AgentUpdate.integrate(
+          %{session_id: "sess-1", langfuse_trace_id: "existing-trace"},
+          trace_completed_update(nil)
+        )
+
+      assert updated.langfuse_trace_id == "existing-trace"
+    end
+
+    test "is nil when no update ever carried a trace id" do
+      {updated, _} =
+        AgentUpdate.integrate(%{session_id: "sess-1"}, trace_completed_update(nil))
+
+      assert updated.langfuse_trace_id == nil
+    end
+  end
+
+  describe "integrate/2 — agent_cost_usd" do
+    defp cost_completed_update(cost) do
+      params =
+        %{"turn_id" => "t-1", "usage" => %{}}
+        |> then(fn p -> if cost == :none, do: p, else: Map.put(p, "total_cost_usd", cost) end)
+
+      payload = %{"method" => "turn/completed", "params" => params}
+
+      %{
+        event: :turn_completed,
+        timestamp: ~U[2026-05-15 13:00:00Z],
+        payload: payload,
+        raw: "",
+        details: payload
+      }
+    end
+
+    test "latches the cumulative cost from turn/completed params" do
+      {updated, _} =
+        AgentUpdate.integrate(%{session_id: "sess-1"}, cost_completed_update(0.855))
+
+      assert updated.agent_cost_usd == 0.855
+    end
+
+    test "a later turn overwrites with the newer cumulative cost" do
+      {updated, _} =
+        AgentUpdate.integrate(
+          %{session_id: "sess-1", agent_cost_usd: 0.855},
+          cost_completed_update(1.42)
+        )
+
+      assert updated.agent_cost_usd == 1.42
+    end
+
+    test "keeps the existing cost when a later update carries none" do
+      {updated, _} =
+        AgentUpdate.integrate(
+          %{session_id: "sess-1", agent_cost_usd: 1.42},
+          cost_completed_update(:none)
+        )
+
+      assert updated.agent_cost_usd == 1.42
+    end
+
+    test "is nil when no update ever carried a cost" do
+      {updated, _} =
+        AgentUpdate.integrate(%{session_id: "sess-1"}, cost_completed_update(:none))
+
+      assert updated.agent_cost_usd == nil
+    end
+  end
+
   describe "integrate/2 — real-time token streaming via item/agent_message" do
     test "absolute usage at params.usage propagates even when method is not turn/completed" do
       # Shim emits accumulated usage inside item/agent_message params so the

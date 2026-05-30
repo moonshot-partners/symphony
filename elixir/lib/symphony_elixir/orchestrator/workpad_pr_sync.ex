@@ -24,11 +24,17 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     GitHubPrFiles,
     QaArtifactGate,
     QaEvidence,
-    Tracker,
     Workpad
   }
 
-  alias SymphonyElixir.Orchestrator.{GithubLabel, RunningEntry, State, StateTransition, TurnArtifacts}
+  alias SymphonyElixir.Orchestrator.{
+    CompletionSummary,
+    GithubLabel,
+    RunningEntry,
+    State,
+    StateTransition,
+    TurnArtifacts
+  }
 
   @doc """
   Sync the workpad comment for `issue_id` with the `pr_attached`
@@ -82,11 +88,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     if in_auto_engagement?(issue, pr_engagements) do
       # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
       # in on_reject_state on this run even if QA self-reports BLOCKED
-      # or CI is red — let the K=1 re-engagement land. If the next
-      # claude-pr-review verdict is still critical, PrReengagement caps
-      # at K=1 and parks for human review.
+      # or CI is red — let the bounded re-engagement land. Later blocking
+      # claude-pr-review verdicts are handled by PrReengagement.
       emit_route("auto_engagement_bypass", issue, complete_state, pr_engagements)
-      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id)
+      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
     else
       route_by_ci_then_qa(
         issue,
@@ -110,11 +115,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     case GitHubPr.required_checks_status(issue) do
       {:red, names} when is_binary(reject_state) ->
         # SYM-1c (SYM-29): a red required check means the agent's PR cannot
-        # land as-is. Park in on_reject_state and post a workpad comment
-        # naming the failing checks so a human can triage.
+        # land as-is. Park in on_reject_state and publish one final
+        # summary naming the failing checks so a human can triage.
         emit_route("ci_red", issue, reject_state, pr_engagements, %{red_checks: names})
-        post_red_checks_comment(issue, names, parent_comment_id)
-        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, {:ci_red, names})
 
       :pending ->
         # SYM-1c (SYM-29) AC3: checks still running — do NOT transition.
@@ -132,8 +136,13 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
               unbacked_acs: Enum.map(failures, & &1.ac_id)
             })
 
-            post_substance_fail_comment(issue, failures, parent_comment_id)
-            apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+            apply_completion_side_effects(
+              issue,
+              reject_state,
+              running_entry,
+              parent_comment_id,
+              {:gate_d_substance_fail, failures}
+            )
 
           _ ->
             route_post_substance(
@@ -166,8 +175,13 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
           undisclosed_files: undisclosed
         })
 
-        post_conflict_disclosure_comment(issue, undisclosed, parent_comment_id)
-        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+        apply_completion_side_effects(
+          issue,
+          reject_state,
+          running_entry,
+          parent_comment_id,
+          {:conflict_disclosure_fail, undisclosed}
+        )
 
       _ ->
         route_post_conflict(
@@ -191,13 +205,12 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
        ) do
     case qa_artifact_verdict(issue, running_entry) do
       {:fail, :no_artifact} when is_binary(reject_state) ->
-        # SYM-34: the agent's PR body claims `- Result: PASS` under
-        # `## QA self-review` but no Playwright artifact (screenshot,
-        # webm, zip) exists on disk. Park in on_reject_state — the agent
-        # skipped the QA run and only wrote prose.
+        # SYM-34: the agent's PR body or ticket contract requires visual
+        # QA evidence, but no Playwright artifact (screenshot, webm, zip)
+        # exists on disk. Park in on_reject_state — the agent skipped the
+        # QA run and only wrote prose.
         emit_route("qa_artifact_missing", issue, reject_state, pr_engagements)
-        post_qa_artifact_missing_comment(issue, parent_comment_id)
-        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, :qa_artifact_missing)
 
       _ ->
         route_by_qa(
@@ -214,10 +227,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   defp route_by_qa(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state) do
     if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
       emit_route("qa_blocked", issue, reject_state, pr_engagements)
-      apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id)
+      apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, :qa_blocked)
     else
       emit_route("default_complete", issue, complete_state, pr_engagements)
-      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id)
+      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
     end
   end
 
@@ -246,7 +259,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
 
     QaArtifactGate.validate(body, workspace_path, issue_id,
       subpaths: Config.qa_evidence_subpaths(),
-      changed_files: changed_files
+      changed_files: changed_files,
+      issue_description: Map.get(issue, :description)
     )
   end
 
@@ -261,9 +275,10 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
 
   defp read_understanding_md(_), do: nil
 
-  defp apply_completion_side_effects(issue, target_state, running_entry, parent_comment_id) do
+  defp apply_completion_side_effects(issue, target_state, running_entry, parent_comment_id, reason) do
     StateTransition.apply(issue, target_state)
     Task.start(fn -> GithubLabel.apply(issue) end)
+    CompletionSummary.publish_async(issue, target_state, running_entry, reason, parent_comment_id)
 
     QaEvidence.maybe_publish(
       Map.get(issue, :id),
@@ -284,111 +299,6 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     }
 
     DecisionLog.emit("workpad_pr_sync.route", Map.merge(base, extra))
-  end
-
-  defp post_red_checks_comment(issue, names, parent_comment_id) do
-    issue_id = Map.get(issue, :id)
-
-    if is_binary(issue_id) do
-      body = red_checks_comment_body(names)
-      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
-    end
-
-    :ok
-  end
-
-  defp post_conflict_disclosure_comment(issue, undisclosed, parent_comment_id) do
-    issue_id = Map.get(issue, :id)
-
-    if is_binary(issue_id) do
-      body = conflict_disclosure_comment_body(undisclosed)
-      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
-    end
-
-    :ok
-  end
-
-  defp conflict_disclosure_comment_body(undisclosed) when is_list(undisclosed) do
-    bullet_list = Enum.map_join(undisclosed, "\n", &"- `#{&1}`")
-
-    """
-    ## Conflict disclosure — undisclosed files in diff
-
-    The ticket spec declared a minimal-diff allowlist via `## Files (allowed)`, but the PR touches files outside it with no mention in the agent's `## Root cause` section of `understanding.md`. Parking in `on_reject_state` so a human can decide whether to expand the allowlist or revert the diff.
-
-    **Undisclosed files:**
-
-    #{bullet_list}
-
-    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1d/SYM-30)._
-    """
-  end
-
-  defp post_qa_artifact_missing_comment(issue, parent_comment_id) do
-    issue_id = Map.get(issue, :id)
-
-    if is_binary(issue_id) do
-      body = qa_artifact_missing_comment_body()
-      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
-    end
-
-    :ok
-  end
-
-  defp qa_artifact_missing_comment_body do
-    """
-    ## QA artifact — substance verification failed
-
-    The PR body declares `- Result: PASS` under `## QA self-review`, but no real Playwright artifact (`*.png`, `*.webm`, `*.zip`) was found in the workspace `qa-evidence/` directory or the staged retry snapshot. The agent likely wrote the QA prose without running the spec. Parking in `on_reject_state` so the retry loop or a human can re-run the QA harness end-to-end.
-
-    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-34)._
-    """
-  end
-
-  defp post_substance_fail_comment(issue, failures, parent_comment_id) do
-    issue_id = Map.get(issue, :id)
-
-    if is_binary(issue_id) do
-      body = substance_fail_comment_body(failures)
-      Task.start(fn -> Tracker.create_comment(issue_id, body, parent_id: parent_comment_id) end)
-    end
-
-    :ok
-  end
-
-  defp substance_fail_comment_body(failures) when is_list(failures) do
-    bullet_list =
-      Enum.map_join(failures, "\n", fn %{ac_id: id, reason: reason} ->
-        "- AC #{id} — #{reason}"
-      end)
-
-    """
-    ## Gate D — substance verification failed
-
-    The agent's `## AC Evidence` block contains `verified` claims that lack a resolvable artifact reference. Parking in `on_reject_state` so the retry loop or a human can investigate.
-
-    **Unbacked claims:**
-
-    #{bullet_list}
-
-    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1b/SYM-28)._
-    """
-  end
-
-  defp red_checks_comment_body(names) when is_list(names) do
-    bullet_list = Enum.map_join(names, "\n", &"- `#{&1}`")
-
-    """
-    ## CI gate — required checks failing
-
-    The agent's PR has one or more failing required checks. Parking in `on_reject_state` so the retry loop or a human can investigate.
-
-    **Failing checks:**
-
-    #{bullet_list}
-
-    _Posted by SymphonyElixir.Orchestrator.WorkpadPrSync (SYM-1c)._
-    """
   end
 
   defp in_auto_engagement?(issue, pr_engagements) when is_map(pr_engagements) do

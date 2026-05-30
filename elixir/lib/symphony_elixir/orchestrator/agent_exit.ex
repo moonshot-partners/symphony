@@ -24,7 +24,6 @@ defmodule SymphonyElixir.Orchestrator.AgentExit do
   alias SymphonyElixir.Orchestrator.{
     AgentTotals,
     ArtifactPin,
-    GateDTrigger,
     RetryAttempts,
     RetryDispatch,
     RetryPlan,
@@ -32,8 +31,6 @@ defmodule SymphonyElixir.Orchestrator.AgentExit do
     RunningEntry,
     State
   }
-
-  alias SymphonyElixir.Tracker
 
   @type completer :: (State.t(), String.t() -> State.t())
   @type retrier :: ({:armed | :halted, State.t()}, term(), String.t(), map() -> State.t())
@@ -79,8 +76,6 @@ defmodule SymphonyElixir.Orchestrator.AgentExit do
     retry_dispatch_opts = Keyword.fetch!(opts, :retry_dispatch_opts)
 
     pinned_entry = ArtifactPin.pin(running_entry, issue_id, "AC Evidence")
-    gate_d_result = GateDTrigger.maybe_run(pinned_entry)
-    handle_gate_d_result(gate_d_result, issue_id, pinned_entry)
 
     state
     |> completer.(issue_id)
@@ -104,26 +99,5 @@ defmodule SymphonyElixir.Orchestrator.AgentExit do
 
     RetryAttempts.schedule(state, issue_id, next_attempt, failure_metadata, recipient)
     |> retrier.(Map.get(running_entry, :issue), issue_id, failure_metadata)
-  end
-
-  defp handle_gate_d_result(:ok, _issue_id, _running_entry), do: :ok
-
-  defp handle_gate_d_result({:violation, reason}, issue_id, running_entry) do
-    identifier = Map.get(running_entry, :identifier, issue_id)
-
-    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-      body = """
-      ## Gate D Observer — AC Evidence missing (informational, no halt)
-
-      The agent's final turn did not include the recommended `## AC Evidence` section mapping each acceptance criterion to the specific code or test that satisfies it. This observation is logged for future-runs improvement — the run is not halted.
-
-      Reason: #{reason}
-      Issue: #{identifier}
-
-      Add an `## AC Evidence` section to the final-turn summary in future runs. See AGENTS.md for the expected format.
-      """
-
-      Tracker.create_comment(issue_id, body)
-    end)
   end
 end

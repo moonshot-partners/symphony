@@ -606,4 +606,67 @@ defmodule SymphonyElixir.GitHubPrCriticalReviewTest do
       assert GitHubPr.critical_review_pending?(issue) == :none
     end
   end
+
+  describe "critical_review_pending?/1 — PR state guard (closed-PR re-engagement)" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:symphony_elixir, :pr_head_meta_fn)
+        Application.delete_env(:symphony_elixir, :pr_comments_fn)
+        Application.delete_env(:symphony_elixir, :pr_review_verdict_artifact_fn)
+      end)
+
+      :ok
+    end
+
+    defp issue_with_pr(url), do: %{repos: [%{name: "fe-next-app", pr: %{url: url}}]}
+
+    test "a CLOSED PR with a stale request_changes comment does not re-engage" do
+      Application.put_env(:symphony_elixir, :pr_head_meta_fn, fn _, _, _, _ ->
+        {:ok, "deadbeef", ~U[2026-05-15 12:00:00Z], "CLOSED"}
+      end)
+
+      # The state guard must short-circuit before any comment fetch. If it
+      # does not, this raises and the test fails loudly.
+      Application.put_env(:symphony_elixir, :pr_comments_fn, fn _, _, _, _ ->
+        flunk("fetch_pr_comments must not run for a CLOSED PR")
+      end)
+
+      assert GitHubPr.critical_review_pending?(issue_with_pr("https://github.com/org/repo/pull/5")) ==
+               :none
+    end
+
+    test "a MERGED PR does not re-engage" do
+      Application.put_env(:symphony_elixir, :pr_head_meta_fn, fn _, _, _, _ ->
+        {:ok, "deadbeef", ~U[2026-05-15 12:00:00Z], "MERGED"}
+      end)
+
+      assert GitHubPr.critical_review_pending?(issue_with_pr("https://github.com/org/repo/pull/6")) ==
+               :none
+    end
+
+    test "an OPEN PR with a fresh request_changes comment still re-engages" do
+      Application.put_env(:symphony_elixir, :pr_head_meta_fn, fn _, _, _, _ ->
+        {:ok, "deadbeef", ~U[2026-05-15 12:00:00Z], "OPEN"}
+      end)
+
+      Application.put_env(:symphony_elixir, :pr_review_verdict_artifact_fn, fn _, _, _, _ ->
+        :missing
+      end)
+
+      Application.put_env(:symphony_elixir, :pr_comments_fn, fn _, _, _, _ ->
+        {:ok,
+         [
+           %{
+             "body" => "# claude-pr-review: request_changes\n\n## Critical Issues (1)\n- silent-failure-hunter: `a.ts:1` — bare catch swallows errors\n",
+             "created_at" => "2026-05-15T13:00:00Z"
+           }
+         ]}
+      end)
+
+      assert {:critical, info} =
+               GitHubPr.critical_review_pending?(issue_with_pr("https://github.com/org/repo/pull/7"))
+
+      assert info.pr_url == "https://github.com/org/repo/pull/7"
+    end
+  end
 end

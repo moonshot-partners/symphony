@@ -46,6 +46,8 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHook do
       initiator: initiator_for(issue),
       started_at: started_at_iso(running_entry),
       session_id: Map.get(running_entry, :session_id),
+      langfuse_trace_id: Map.get(running_entry, :langfuse_trace_id),
+      cost_usd: Map.get(running_entry, :agent_cost_usd),
       worker_host: Map.get(running_entry, :worker_host)
     }
   end

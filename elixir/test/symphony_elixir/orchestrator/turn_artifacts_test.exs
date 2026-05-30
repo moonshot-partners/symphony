@@ -60,7 +60,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
     end
   end
 
-  describe "maybe_post/3 — understanding.md not found" do
+  describe "maybe_post/3 — understanding.md discovery" do
     test "returns :ok and logs debug when file missing" do
       e = entry(%{workspace_path: "/tmp/no-such-workspace-xyz"})
 
@@ -73,121 +73,48 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       assert log =~ "understanding.md not found"
       refute_receive {:memory_tracker_comment, _, _}, 200
     end
-  end
 
-  describe "maybe_post/3 — understanding.md found" do
-    test "posts comment with file contents, threaded under workpad comment when available" do
-      tmp = System.tmp_dir!()
-      session_id = "sess-turn1-#{System.unique_integer([:positive])}"
-      state_dir = Path.join([tmp, "ws-#{session_id}", "state", session_id])
-      File.mkdir_p!(state_dir)
-      content = "# Ticket Analysis\n\nRoot cause: path alias mismatch."
-      File.write!(Path.join(state_dir, "understanding.md"), content)
-
-      workspace_path = Path.join(tmp, "ws-#{session_id}")
-      e = entry(%{workspace_path: workspace_path, session_id: session_id, workpad_comment_id: "wp-comment-1"})
-
-      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "understanding.md"
-      assert body =~ "SODEV-537"
-      assert body =~ "Root cause: path alias mismatch."
-    end
-
-    test "posts comment without parent_id when workpad_comment_id is nil" do
-      tmp = System.tmp_dir!()
-      session_id = "sess-nopid-#{System.unique_integer([:positive])}"
-      state_dir = Path.join([tmp, "ws-#{session_id}", "state", session_id])
-      File.mkdir_p!(state_dir)
-      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nFoo bar.")
-
-      workspace_path = Path.join(tmp, "ws-#{session_id}")
-      e = entry(%{workspace_path: workspace_path, session_id: session_id, workpad_comment_id: nil})
-
-      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "understanding.md"
-    end
-
-    test "logs warning when Tracker.create_comment returns error" do
-      Application.put_env(:symphony_elixir, :memory_tracker_create_comment_result, {:error, :boom})
-      on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_create_comment_result) end)
-
-      tmp = System.tmp_dir!()
-      session_id = "sess-err-#{System.unique_integer([:positive])}"
-      state_dir = Path.join([tmp, "ws-#{session_id}", "state", session_id])
-      File.mkdir_p!(state_dir)
-      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nbody.")
-
-      workspace_path = Path.join(tmp, "ws-#{session_id}")
-      e = entry(%{workspace_path: workspace_path, session_id: session_id})
+    test "captures understanding.md by log only and keeps Linear quiet" do
+      workspace_path = workspace_with_understanding("sess-turn1", "# Ticket Analysis\n\nRoot cause: path alias mismatch.")
+      e = entry(%{workspace_path: workspace_path, workpad_comment_id: "wp-comment-1"})
 
       log =
-        capture_log([level: :warning], fn ->
+        capture_log(fn ->
           assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-          Process.sleep(100)
+          Process.sleep(50)
         end)
 
-      assert log =~ "TurnArtifacts post failed"
-      assert log =~ "boom"
+      assert log =~ "TurnArtifacts captured understanding.md"
+      assert log =~ "SODEV-537"
+      refute_receive {:memory_tracker_comment, _, _}, 200
+      refute_receive {:memory_tracker_comment_parent, _, _}, 200
     end
 
     test "skips empty understanding.md" do
-      tmp = System.tmp_dir!()
-      session_id = "sess-empty-#{System.unique_integer([:positive])}"
-      state_dir = Path.join([tmp, "ws-#{session_id}", "state", session_id])
-      File.mkdir_p!(state_dir)
-      File.write!(Path.join(state_dir, "understanding.md"), "")
+      workspace_path = workspace_with_understanding("sess-empty", "")
+      e = entry(%{workspace_path: workspace_path})
 
-      workspace_path = Path.join(tmp, "ws-#{session_id}")
-      e = entry(%{workspace_path: workspace_path, session_id: session_id})
+      log =
+        capture_log([level: :debug], fn ->
+          assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
+          Process.sleep(50)
+        end)
+
+      assert log =~ "understanding.md empty"
+      refute_receive {:memory_tracker_comment, _, _}, 200
+    end
+
+    test "discovers understanding.md when state dir name differs from session id" do
+      workspace_path = workspace_with_understanding("sodev-840", "# Analysis\n\nAgent-written path.")
+      e = entry(%{workspace_path: workspace_path, session_id: "shim-dc9fd3b56806-turn-79756d1a87a3"})
 
       assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
 
-      refute_receive {:memory_tracker_comment, _, _}, 500
+      assert TurnArtifacts.discover_understanding_md(workspace_path) =~ "state/sodev-840/understanding.md"
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
-    test "posts when state dir name differs from running_entry session_id (glob discovery)" do
-      tmp = System.tmp_dir!()
-      uniq = System.unique_integer([:positive])
-      workspace_path = Path.join(tmp, "ws-glob-#{uniq}")
-      state_dir = Path.join([workspace_path, "state", "sodev-840"])
-      File.mkdir_p!(state_dir)
-      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nAgent-written path.")
-      on_exit(fn -> File.rm_rf!(workspace_path) end)
-
-      e =
-        entry(%{
-          workspace_path: workspace_path,
-          session_id: "shim-dc9fd3b56806-turn-79756d1a87a3"
-        })
-
-      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "Agent-written path."
-    end
-
-    test "posts when session_id is missing — session_id is no longer a guard" do
-      tmp = System.tmp_dir!()
-      uniq = System.unique_integer([:positive])
-      workspace_path = Path.join(tmp, "ws-nosid-#{uniq}")
-      state_dir = Path.join([workspace_path, "state", "sodev-537"])
-      File.mkdir_p!(state_dir)
-      File.write!(Path.join(state_dir, "understanding.md"), "# Analysis\n\nNo session id.")
-      on_exit(fn -> File.rm_rf!(workspace_path) end)
-
-      e = entry(%{workspace_path: workspace_path, session_id: nil})
-
-      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "No session id."
-    end
-
-    test "posts when understanding.md is nested under a repo subdir" do
+    test "discovers understanding.md nested under a repo subdir" do
       tmp = System.tmp_dir!()
       uniq = System.unique_integer([:positive])
       workspace_path = Path.join(tmp, "ws-nested-#{uniq}")
@@ -200,8 +127,10 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
 
       assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
 
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "Nested under repo subdir."
+      assert TurnArtifacts.discover_understanding_md(workspace_path) =~
+               "fe-next-app/state/sodev-891/understanding.md"
+
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
     test "ignores understanding.md that is not under a state/ dir" do
@@ -216,8 +145,8 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
 
       assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      refute_receive {:memory_tracker_comment, _, _}, 500
+      assert is_nil(TurnArtifacts.discover_understanding_md(workspace_path))
+      refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
     test "logs debug and skips when the discovered understanding.md is unreadable" do
@@ -241,7 +170,7 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       refute_receive {:memory_tracker_comment, _, _}, 200
     end
 
-    test "posts the most-recently-modified understanding.md when multiple state dirs exist" do
+    test "discovers the most-recently-modified understanding.md when multiple state dirs exist" do
       tmp = System.tmp_dir!()
       uniq = System.unique_integer([:positive])
       workspace_path = Path.join(tmp, "ws-multi-#{uniq}")
@@ -256,13 +185,18 @@ defmodule SymphonyElixir.Orchestrator.TurnArtifactsTest do
       File.touch!(old_md, {{2020, 1, 1}, {0, 0, 0}})
       on_exit(fn -> File.rm_rf!(workspace_path) end)
 
-      e = entry(%{workspace_path: workspace_path, session_id: "whatever"})
-
-      assert :ok = TurnArtifacts.maybe_post(e, %{event: :turn_completed}, "issue-abc")
-
-      assert_receive {:memory_tracker_comment, "issue-abc", body}, 2000
-      assert body =~ "Freshest turn content."
-      refute body =~ "Stale turn content."
+      assert TurnArtifacts.discover_understanding_md(workspace_path) == new_md
     end
+  end
+
+  defp workspace_with_understanding(state_name, content) do
+    tmp = System.tmp_dir!()
+    uniq = System.unique_integer([:positive])
+    workspace_path = Path.join(tmp, "ws-#{state_name}-#{uniq}")
+    state_dir = Path.join([workspace_path, "state", state_name])
+    File.mkdir_p!(state_dir)
+    File.write!(Path.join(state_dir, "understanding.md"), content)
+    on_exit(fn -> File.rm_rf!(workspace_path) end)
+    workspace_path
   end
 end
