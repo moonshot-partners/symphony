@@ -79,6 +79,15 @@ defmodule SymphonyElixir.Orchestrator.RunLedgerHookTest do
       assert run.turns == 0
       assert run.retries == 0
       assert run.pr_url == nil
+      assert run.langfuse_trace_id == nil
+    end
+
+    test "persists langfuse_trace_id from the running entry" do
+      running_entry = %{identifier: "SODEV-7", langfuse_trace_id: "c3e398dcac560ff9301ccecff37d3e58"}
+
+      run = RunLedgerHook.build_run_map(running_entry, "lin-7")
+
+      assert run.langfuse_trace_id == "c3e398dcac560ff9301ccecff37d3e58"
     end
 
     test "reads identifier from issue when running entry has none" do

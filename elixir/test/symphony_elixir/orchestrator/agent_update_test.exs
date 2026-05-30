@@ -68,6 +68,51 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
     end
   end
 
+  describe "integrate/2 — langfuse_trace_id" do
+    defp trace_completed_update(trace_id) do
+      params =
+        %{"turn_id" => "t-1", "usage" => %{}}
+        |> then(fn p -> if trace_id, do: Map.put(p, "langfuse_trace_id", trace_id), else: p end)
+
+      payload = %{"method" => "turn/completed", "params" => params}
+
+      %{
+        event: :turn_completed,
+        timestamp: ~U[2026-05-15 13:00:00Z],
+        payload: payload,
+        raw: "",
+        details: payload
+      }
+    end
+
+    test "latches the trace id from turn/completed params" do
+      {updated, _} =
+        AgentUpdate.integrate(
+          %{session_id: "sess-1"},
+          trace_completed_update("c3e398dcac560ff9301ccecff37d3e58")
+        )
+
+      assert updated.langfuse_trace_id == "c3e398dcac560ff9301ccecff37d3e58"
+    end
+
+    test "keeps an existing trace id when a later update carries none" do
+      {updated, _} =
+        AgentUpdate.integrate(
+          %{session_id: "sess-1", langfuse_trace_id: "existing-trace"},
+          trace_completed_update(nil)
+        )
+
+      assert updated.langfuse_trace_id == "existing-trace"
+    end
+
+    test "is nil when no update ever carried a trace id" do
+      {updated, _} =
+        AgentUpdate.integrate(%{session_id: "sess-1"}, trace_completed_update(nil))
+
+      assert updated.langfuse_trace_id == nil
+    end
+  end
+
   describe "integrate/2 — real-time token streaming via item/agent_message" do
     test "absolute usage at params.usage propagates even when method is not turn/completed" do
       # Shim emits accumulated usage inside item/agent_message params so the

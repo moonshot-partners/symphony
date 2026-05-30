@@ -230,6 +230,29 @@ def flush() -> None:
         logger.debug("Langfuse flush failed: %s", exc)
 
 
+def current_trace_id() -> str | None:
+    """Return the active OpenTelemetry trace id as 32-char lowercase hex.
+
+    Meaningful only inside an active span — e.g. within ``turn_context`` —
+    where it returns the same id Langfuse stores for the turn's trace, so the
+    orchestrator can persist it alongside the run and link a ``runs.jsonl`` row
+    straight to its Langfuse trace. Returns ``None`` when tracing is disabled or
+    no span is recording. Never raises: a tracing fault must not break the turn.
+    """
+    if not _enabled:
+        return None
+    try:
+        from opentelemetry import trace as otel_trace
+
+        ctx = otel_trace.get_current_span().get_span_context()
+        if ctx is None or not ctx.trace_id:
+            return None
+        return format(ctx.trace_id, "032x")
+    except Exception as exc:  # noqa: BLE001 — tracing must never crash the shim
+        logger.debug("Langfuse current_trace_id failed: %s", exc)
+        return None
+
+
 def command_metadata(command: str, *, cwd: str | None = None) -> dict[str, str]:
     return _clean_metadata(
         {

@@ -133,6 +133,62 @@ def test_flush_noop_when_disabled():
     assert tracing.enabled() is False
 
 
+class _FakeSpanContext:
+    def __init__(self, trace_id):
+        self.trace_id = trace_id
+
+
+def _install_fake_otel(monkeypatch, *, span_context=None, raise_on_call=False):
+    """Inject a fake ``opentelemetry`` module so current_trace_id() runs without
+    a real tracer. ``span_context`` is returned by get_span_context();
+    ``raise_on_call`` makes get_current_span() raise."""
+    otel = types.ModuleType("opentelemetry")
+    trace_mod = types.ModuleType("opentelemetry.trace")
+
+    if raise_on_call:
+
+        def _boom():
+            raise RuntimeError("otel boom")
+
+        trace_mod.get_current_span = _boom
+    else:
+
+        class _Span:
+            def get_span_context(self):
+                return span_context
+
+        trace_mod.get_current_span = _Span
+    otel.trace = trace_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry", otel)
+    monkeypatch.setitem(sys.modules, "opentelemetry.trace", trace_mod)
+
+
+def test_current_trace_id_none_when_disabled():
+    assert tracing.enabled() is False
+    assert tracing.current_trace_id() is None
+
+
+def test_current_trace_id_formats_active_span_as_hex(monkeypatch):
+    tracing._enabled = True
+    _install_fake_otel(
+        monkeypatch,
+        span_context=_FakeSpanContext(0xC3E398DCAC560FF9301CCECFF37D3E58),
+    )
+    assert tracing.current_trace_id() == "c3e398dcac560ff9301ccecff37d3e58"
+
+
+def test_current_trace_id_none_for_zero_trace(monkeypatch):
+    tracing._enabled = True
+    _install_fake_otel(monkeypatch, span_context=_FakeSpanContext(0))
+    assert tracing.current_trace_id() is None
+
+
+def test_current_trace_id_swallows_errors(monkeypatch):
+    tracing._enabled = True
+    _install_fake_otel(monkeypatch, raise_on_call=True)
+    assert tracing.current_trace_id() is None
+
+
 def test_setup_enables_and_instruments(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "test-public-key")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "test-secret-key")

@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
         last_agent_timestamp: timestamp,
         last_agent_message: summarize_update(update),
         session_id: session_id_for_update(running_entry.session_id, update),
+        langfuse_trace_id: trace_id_for_update(Map.get(running_entry, :langfuse_trace_id), update),
         last_agent_event: event,
         agent_pid: agent_pid_for_update(agent_pid, update),
         agent_input_tokens: agent_input_tokens + token_delta.input_tokens,
@@ -68,6 +69,20 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
     do: session_id
 
   defp session_id_for_update(existing, _update), do: existing
+
+  # The shim attaches the Langfuse trace id to the turn/completed params (when
+  # tracing is on). It arrives once per turn, so latch the first binary value
+  # and keep it across later updates that don't carry one.
+  defp trace_id_for_update(existing, update) do
+    case update[:payload] do
+      %{"params" => %{"langfuse_trace_id" => trace_id}}
+      when is_binary(trace_id) and trace_id != "" ->
+        trace_id
+
+      _ ->
+        existing
+    end
+  end
 
   defp turn_count_for_update(existing_count, existing_session_id, %{
          event: :session_started,
