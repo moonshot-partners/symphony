@@ -207,17 +207,19 @@ async def _emit_message(
             },
             output={"usage": usage, "stop_reason": message.subtype},
         ):
-            await writer(
-                protocol.notification(
-                    protocol.METHOD_TURN_COMPLETED,
-                    {
-                        "turn_id": turn_id,
-                        "usage": usage,
-                        "total_cost_usd": message.total_cost_usd,
-                        "stop_reason": message.subtype,
-                    },
-                )
-            )
+            params: dict[str, Any] = {
+                "turn_id": turn_id,
+                "usage": usage,
+                "total_cost_usd": message.total_cost_usd,
+                "stop_reason": message.subtype,
+            }
+            # Link this run to its Langfuse trace: the orchestrator persists the
+            # id into runs.jsonl so a row resolves to a trace without manually
+            # cross-referencing threadId/turnId. Omitted when tracing is off.
+            trace_id = tracing.current_trace_id()
+            if trace_id:
+                params["langfuse_trace_id"] = trace_id
+            await writer(protocol.notification(protocol.METHOD_TURN_COMPLETED, params))
 
 
 async def _emit_synthetic_approval(

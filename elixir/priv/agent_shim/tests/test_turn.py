@@ -625,3 +625,78 @@ async def test_cancel_emits_turn_cancelled():
     cancelled = [m for m in sent if m.get("method") == "turn/cancelled"]
     assert len(cancelled) == 1
     assert cancelled[0]["params"]["turn_id"] == "turn-x"
+
+
+def _result_only_client():
+    """Fake client whose stream is a single end_turn ResultMessage."""
+    fake_client = MagicMock()
+
+    async def fake_messages():
+        from claude_agent_sdk import ResultMessage
+
+        yield ResultMessage(
+            subtype="end_turn",
+            duration_ms=10,
+            duration_api_ms=5,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            total_cost_usd=0.001,
+            usage={"input_tokens": 1, "output_tokens": 1},
+            result="ok",
+        )
+
+    fake_client.query = AsyncMock()
+    fake_client.receive_response = lambda: fake_messages()
+    return fake_client
+
+
+async def _run_one_turn(thread_id, writer):
+    registry = ThreadRegistry()
+    session = ThreadSession(thread_id=thread_id, client=_result_only_client(), auto_approve=True)
+    registry.register(session)
+    await handle_turn_start(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "turn/start",
+            "params": {"threadId": thread_id, "input": [{"type": "text", "text": "go"}], "cwd": "/tmp"},
+        },
+        writer=writer,
+        registry=registry,
+        tracker=TurnTracker(),
+    )
+    await session.active_task
+
+
+@pytest.mark.asyncio
+async def test_turn_completed_includes_langfuse_trace_id_when_tracing_active(monkeypatch):
+    monkeypatch.setattr(
+        "symphony_agent_shim.tracing.current_trace_id",
+        lambda: "c3e398dcac560ff9301ccecff37d3e58",
+    )
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    await _run_one_turn("t-trace", writer)
+
+    completed = [m for m in sent if m.get("method") == "turn/completed"]
+    assert len(completed) == 1
+    assert completed[0]["params"]["langfuse_trace_id"] == "c3e398dcac560ff9301ccecff37d3e58"
+
+
+@pytest.mark.asyncio
+async def test_turn_completed_omits_langfuse_trace_id_when_disabled(monkeypatch):
+    monkeypatch.setattr("symphony_agent_shim.tracing.current_trace_id", lambda: None)
+    sent: list[dict] = []
+
+    async def writer(msg: dict) -> None:
+        sent.append(msg)
+
+    await _run_one_turn("t-notrace", writer)
+
+    completed = [m for m in sent if m.get("method") == "turn/completed"]
+    assert len(completed) == 1
+    assert "langfuse_trace_id" not in completed[0]["params"]
