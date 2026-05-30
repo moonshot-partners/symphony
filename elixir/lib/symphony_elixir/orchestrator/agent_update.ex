@@ -38,6 +38,7 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
         last_agent_message: summarize_update(update),
         session_id: session_id_for_update(running_entry.session_id, update),
         langfuse_trace_id: trace_id_for_update(Map.get(running_entry, :langfuse_trace_id), update),
+        agent_cost_usd: cost_for_update(Map.get(running_entry, :agent_cost_usd), update),
         last_agent_event: event,
         agent_pid: agent_pid_for_update(agent_pid, update),
         agent_input_tokens: agent_input_tokens + token_delta.input_tokens,
@@ -78,6 +79,19 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
       %{"params" => %{"langfuse_trace_id" => trace_id}}
       when is_binary(trace_id) and trace_id != "" ->
         trace_id
+
+      _ ->
+        existing
+    end
+  end
+
+  # The shim reports the Claude SDK's cumulative session cost on each
+  # turn/completed. It is cumulative, so the latest value is the run total;
+  # latch the most recent number and keep it when an update carries none.
+  defp cost_for_update(existing, update) do
+    case update[:payload] do
+      %{"params" => %{"total_cost_usd" => cost}} when is_number(cost) and cost >= 0 ->
+        cost
 
       _ ->
         existing
