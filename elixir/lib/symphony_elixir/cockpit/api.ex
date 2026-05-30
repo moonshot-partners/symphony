@@ -11,9 +11,10 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   use Plug.Router
 
-  alias SymphonyElixir.{Config, Tracker}
   alias SymphonyElixir.Cockpit.BoardView
+  alias SymphonyElixir.Config
   alias SymphonyElixir.RunLedger.Report
+  alias SymphonyElixir.Tracker
 
   @default_runs_path "/opt/symphony/state/runs.jsonl"
 
