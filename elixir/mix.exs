@@ -20,6 +20,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.AgentRunner,
           SymphonyElixir.Application,
           SymphonyElixir.CLI,
+          SymphonyElixir.Cockpit.Api,
           SymphonyElixir.Config,
           SymphonyElixir.GitHubPr,
           SymphonyElixir.GitHubPrBody,
@@ -70,6 +71,8 @@ defmodule SymphonyElixir.MixProject do
       {:yaml_elixir, "~> 2.12"},
       {:solid, "~> 1.2"},
       {:ecto, "~> 3.13"},
+      {:plug, "~> 1.16"},
+      {:bandit, "~> 1.6"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false}
     ]
