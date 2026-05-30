@@ -97,7 +97,7 @@ defmodule SymphonyElixir.Orchestrator.AgentExitTest do
   end
 
   describe "process_exit/4 — :normal reason" do
-    test "pops entry, runs completer, schedules continuation, no Gate D violation" do
+    test "pops entry, runs completer, schedules continuation, posts no comment" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
         tracker_on_reject_state: "On Hold / Blocked"
@@ -117,30 +117,6 @@ defmodule SymphonyElixir.Orchestrator.AgentExitTest do
 
       refute Map.has_key?(new_state.running, "issue-ax-1")
       assert MapSet.member?(new_state.completed, "issue-ax-1")
-    end
-
-    test "posts Gate D Observer comment when last_agent_text lacks AC Evidence" do
-      write_workflow_file!(Workflow.workflow_file_path(),
-        tracker_kind: "memory",
-        tracker_on_reject_state: "On Hold / Blocked"
-      )
-
-      set_memory_tracker_recipient()
-
-      entry =
-        running_entry(%{
-          gate_c_checked: true,
-          last_agent_text: "## AC Extracted\n- one\n\nbut no evidence section"
-        })
-
-      state = empty_state(%{running: %{"issue-ax-1" => entry}})
-
-      _ = AgentExit.process_exit(state, entry.ref, :normal, callbacks(self()))
-
-      assert_receive {:memory_tracker_comment, "issue-ax-1", body}, 500
-      assert body =~ "Gate D Observer"
-      assert body =~ "AC Evidence missing"
-      assert body =~ "ISS-1"
     end
   end
 

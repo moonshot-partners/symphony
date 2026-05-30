@@ -1,8 +1,8 @@
 defmodule SymphonyElixir.GateDValidator do
   @moduledoc """
   Gate D Validator — substance verification for the agent's `## AC Evidence`
-  section. Promotes Gate D from header-presence check (covered by
-  `SymphonyElixir.GateDObserver`) to claim-by-claim verification.
+  section: claim-by-claim verification that each "verified" claim cites a
+  resolvable artifact, routing unbacked claims to the reject state.
 
   ## Decision
 
