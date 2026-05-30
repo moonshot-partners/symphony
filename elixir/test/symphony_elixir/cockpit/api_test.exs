@@ -84,6 +84,7 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
       assert [{Bandit, opts}] = SymphonyElixir.Application.cockpit_children()
       assert opts[:plug] == SymphonyElixir.Cockpit.Api
       assert opts[:port] == 41_999
+      assert opts[:ip] == {127, 0, 0, 1}
     end
   end
 end
