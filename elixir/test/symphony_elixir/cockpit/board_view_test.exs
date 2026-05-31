@@ -115,6 +115,15 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
       assert Enum.at(tickets, 2)["pr"]["number"] == 0
     end
 
+    test "marks tickets whose internal id is in the running set" do
+      running = %Issue{id: "uuid-1", identifier: "SODEV-9", title: "T", state: "In Development", repos: []}
+      idle = %Issue{id: "uuid-2", identifier: "SODEV-10", title: "T2", state: "Scheduled", repos: []}
+
+      [a, b] = BoardView.assemble([running, idle], [], tracker(), running: ["uuid-1"])["tickets"]
+      assert a["agent"]["status"] == "running"
+      assert b["agent"]["status"] == "idle"
+    end
+
     test "ignores unusable ledger fields without fabricating data" do
       issue = %Issue{identifier: "SODEV-3", title: "T3", state: "On Hold", url: "u", repos: []}
 

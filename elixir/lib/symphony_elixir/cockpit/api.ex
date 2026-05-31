@@ -17,6 +17,7 @@ defmodule SymphonyElixir.Cockpit.Api do
   alias SymphonyElixir.Tracker
 
   @default_runs_path "/opt/symphony/state/runs.jsonl"
+  @default_status_path "/opt/symphony/state/status.json"
 
   plug(:auth)
   plug(:match)
@@ -39,7 +40,7 @@ defmodule SymphonyElixir.Cockpit.Api do
   def board do
     tracker = Config.settings!().tracker
     issues = fetch_issues(BoardView.relevant_states(tracker))
-    BoardView.assemble(issues, read_runs(), tracker)
+    BoardView.assemble(issues, read_runs(), tracker, running: read_running())
   end
 
   defp fetch_issues(states) do
@@ -54,6 +55,19 @@ defmodule SymphonyElixir.Cockpit.Api do
 
     case File.read(path) do
       {:ok, content} -> Report.parse_lines(content)
+      _ -> []
+    end
+  end
+
+  # Internal issue ids with an agent running right now, from the orchestrator's
+  # status.json (`.running`). Read-only; absent/garbled file -> no running marks.
+  defp read_running do
+    path = System.get_env("SYMPHONY_STATUS_PATH") || @default_status_path
+
+    with {:ok, content} <- File.read(path),
+         {:ok, %{"running" => running}} when is_list(running) <- Jason.decode(content) do
+      running
+    else
       _ -> []
     end
   end
