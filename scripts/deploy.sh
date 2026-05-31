@@ -12,6 +12,25 @@ log() {
   printf '[deploy] %s\n' "$*"
 }
 
+# Build and restart the read-only cockpit dashboard from source. Runs only when
+# dashboard/ changed and only after the agent is confirmed healthy, and is
+# non-fatal: a cockpit failure must never take down the agent. `</dev/null` on
+# the node tooling for the same reason mix needs it (script is piped on stdin).
+deploy_cockpit() {
+  cd "$SYMPHONY_DIR/dashboard" || return 1
+  corepack enable >/dev/null 2>&1 || true
+  corepack prepare pnpm@latest --activate >/dev/null 2>&1 || true
+  pnpm install --frozen-lockfile </dev/null >/dev/null 2>&1 || return 1
+  NEXT_PUBLIC_DATA_SOURCE=http pnpm build </dev/null >/dev/null 2>&1 || return 1
+  cp -r .next/static .next/standalone/.next/static || return 1
+  cp -r public .next/standalone/public || return 1
+  rm -rf "$SYMPHONY_DIR/cockpit"
+  mkdir -p "$SYMPHONY_DIR/cockpit"
+  cp -r .next/standalone/. "$SYMPHONY_DIR/cockpit/" || return 1
+  sudo chown -R ubuntu:ubuntu "$SYMPHONY_DIR/cockpit"
+  sudo systemctl restart cockpit || return 1
+}
+
 trap 'rm -f "$DRAIN_FLAG"' EXIT
 
 # Capture the deployed SHA *before* drain. WorkflowStore (running inside the
@@ -140,5 +159,18 @@ sudo systemctl is-active --quiet symphony || {
   sudo journalctl -u symphony -n 30 --no-pager
   exit 1
 }
+
+# Cockpit dashboard. Agent is healthy by here; this is best-effort and never
+# fails the deploy.
+if git -C "$SYMPHONY_DIR" diff --name-only "$old_sha" "$new_sha" | grep -qE '^dashboard/'; then
+  log "dashboard changed — rebuild cockpit"
+  if deploy_cockpit; then
+    log "cockpit deployed"
+  else
+    log "cockpit deploy FAILED (non-fatal; agent unaffected)"
+  fi
+else
+  log "dashboard unchanged; skip cockpit rebuild"
+fi
 
 log "done"
