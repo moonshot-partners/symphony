@@ -34,6 +34,11 @@ ENV_EXAMPLE="${ENV_DIR}/symphony.env.example"
 ENV_FILE="${ENV_DIR}/symphony.env"
 UNIT_FILE="/etc/systemd/system/symphony.service"
 
+COCKPIT_DIR="${SYMPHONY_DIR:-/opt/symphony}/cockpit"
+COCKPIT_UNIT="/etc/systemd/system/cockpit.service"
+CADDYFILE="/etc/caddy/Caddyfile"
+COCKPIT_DOMAIN="${COCKPIT_DOMAIN:-symphony.moonshot-apps.com}"
+
 FORCE_UNIT=0
 for arg in "$@"; do
   case "$arg" in
@@ -162,6 +167,14 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 LANGFUSE_HOST=https://cloud.langfuse.com
 LANGFUSE_TRACING_ENVIRONMENT=production
 LANGFUSE_CAPTURE_IO=redacted
+
+# --- Cockpit dashboard (read-only UI; optional) ---
+# Set a port to start the read-only cockpit API (loopback only); the token
+# gates it. The cockpit BFF reads COCKPIT_API_* (same token as the API).
+SYMPHONY_COCKPIT_API_PORT=4010
+SYMPHONY_COCKPIT_API_TOKEN=
+COCKPIT_API_URL=http://127.0.0.1:4010
+COCKPIT_API_TOKEN=
 EOF
   chmod 644 "${ENV_EXAMPLE}"
 }
@@ -202,6 +215,67 @@ EOF
   systemctl daemon-reload
 }
 
+# Cockpit dashboard: node runtime, Caddy reverse proxy, and the cockpit
+# systemd unit. The cockpit code at ${COCKPIT_DIR} is populated by deploy.sh
+# (deploy_cockpit) on the first deploy, so cockpit is enabled after that.
+step_cockpit() {
+  if ! command -v node >/dev/null 2>&1; then
+    log "installing nodejs 22 (cockpit runtime)"
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+    apt-get install -y -qq nodejs
+  fi
+
+  if ! command -v caddy >/dev/null 2>&1; then
+    log "installing caddy (reverse proxy + automatic TLS)"
+    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null 2>&1
+    curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq && apt-get install -y -qq caddy
+  fi
+
+  log "writing ${COCKPIT_UNIT}"
+  cat > "${COCKPIT_UNIT}" <<EOF
+[Unit]
+Description=Symphony Cockpit (read-only dashboard)
+After=network.target symphony.service
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+WorkingDirectory=${COCKPIT_DIR}
+EnvironmentFile=${ENV_FILE}
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node ${COCKPIT_DIR}/server.js
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=cockpit
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 644 "${COCKPIT_UNIT}"
+
+  if [ ! -f "${CADDYFILE}" ] || [ "${FORCE_UNIT}" -eq 1 ]; then
+    install -d -m 755 /etc/caddy
+    log "writing ${CADDYFILE} (set the hash with: caddy hash-password)"
+    cat > "${CADDYFILE}" <<EOF
+${COCKPIT_DOMAIN} {
+    reverse_proxy 127.0.0.1:3000
+    basic_auth {
+        vini REPLACE_WITH_BCRYPT_HASH
+    }
+}
+EOF
+    chmod 644 "${CADDYFILE}"
+  else
+    log "${CADDYFILE} exists — keep it"
+  fi
+
+  systemctl daemon-reload
+}
+
 step_summary() {
   log "provision complete"
   log ""
@@ -211,6 +285,11 @@ step_summary() {
   log "  3. sudo \$EDITOR ${ENV_FILE}            # fill in real secrets"
   log "  4. sudo systemctl enable --now symphony"
   log "  5. sudo systemctl status symphony"
+  log ""
+  log "cockpit (optional):"
+  log "  6. set SYMPHONY_COCKPIT_API_PORT/TOKEN + COCKPIT_API_* in ${ENV_FILE}"
+  log "  7. set the Caddy password: caddy hash-password --plaintext '<pw>' then edit ${CADDYFILE}"
+  log "  8. deploy once (deploy.sh builds ${COCKPIT_DIR}), then: sudo systemctl enable --now cockpit caddy"
 }
 
 main() {
@@ -222,6 +301,7 @@ main() {
   step_build
   step_env
   step_unit
+  step_cockpit
   step_summary
 }
 
