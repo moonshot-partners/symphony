@@ -18,9 +18,14 @@ log() {
 # the node tooling for the same reason mix needs it (script is piped on stdin).
 deploy_cockpit() {
   cd "$SYMPHONY_DIR/dashboard" || return 1
-  corepack enable >/dev/null 2>&1 || true
-  corepack prepare pnpm@latest --activate >/dev/null 2>&1 || true
-  pnpm install --frozen-lockfile </dev/null >/dev/null 2>&1 || return 1
+  # corepack ships a pnpm that crashes on this box's node 22
+  # (ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING), so use a plain global pnpm.
+  corepack disable >/dev/null 2>&1 || true
+  pnpm --version >/dev/null 2>&1 || npm install -g pnpm >/dev/null 2>&1 || return 1
+  # --ignore-scripts: the only build scripts are sharp/unrs/msw, none needed
+  # for the server build (images are unoptimized), and pnpm 11 otherwise exits
+  # non-zero on un-approved build scripts.
+  pnpm install --frozen-lockfile --ignore-scripts </dev/null >/dev/null 2>&1 || return 1
   NEXT_PUBLIC_DATA_SOURCE=http pnpm build </dev/null >/dev/null 2>&1 || return 1
   cp -r .next/static .next/standalone/.next/static || return 1
   cp -r public .next/standalone/public || return 1
