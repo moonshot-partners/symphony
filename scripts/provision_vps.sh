@@ -276,6 +276,19 @@ EOF
   systemctl daemon-reload
 }
 
+# Minimal firewall: deny inbound except SSH and the Caddy ports. The cockpit
+# (3000) and the cockpit API (4010) bind loopback and need no inbound rule.
+step_firewall() {
+  command -v ufw >/dev/null 2>&1 || apt-get install -y -qq ufw
+  ufw allow 22/tcp >/dev/null
+  ufw allow 80/tcp >/dev/null
+  ufw allow 443/tcp >/dev/null
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  ufw --force enable >/dev/null
+  log "ufw active (inbound: 22, 80, 443)"
+}
+
 step_summary() {
   log "provision complete"
   log ""
@@ -302,6 +315,7 @@ main() {
   step_env
   step_unit
   step_cockpit
+  step_firewall
   step_summary
 }
 
