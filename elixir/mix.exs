@@ -21,6 +21,8 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Application,
           SymphonyElixir.CLI,
           SymphonyElixir.Cockpit.Api,
+          SymphonyElixir.Cockpit.BoardCache,
+          SymphonyElixir.Cockpit.Checks,
           SymphonyElixir.Config,
           SymphonyElixir.GitHubPr,
           SymphonyElixir.GitHubPrBody,

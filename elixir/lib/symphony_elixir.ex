@@ -53,6 +53,7 @@ defmodule SymphonyElixir.Application do
     case System.get_env("SYMPHONY_COCKPIT_API_PORT") do
       port when is_binary(port) and port != "" ->
         [
+          SymphonyElixir.Cockpit.BoardCache,
           {Bandit, plug: SymphonyElixir.Cockpit.Api, scheme: :http, ip: {127, 0, 0, 1}, port: String.to_integer(port)}
         ]
 

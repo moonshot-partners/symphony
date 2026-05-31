@@ -11,7 +11,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   use Plug.Router
 
-  alias SymphonyElixir.Cockpit.BoardView
+  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks}
   alias SymphonyElixir.Config
   alias SymphonyElixir.RunLedger.Report
   alias SymphonyElixir.Tracker
@@ -37,11 +37,42 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   @doc false
   @spec board() :: map()
-  def board do
+  def board, do: BoardCache.board(&assemble_board/0)
+
+  @doc false
+  @spec assemble_board() :: map()
+  def assemble_board do
     tracker = Config.settings!().tracker
     issues = fetch_issues(BoardView.relevant_states(tracker))
-    BoardView.assemble(issues, read_runs(), tracker, running: read_running())
+
+    BoardView.assemble(issues, read_runs(), tracker,
+      running: read_running(),
+      ci: ci_map(issues)
+    )
   end
+
+  # CI status per PR url, fetched once per board build (bounded by BoardCache).
+  defp ci_map(issues) do
+    issues
+    |> Enum.flat_map(&pr_urls/1)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn url ->
+      case Checks.status(url) do
+        nil -> []
+        status -> [{url, status}]
+      end
+    end)
+  end
+
+  defp pr_urls(%{repos: repos}) when is_list(repos) do
+    Enum.flat_map(repos, fn
+      %{pr: %{url: url}} when is_binary(url) -> [url]
+      %{"pr" => %{"url" => url}} when is_binary(url) -> [url]
+      _ -> []
+    end)
+  end
+
+  defp pr_urls(_), do: []
 
   defp fetch_issues(states) do
     case Tracker.fetch_issues_by_states(states) do
