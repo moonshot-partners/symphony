@@ -23,6 +23,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Cockpit.Api,
           SymphonyElixir.Cockpit.BoardCache,
           SymphonyElixir.Cockpit.Checks,
+          SymphonyElixir.Cockpit.EvidenceStore,
           SymphonyElixir.Config,
           SymphonyElixir.GitHubPr,
           SymphonyElixir.GitHubPrBody,

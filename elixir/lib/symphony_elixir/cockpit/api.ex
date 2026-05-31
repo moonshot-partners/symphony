@@ -11,7 +11,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   use Plug.Router
 
-  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks}
+  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks, EvidenceStore}
   alias SymphonyElixir.Config
   alias SymphonyElixir.RunLedger.Report
   alias SymphonyElixir.Tracker
@@ -31,6 +31,13 @@ defmodule SymphonyElixir.Cockpit.Api do
     send_json(conn, 200, board())
   end
 
+  get "/evidence/:id/:file" do
+    case EvidenceStore.file_path(id, file) do
+      nil -> send_json(conn, 404, %{"error" => "not_found"})
+      path -> serve_file(conn, path)
+    end
+  end
+
   match _ do
     send_json(conn, 404, %{"error" => "not_found"})
   end
@@ -47,8 +54,15 @@ defmodule SymphonyElixir.Cockpit.Api do
 
     BoardView.assemble(issues, read_runs(), tracker,
       running: read_running(),
-      ci: ci_map(issues)
+      ci: ci_map(issues),
+      evidence: evidence_map(issues)
     )
+  end
+
+  # QA evidence manifest per issue, read from the local cockpit store. Cheap
+  # local disk reads, bounded by the board cache; keyed by internal issue id.
+  defp evidence_map(issues) do
+    Map.new(issues, fn issue -> {issue.id, EvidenceStore.read(issue.id)} end)
   end
 
   # CI status per PR url, fetched once per board build (bounded by BoardCache).
@@ -114,6 +128,25 @@ defmodule SymphonyElixir.Cockpit.Api do
 
       _ ->
         conn
+    end
+  end
+
+  defp serve_file(conn, path) do
+    conn
+    |> Plug.Conn.put_resp_content_type(content_type(path))
+    |> Plug.Conn.send_file(200, path)
+  end
+
+  defp content_type(path) do
+    case path |> Path.extname() |> String.downcase() do
+      ".png" -> "image/png"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".gif" -> "image/gif"
+      ".webp" -> "image/webp"
+      ".webm" -> "video/webm"
+      ".mp4" -> "video/mp4"
+      _ -> "application/octet-stream"
     end
   end
 

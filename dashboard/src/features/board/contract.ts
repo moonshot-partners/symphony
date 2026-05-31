@@ -13,10 +13,9 @@ export const CiStatus = z.enum(["pending", "passing", "failing"]);
 
 export const Evidence = z.object({
   id: z.string(),
-  ac: z.string(), // acceptance criterion label, e.g. "AC 1 — debounce dispara 1 request"
   kind: z.enum(["image", "video"]),
   name: z.string(),
-  url: z.string(),
+  url: z.string(), // same-origin BFF proxy, e.g. "/api/evidence/<issue id>/<file>"
 });
 
 export const Agent = z.object({
@@ -46,6 +45,7 @@ export const Ticket = z.object({
   agent: Agent,
   pr: Pr.nullable(),
   evidence: z.array(Evidence),
+  report: z.string().nullable().optional(), // QA self-review report (markdown), from the evidence store
   timeline: z.array(TimelineStep).optional(),
   url: z.string().url().nullable().optional(), // Linear issue link
   traceUrl: z.string().url().nullable().optional(), // Langfuse trace link

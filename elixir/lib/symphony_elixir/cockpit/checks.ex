@@ -27,8 +27,8 @@ defmodule SymphonyElixir.Cockpit.Checks do
 
   def status(_), do: nil
 
+  # Total over ChecksClassifier.required_checks_status(); no catch-all needed.
   defp classify(:all_green), do: "passing"
   defp classify(:pending), do: "pending"
   defp classify({:red, _}), do: "failing"
-  defp classify(_), do: nil
 end

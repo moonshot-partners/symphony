@@ -1,7 +1,6 @@
 "use client";
 
 import type { Ticket } from "../contract";
-import { groupEvidenceByAc } from "../evidence";
 import {
   Sheet,
   SheetContent,
@@ -9,11 +8,6 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   Activity,
   Check,
@@ -59,7 +53,6 @@ export function TicketDetail({
 
 function Body({ ticket }: { ticket: Ticket }) {
   const { agent, pr } = ticket;
-  const groups = groupEvidenceByAc(ticket.evidence);
   const steps = ticket.timeline ?? [];
 
   return (
@@ -104,63 +97,58 @@ function Body({ ticket }: { ticket: Ticket }) {
 
       <Separator />
 
-      <div className="grid flex-1 grid-cols-1 gap-6 overflow-y-auto p-4 md:grid-cols-2">
-        <section>
-          <SectionLabel>Timeline</SectionLabel>
-          {steps.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No activity yet.</p>
-          ) : (
-            <ol className="space-y-3">
-              {steps.map((s, i) => (
-                <li key={i} className="flex gap-2.5">
-                  {s.status === "active" ? (
-                    <LoaderCircle
-                      className="mt-0.5 size-3.5 flex-none animate-spin text-emerald-600"
-                      aria-hidden
-                    />
-                  ) : (
-                    <Check className="mt-0.5 size-3.5 flex-none text-muted-foreground" aria-hidden />
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-sm leading-snug">{s.label}</p>
-                    {s.turn != null && (
-                      <p className="font-mono text-xs text-muted-foreground">turn {s.turn}</p>
+      <div className="flex-1 space-y-6 overflow-y-auto p-4">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <section>
+            <SectionLabel>Timeline</SectionLabel>
+            {steps.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No activity yet.</p>
+            ) : (
+              <ol className="space-y-3">
+                {steps.map((s, i) => (
+                  <li key={i} className="flex gap-2.5">
+                    {s.status === "active" ? (
+                      <LoaderCircle
+                        className="mt-0.5 size-3.5 flex-none animate-spin text-emerald-600"
+                        aria-hidden
+                      />
+                    ) : (
+                      <Check className="mt-0.5 size-3.5 flex-none text-muted-foreground" aria-hidden />
                     )}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
-
-        <section>
-          <SectionLabel>Evidence ({ticket.evidence.length})</SectionLabel>
-          {groups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No evidence captured.</p>
-          ) : (
-            <div className="space-y-2">
-              {groups.map((g) => (
-                <Collapsible
-                  key={g.ac}
-                  defaultOpen
-                  className="rounded-md border"
-                >
-                  <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-muted/50">
-                    <span className="min-w-0 truncate">{g.ac}</span>
-                    <span className="text-xs text-muted-foreground">{g.items.length}</span>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="px-3 pb-3">
-                    <div className="grid grid-cols-3 gap-2">
-                      {g.items.map((item) => (
-                        <EvidenceThumb key={item.id} item={item} ac={g.ac} />
-                      ))}
+                    <div className="min-w-0">
+                      <p className="text-sm leading-snug">{s.label}</p>
+                      {s.turn != null && (
+                        <p className="font-mono text-xs text-muted-foreground">turn {s.turn}</p>
+                      )}
                     </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              ))}
-            </div>
-          )}
-        </section>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
+          <section>
+            <SectionLabel>Evidence ({ticket.evidence.length})</SectionLabel>
+            {ticket.evidence.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No evidence captured.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {ticket.evidence.map((item) => (
+                  <EvidenceThumb key={item.id} item={item} />
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        {ticket.report && (
+          <section>
+            <SectionLabel>QA report</SectionLabel>
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+              {ticket.report.trim()}
+            </pre>
+          </section>
+        )}
       </div>
     </>
   );
@@ -200,7 +188,7 @@ function LinkPill({
   );
 }
 
-function EvidenceThumb({ item, ac }: { item: Evidence; ac: string }) {
+function EvidenceThumb({ item }: { item: Evidence }) {
   return (
     <Dialog>
       <DialogTrigger className="group block overflow-hidden rounded border text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -217,7 +205,7 @@ function EvidenceThumb({ item, ac }: { item: Evidence; ac: string }) {
           <div className="min-w-0">
             <DialogTitle className="truncate text-sm text-white">{item.name}</DialogTitle>
             <DialogDescription className="text-xs text-white/60">
-              {ac} · {item.kind === "video" ? "video" : "image"}
+              {item.kind === "video" ? "video" : "image"}
             </DialogDescription>
           </div>
           <DialogClose

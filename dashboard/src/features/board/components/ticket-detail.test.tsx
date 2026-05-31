@@ -12,15 +12,22 @@ describe("TicketDetail", () => {
     expect(screen.queryByText("Timeline")).toBeNull();
   });
 
-  it("shows the timeline and every evidence group expanded", async () => {
+  it("shows the timeline and a flat evidence gallery", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     expect(await screen.findByText("Timeline")).toBeInTheDocument();
     expect(screen.getByText("Running unit tests + lint")).toBeInTheDocument();
-    // both AC groups and their items are visible (nothing collapsed)
-    expect(screen.getByText(/AC 1 — debounce fires one request/)).toBeInTheDocument();
-    expect(screen.getByText(/AC 2 — no loading flicker/)).toBeInTheDocument();
+    expect(screen.getByText(`Evidence (${running.evidence.length})`)).toBeInTheDocument();
+    // every captured item is visible (no AC grouping, nothing collapsed)
     expect(screen.getByText("before.png")).toBeInTheDocument();
+    expect(screen.getByText("flow.webm")).toBeInTheDocument();
     expect(screen.getByText("flicker-1.png")).toBeInTheDocument();
+  });
+
+  it("renders the QA report when present", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+    expect(screen.getByText("QA report")).toBeInTheDocument();
+    expect(screen.getByText(/no loading flicker \| PASS/)).toBeInTheDocument();
   });
 
   it("exposes Linear, GitHub PR and Langfuse trace as new-tab links", async () => {
