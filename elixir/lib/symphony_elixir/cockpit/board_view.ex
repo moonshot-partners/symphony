@@ -45,6 +45,8 @@ defmodule SymphonyElixir.Cockpit.BoardView do
     # Internal issue ids the orchestrator currently has an agent running on
     # (from status.json). Matched against issue.id, not the identifier.
     running = MapSet.new(list(Keyword.get(opts, :running)))
+    # CI status keyed by PR url: %{url => "passing" | "pending" | "failing"}.
+    ci = Map.new(Keyword.get(opts, :ci, []))
 
     %{
       "states" => %{
@@ -56,11 +58,11 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "onReject" => tracker.on_reject_state,
         "terminal" => list(tracker.terminal_states)
       },
-      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running))
+      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci))
     }
   end
 
-  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running) do
+  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running, ci) do
     run = Map.get(runs_by_ticket, issue.identifier)
     status = if MapSet.member?(running, issue.id), do: "running", else: "idle"
 
@@ -75,7 +77,7 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "costUsd" => nil,
         "lastAction" => run && string_field(run, "outcome")
       },
-      "pr" => pr(issue),
+      "pr" => pr(issue, ci),
       "evidence" => [],
       "url" => issue.url,
       "traceUrl" => trace_url(run, trace_base),
@@ -93,17 +95,17 @@ defmodule SymphonyElixir.Cockpit.BoardView do
     end)
   end
 
-  defp pr(%Issue{repos: repos}) when is_list(repos) do
+  defp pr(%Issue{repos: repos}, ci) when is_list(repos) do
     repos
     |> Enum.map(&pr_url/1)
     |> Enum.find(&is_binary/1)
     |> case do
       nil -> nil
-      url -> %{"number" => pr_number(url), "ci" => nil, "url" => url}
+      url -> %{"number" => pr_number(url), "ci" => Map.get(ci, url), "url" => url}
     end
   end
 
-  defp pr(_), do: nil
+  defp pr(_, _), do: nil
 
   defp pr_url(%{pr: %{url: url}}) when is_binary(url), do: url
   defp pr_url(%{"pr" => %{"url" => url}}) when is_binary(url), do: url

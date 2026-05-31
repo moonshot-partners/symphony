@@ -115,6 +115,21 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
       assert Enum.at(tickets, 2)["pr"]["number"] == 0
     end
 
+    test "fills pr.ci from the ci map keyed by PR url" do
+      issue = %Issue{
+        id: "u1",
+        identifier: "SODEV-7",
+        title: "T",
+        state: "In Code Review",
+        repos: [%{name: "r", pr: %{url: "https://github.com/o/r/pull/5"}}]
+      }
+
+      [ticket] =
+        BoardView.assemble([issue], [], tracker(), ci: [{"https://github.com/o/r/pull/5", "passing"}])["tickets"]
+
+      assert ticket["pr"]["ci"] == "passing"
+    end
+
     test "marks tickets whose internal id is in the running set" do
       running = %Issue{id: "uuid-1", identifier: "SODEV-9", title: "T", state: "In Development", repos: []}
       idle = %Issue{id: "uuid-2", identifier: "SODEV-10", title: "T2", state: "Scheduled", repos: []}

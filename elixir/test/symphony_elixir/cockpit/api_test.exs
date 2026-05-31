@@ -81,7 +81,9 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
       System.put_env("SYMPHONY_COCKPIT_API_PORT", "41999")
       on_exit(fn -> System.delete_env("SYMPHONY_COCKPIT_API_PORT") end)
 
-      assert [{Bandit, opts}] = SymphonyElixir.Application.cockpit_children()
+      assert [SymphonyElixir.Cockpit.BoardCache, {Bandit, opts}] =
+               SymphonyElixir.Application.cockpit_children()
+
       assert opts[:plug] == SymphonyElixir.Cockpit.Api
       assert opts[:port] == 41_999
       assert opts[:ip] == {127, 0, 0, 1}
