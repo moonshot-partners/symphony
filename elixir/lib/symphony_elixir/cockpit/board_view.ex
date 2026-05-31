@@ -42,6 +42,9 @@ defmodule SymphonyElixir.Cockpit.BoardView do
   def assemble(issues, runs, tracker, opts \\ []) do
     trace_base = Keyword.get(opts, :trace_base, @default_trace_base)
     runs_by_ticket = index_runs(runs)
+    # Internal issue ids the orchestrator currently has an agent running on
+    # (from status.json). Matched against issue.id, not the identifier.
+    running = MapSet.new(list(Keyword.get(opts, :running)))
 
     %{
       "states" => %{
@@ -53,19 +56,20 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "onReject" => tracker.on_reject_state,
         "terminal" => list(tracker.terminal_states)
       },
-      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base))
+      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running))
     }
   end
 
-  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base) do
+  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running) do
     run = Map.get(runs_by_ticket, issue.identifier)
+    status = if MapSet.member?(running, issue.id), do: "running", else: "idle"
 
     %{
       "id" => issue.identifier,
       "title" => issue.title,
       "state" => issue.state,
       "agent" => %{
-        "status" => "idle",
+        "status" => status,
         "turn" => run && int_field(run, "turns"),
         "maxTurns" => nil,
         "costUsd" => nil,
