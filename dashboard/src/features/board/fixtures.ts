@@ -44,11 +44,13 @@ export const MOCK_BOARD: BoardPayload = {
       },
       pr: { number: 642, ci: "pending", url: ghPr(642) },
       evidence: [
-        { id: "e1", ac: "AC 1 — debounce fires one request", kind: "image", name: "before.png", url: "#" },
-        { id: "e2", ac: "AC 1 — debounce fires one request", kind: "image", name: "after.png", url: "#" },
-        { id: "e3", ac: "AC 1 — debounce fires one request", kind: "video", name: "flow.webm", url: "#" },
-        { id: "e4", ac: "AC 2 — no loading flicker", kind: "image", name: "flicker-1.png", url: "#" },
+        { id: "e1", kind: "image", name: "before.png", url: "#" },
+        { id: "e2", kind: "image", name: "after.png", url: "#" },
+        { id: "e3", kind: "video", name: "flow.webm", url: "#" },
+        { id: "e4", kind: "image", name: "flicker-1.png", url: "#" },
       ],
+      report:
+        "- Result: PASS\n\n| Check | Result |\n| --- | --- |\n| debounce fires one request | PASS |\n| no loading flicker | PASS |\n",
       timeline: [
         { label: "Read issue and extracted acceptance criteria", turn: 1, status: "done" },
         { label: "Implemented debounce in SearchInput", turn: 2, status: "done" },
@@ -65,8 +67,8 @@ export const MOCK_BOARD: BoardPayload = {
       agent: { status: "idle", turn: 11, maxTurns: 20, costUsd: 1.92, lastAction: "opened PR" },
       pr: { number: 631, ci: "passing", url: ghPr(631) },
       evidence: [
-        { id: "e5", ac: "AC 1 — upload accepts png/jpg", kind: "image", name: "upload-ok.png", url: "#" },
-        { id: "e6", ac: "AC 2 — rejects files over 5mb", kind: "image", name: "reject.png", url: "#" },
+        { id: "e5", kind: "image", name: "upload-ok.png", url: "#" },
+        { id: "e6", kind: "image", name: "reject.png", url: "#" },
       ],
       timeline: [
         { label: "Read issue and extracted acceptance criteria", turn: 1, status: "done" },
@@ -84,9 +86,7 @@ export const MOCK_BOARD: BoardPayload = {
       state: "Promote to Staging",
       agent: { status: "idle", turn: 8, maxTurns: 20, costUsd: 1.05, lastAction: "CI green" },
       pr: { number: 638, ci: "passing", url: ghPr(638) },
-      evidence: [
-        { id: "e7", ac: "AC 1 — page 2 loads", kind: "video", name: "pagination.webm", url: "#" },
-      ],
+      evidence: [{ id: "e7", kind: "video", name: "pagination.webm", url: "#" }],
       url: linear("SODEV-933"),
       traceUrl: trace("d4e5f6a7b8c9001234"),
       updatedAt: "2026-05-30T10:02:00Z",

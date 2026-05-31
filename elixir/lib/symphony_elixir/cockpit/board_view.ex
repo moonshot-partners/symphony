@@ -47,6 +47,8 @@ defmodule SymphonyElixir.Cockpit.BoardView do
     running = MapSet.new(list(Keyword.get(opts, :running)))
     # CI status keyed by PR url: %{url => "passing" | "pending" | "failing"}.
     ci = Map.new(Keyword.get(opts, :ci, []))
+    # QA evidence manifests keyed by internal issue id (cockpit evidence store).
+    evidence = Map.new(Keyword.get(opts, :evidence, []))
 
     %{
       "states" => %{
@@ -58,13 +60,14 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "onReject" => tracker.on_reject_state,
         "terminal" => list(tracker.terminal_states)
       },
-      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci))
+      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci, evidence))
     }
   end
 
-  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running, ci) do
+  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running, ci, evidence) do
     run = Map.get(runs_by_ticket, issue.identifier)
     status = if MapSet.member?(running, issue.id), do: "running", else: "idle"
+    manifest = Map.get(evidence, issue.id, %{})
 
     %{
       "id" => issue.identifier,
@@ -78,11 +81,30 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "lastAction" => run && string_field(run, "outcome")
       },
       "pr" => pr(issue, ci),
-      "evidence" => [],
+      "evidence" => evidence_items(issue.id, manifest),
+      "report" => Map.get(manifest, "report"),
       "url" => issue.url,
       "traceUrl" => trace_url(run, trace_base),
       "updatedAt" => issue.updated_at || ""
     }
+  end
+
+  # Gallery items from the store manifest, each pointing at the cockpit's
+  # same-origin evidence proxy (`/api/evidence/<issue id>/<file>`).
+  defp evidence_items(issue_id, manifest) do
+    manifest
+    |> Map.get("items", [])
+    |> Enum.with_index()
+    |> Enum.map(fn {item, index} ->
+      name = item["name"]
+
+      %{
+        "id" => "#{issue_id}-#{index}",
+        "kind" => item["kind"],
+        "name" => name,
+        "url" => "/api/evidence/#{URI.encode(issue_id)}/#{URI.encode(name)}"
+      }
+    end)
   end
 
   # Latest ledger row per ticket identifier (append order: last wins).

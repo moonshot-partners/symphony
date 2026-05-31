@@ -1,21 +1,12 @@
 defmodule SymphonyElixir.QaEvidenceTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Cockpit.EvidenceStore
   alias SymphonyElixir.QaEvidence
 
-  defmodule FakeUpload do
-    @moduledoc false
-    def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}
-  end
-
-  defmodule FailingUpload do
-    @moduledoc false
-    def upload(_path), do: {:error, :boom}
-  end
-
   setup do
-    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-    Application.put_env(:symphony_elixir, :qa_evidence_upload_module, FakeUpload)
+    store = Path.join(System.tmp_dir!(), "qa-store-#{System.unique_integer([:positive])}")
+    System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", store)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "memory",
@@ -23,8 +14,8 @@ defmodule SymphonyElixir.QaEvidenceTest do
     )
 
     on_exit(fn ->
-      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
-      Application.delete_env(:symphony_elixir, :qa_evidence_upload_module)
+      System.delete_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
+      File.rm_rf!(store)
     end)
 
     :ok
@@ -43,22 +34,25 @@ defmodule SymphonyElixir.QaEvidenceTest do
     base
   end
 
-  describe "maybe_publish/2" do
-    test "no-ops when workspace_path is nil" do
-      assert :ok == QaEvidence.maybe_publish("issue-1", nil)
-      refute_receive {:memory_tracker_comment, _, _}, 200
-    end
+  # maybe_publish runs publish in a supervised Task; poll the store until the
+  # manifest lands (or time out).
+  defp await_manifest(issue_id) do
+    Enum.reduce_while(1..200, EvidenceStore.read(issue_id), fn _, _ ->
+      manifest = EvidenceStore.read(issue_id)
 
-    test "no-ops when the qa-evidence directory is absent" do
-      base = Path.join(System.tmp_dir!(), "qa-empty-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(base)
-      on_exit(fn -> File.rm_rf!(base) end)
+      if manifest["items"] != [] or manifest["report"] != nil do
+        {:halt, manifest}
+      else
+        Process.sleep(25)
+        {:cont, manifest}
+      end
+    end)
+  end
 
-      assert :ok == QaEvidence.maybe_publish("issue-1", base)
-      refute_receive {:memory_tracker_comment, _, _}, 200
-    end
+  defp names(manifest), do: Enum.map(manifest["items"], & &1["name"])
 
-    test "uploads screenshots and posts a comment with the report table inline" do
+  describe "publish/3 — writes the bundle to the cockpit store" do
+    test "stores screenshots + session video and the report inline; drops the trace zip" do
       base =
         evidence_dir([
           {"01-collapsed.png", "fake-png"},
@@ -68,87 +62,117 @@ defmodule SymphonyElixir.QaEvidenceTest do
           {"session.zip", "fake-trace"}
         ])
 
+      dir = Path.join(base, "fe-next-app/qa-evidence")
+      assert :ok == QaEvidence.publish("issue-42", dir)
+
+      manifest = EvidenceStore.read("issue-42")
+      assert names(manifest) == ["01-collapsed.png", "02-expanded.png", "session.webm"]
+
+      kinds = Enum.map(manifest["items"], & &1["kind"])
+      assert kinds == ["image", "image", "video"]
+
+      assert manifest["report"] =~ "- Result: PASS"
+      assert manifest["report"] =~ "| toggle | PASS |"
+
+      # Files actually landed on disk and are servable; the trace zip is not.
+      assert EvidenceStore.file_path("issue-42", "01-collapsed.png")
+      assert EvidenceStore.file_path("issue-42", "session.webm")
+      refute EvidenceStore.file_path("issue-42", "session.zip")
+    end
+
+    test "report is nil when no qa-report.md is present" do
+      base = evidence_dir([{"shot.png", "png"}])
+      dir = Path.join(base, "fe-next-app/qa-evidence")
+
+      assert :ok == QaEvidence.publish("issue-noreport", dir)
+      manifest = EvidenceStore.read("issue-noreport")
+      assert names(manifest) == ["shot.png"]
+      assert manifest["report"] == nil
+    end
+
+    test "republishing replaces the previous bundle" do
+      first = evidence_dir([{"old.png", "old"}])
+      assert :ok == QaEvidence.publish("issue-replace", Path.join(first, "fe-next-app/qa-evidence"))
+
+      second = evidence_dir([{"new.png", "new"}])
+      assert :ok == QaEvidence.publish("issue-replace", Path.join(second, "fe-next-app/qa-evidence"))
+
+      assert names(EvidenceStore.read("issue-replace")) == ["new.png"]
+      refute EvidenceStore.file_path("issue-replace", "old.png")
+    end
+  end
+
+  describe "maybe_publish/2" do
+    test "no-ops when workspace_path is nil" do
+      assert :ok == QaEvidence.maybe_publish("issue-1", nil)
+      assert EvidenceStore.read("issue-1") == %{"items" => [], "report" => nil}
+    end
+
+    test "no-ops when the qa-evidence directory is absent" do
+      base = Path.join(System.tmp_dir!(), "qa-empty-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(base)
+      on_exit(fn -> File.rm_rf!(base) end)
+
+      assert :ok == QaEvidence.maybe_publish("issue-1", base)
+      assert EvidenceStore.read("issue-1") == %{"items" => [], "report" => nil}
+    end
+
+    test "publishes the live workspace bundle to the store asynchronously" do
+      base =
+        evidence_dir([
+          {"01-collapsed.png", "fake-png"},
+          {"qa-report.md", "- Result: PASS\n"},
+          {"session.webm", "fake-webm"}
+        ])
+
       assert :ok == QaEvidence.maybe_publish("issue-42", base)
 
-      assert_receive {:memory_tracker_comment, "issue-42", body}, 2_000
-      assert body =~ "## QA self-review · PASS"
-      refute body =~ "## QA self-review evidence"
-      assert body =~ "| toggle | PASS |"
-      assert body =~ "![01-collapsed.png](https://uploads.example/01-collapsed.png)"
-      assert body =~ "![02-expanded.png](https://uploads.example/02-expanded.png)"
-      refute body =~ "**01-collapsed.png**"
-
-      assert body =~ "\n[session video](https://uploads.example/session.webm)\n\n"
-      assert body =~ "\n[Playwright trace](https://uploads.example/session.zip)\n"
-      refute body =~ "session.webm) · ["
-      refute body =~ "trace.playwright.dev"
+      manifest = await_manifest("issue-42")
+      assert "01-collapsed.png" in names(manifest)
+      assert "session.webm" in names(manifest)
+      assert manifest["report"] =~ "- Result: PASS"
     end
 
-    test "still posts a comment when every upload fails" do
-      Application.put_env(:symphony_elixir, :qa_evidence_upload_module, FailingUpload)
-
-      base = evidence_dir([{"01-collapsed.png", "fake-png"}])
-
-      assert :ok == QaEvidence.maybe_publish("issue-7", base)
-
-      assert_receive {:memory_tracker_comment, "issue-7", body}, 2_000
-      assert body =~ "_(no screenshots uploaded)_"
-    end
-
-    test "threads parent_id to tracker.create_comment when provided" do
-      base = evidence_dir([{"01-collapsed.png", "fake-png"}])
-
-      assert :ok ==
-               QaEvidence.maybe_publish("issue-pp", base, parent_id: "workpad-comment-77")
-
-      assert_receive {:memory_tracker_comment, "issue-pp", _body}, 2_000
-      assert_receive {:memory_tracker_comment_parent, "issue-pp", "workpad-comment-77"}, 1_000
-    end
-
-    test "omits parent linkage when no parent_id is provided" do
-      base = evidence_dir([{"01-collapsed.png", "fake-png"}])
-
-      assert :ok == QaEvidence.maybe_publish("issue-np", base)
-
-      assert_receive {:memory_tracker_comment, "issue-np", _body}, 2_000
-      refute_receive {:memory_tracker_comment_parent, "issue-np", _}, 200
-    end
-
-    test "uploads all artifacts even when the workspace dir is removed before the async upload runs" do
+    test "still publishes after the workspace dir is removed before the async task runs" do
       base =
         evidence_dir([
           {"01-shot.png", "PNG-BYTES"},
-          {"qa-report.md", "| Check | Result |\n| --- | --- |\n| ok | PASS |\n"},
-          {"session.webm", "WEBM-BYTES"},
-          {"session.zip", "ZIP-BYTES"}
+          {"qa-report.md", "- Result: PASS\n"},
+          {"session.webm", "WEBM-BYTES"}
         ])
 
       assert :ok == QaEvidence.maybe_publish("issue-race", base)
-
       File.rm_rf!(base)
 
-      assert_receive {:memory_tracker_comment, "issue-race", body}, 5_000
-      assert body =~ "![01-shot.png](https://uploads.example/"
-      assert body =~ "[session video](https://uploads.example/"
-      assert body =~ "[Playwright trace](https://uploads.example/"
-      refute body =~ "trace.playwright.dev"
+      manifest = await_manifest("issue-race")
+      assert "01-shot.png" in names(manifest)
+      assert "session.webm" in names(manifest)
+    end
+
+    test "accepts (and ignores) a parent_id without touching the tracker" do
+      base = evidence_dir([{"01-collapsed.png", "fake-png"}])
+
+      assert :ok == QaEvidence.maybe_publish("issue-pp", base, parent_id: "workpad-comment-77")
+
+      manifest = await_manifest("issue-pp")
+      assert "01-collapsed.png" in names(manifest)
+      refute_receive {:memory_tracker_comment, "issue-pp", _}, 200
     end
   end
 
   describe "stage_pending_publish/2 + maybe_publish/3 — SODEV-881" do
-    test "stages evidence to a deterministic path that survives workspace removal" do
+    test "stages evidence to a path that survives workspace removal, then publishes it" do
       base = evidence_dir([{"01.png", "PNG"}, {"qa-report.md", "- Result: PASS\n"}])
 
       assert :ok == QaEvidence.stage_pending_publish("issue-881", base)
-
       File.rm_rf!(base)
 
       # workspace gone, but maybe_publish must still pick up the staged copy
       assert :ok == QaEvidence.maybe_publish("issue-881", base)
 
-      assert_receive {:memory_tracker_comment, "issue-881", body}, 5_000
-      assert body =~ "## QA self-review · PASS"
-      assert body =~ "![01.png](https://uploads.example/"
+      manifest = await_manifest("issue-881")
+      assert "01.png" in names(manifest)
+      assert manifest["report"] =~ "- Result: PASS"
 
       # staged dir cleaned up after publish (task `after` clause runs async)
       staged = Path.join(System.tmp_dir!(), "symphony-qa-staged-issue-881")
@@ -180,18 +204,15 @@ defmodule SymphonyElixir.QaEvidenceTest do
     end
 
     test "maybe_publish prefers staged dir over workspace when both present" do
-      # Stage with one set of files
       staged_src = evidence_dir([{"staged.png", "STAGED"}])
       assert :ok == QaEvidence.stage_pending_publish("issue-prefer", staged_src)
 
-      # New workspace has different files; staged should win
       live_ws = evidence_dir([{"live.png", "LIVE"}])
-
       assert :ok == QaEvidence.maybe_publish("issue-prefer", live_ws)
 
-      assert_receive {:memory_tracker_comment, "issue-prefer", body}, 5_000
-      assert body =~ "staged.png"
-      refute body =~ "live.png"
+      manifest = await_manifest("issue-prefer")
+      assert "staged.png" in names(manifest)
+      refute "live.png" in names(manifest)
     end
   end
 
@@ -228,17 +249,15 @@ defmodule SymphonyElixir.QaEvidenceTest do
             {"qa-report.md", "- Result: PASS\n"},
             {"session.webm", "FE-WEBM"}
           ],
-          [
-            {"be-rspec.txt", "rspec output here"}
-          ]
+          [{"be-rspec.txt", "rspec output here"}]
         )
 
       assert :ok == QaEvidence.maybe_publish("issue-mp-1", base)
 
-      assert_receive {:memory_tracker_comment, "issue-mp-1", body}, 5_000
-      assert body =~ "fe-shot.png"
-      assert body =~ "## QA self-review · PASS"
-      assert body =~ "[session video](https://uploads.example/session.webm)"
+      manifest = await_manifest("issue-mp-1")
+      assert "fe-shot.png" in names(manifest)
+      assert "session.webm" in names(manifest)
+      assert manifest["report"] =~ "- Result: PASS"
     end
 
     test "stage_pending_publish snapshots every configured subpath before workspace wipe" do
@@ -254,97 +273,13 @@ defmodule SymphonyElixir.QaEvidenceTest do
         )
 
       assert :ok == QaEvidence.stage_pending_publish("issue-mp-2", base)
-
-      # Workspace wiped (continuation retry simulation)
       File.rm_rf!(base)
 
       assert :ok == QaEvidence.maybe_publish("issue-mp-2", base)
 
-      assert_receive {:memory_tracker_comment, "issue-mp-2", body}, 5_000
-      assert body =~ "fe-shot.png"
-      assert body =~ "## QA self-review · PASS"
-    end
-  end
-
-  describe "build_comment/4" do
-    test "renders compact header with status, screenshots, single-line video+trace" do
-      body =
-        QaEvidence.build_comment(
-          "- Result: PASS\n\n| Check | Result |\n| --- | --- |\n| x | PASS |",
-          [{"a.png", "https://u/a.png"}],
-          "https://u/session.webm",
-          "https://u/session.zip"
-        )
-
-      assert body =~ "## QA self-review · PASS"
-      refute body =~ "## QA self-review evidence"
-      assert body =~ "| x | PASS |"
-      assert body =~ "### Screenshots"
-      assert body =~ "![a.png](https://u/a.png)"
-      refute body =~ "**a.png**"
-      assert body =~ "\n[session video](https://u/session.webm)\n\n"
-      assert body =~ "\n[Playwright trace](https://u/session.zip)\n"
-      refute body =~ "session.webm) · ["
-      refute body =~ "trace.playwright.dev"
-    end
-
-    test "video and trace each sit alone on their own paragraph so Linear renders them as inline players" do
-      body =
-        QaEvidence.build_comment(
-          nil,
-          [],
-          "https://u/session.webm",
-          "https://u/session.zip"
-        )
-
-      assert body =~ "\n[session video](https://u/session.webm)\n\n[Playwright trace](https://u/session.zip)\n"
-      refute body =~ "session.webm) "
-      refute body =~ ") · ["
-    end
-
-    test "handles missing report, video and trace" do
-      body = QaEvidence.build_comment(nil, [], nil, nil)
-
-      assert body =~ "## QA self-review"
-      assert body =~ "_(no screenshots uploaded)_"
-      refute body =~ "session.webm"
-      refute body =~ "session.zip"
-    end
-
-    test "defaults trace_url to nil (back-compat /3 arity)" do
-      body = QaEvidence.build_comment(nil, [], "https://u/session.webm")
-
-      assert body =~ "[session video](https://u/session.webm)"
-      refute body =~ "Playwright trace"
-    end
-
-    test "header reflects FAIL status when report carries '- Result: FAIL'" do
-      body = QaEvidence.build_comment("- Result: FAIL", [], nil, nil)
-      assert body =~ "## QA self-review · FAIL"
-    end
-
-    test "header reflects BLOCKED status when report carries '- Result: BLOCKED'" do
-      body = QaEvidence.build_comment("- Result: BLOCKED", [], nil, nil)
-      assert body =~ "## QA self-review · BLOCKED"
-    end
-
-    test "header omits status suffix when report has no '- Result:' line" do
-      body = QaEvidence.build_comment("- Run: 2026-05-17T00:00:00Z", [], nil, nil)
-      assert body =~ "## QA self-review\n"
-      refute body =~ "## QA self-review · "
-    end
-
-    test "renders single artifact link when only video is present" do
-      body = QaEvidence.build_comment(nil, [], "https://u/session.webm", nil)
-      assert body =~ "[session video](https://u/session.webm)"
-      refute body =~ "Playwright trace"
-      refute body =~ " · "
-    end
-
-    test "renders single artifact link when only trace is present" do
-      body = QaEvidence.build_comment(nil, [], nil, "https://u/session.zip")
-      assert body =~ "[Playwright trace](https://u/session.zip)"
-      refute body =~ "session video"
+      manifest = await_manifest("issue-mp-2")
+      assert "fe-shot.png" in names(manifest)
+      assert manifest["report"] =~ "- Result: PASS"
     end
   end
 end

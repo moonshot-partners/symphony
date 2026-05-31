@@ -1,25 +1,23 @@
 defmodule SymphonyElixir.QaEvidence do
   @moduledoc """
-  Publishes a UI-QA-self-review evidence bundle to the tracker ticket.
+  Collects a UI-QA-self-review evidence bundle and hands it to the cockpit store.
 
   Reads `qa.evidence_subpath` from the active workflow config (defaults to
   `fe-next-app/qa-evidence`) and looks inside the agent's workspace for that
   directory — screenshots, a session `.webm`, a `qa-report.md` table. When the
   agent attaches its PR, the orchestrator calls `maybe_publish/2`: if the
-  directory exists, the screenshots are uploaded and posted as a comment on
-  the ticket (with the report table inline) so the proof lives on the ticket
-  the PM looks at, not only inside the PR.
+  directory exists, the bundle is published to the cockpit evidence store
+  (`SymphonyElixir.Cockpit.EvidenceStore`), where the proof surfaces in the
+  cockpit detail. It is no longer posted as a tracker comment — Linear stays a
+  clean control plane.
 
   Fire-and-forget — any failure is logged, never fatal to the completion path.
   """
 
   require Logger
 
+  alias SymphonyElixir.Cockpit.EvidenceStore
   alias SymphonyElixir.Config
-  alias SymphonyElixir.Tracker
-
-  @image_exts ~w(.png .jpg .jpeg .gif)
-  @max_images 20
 
   @spec maybe_publish(String.t() | nil, String.t() | nil, keyword()) :: :ok
   def maybe_publish(issue_id, workspace_path, opts \\ [])
@@ -159,119 +157,11 @@ defmodule SymphonyElixir.QaEvidence do
     if File.regular?(src), do: File.cp!(src, Path.join(staging_dir, name))
   end
 
+  # Hand the staged bundle to the cockpit store. `opts` (e.g. parent_id) is a
+  # tracker-comment leftover, now ignored — evidence no longer touches Linear.
   @doc false
   @spec publish(String.t(), Path.t(), keyword()) :: :ok
-  def publish(issue_id, dir, opts \\ []) do
-    images = dir |> list_files(@image_exts) |> Enum.take(@max_images)
-    report = read_optional(Path.join(dir, "qa-report.md"))
-
-    uploaded =
-      Enum.flat_map(images, fn path ->
-        case upload_module().upload(path) do
-          {:ok, url} ->
-            [{Path.basename(path), url}]
-
-          {:error, reason} ->
-            Logger.warning("QA evidence upload failed file=#{Path.basename(path)} reason=#{inspect(reason)}")
-            []
-        end
-      end)
-
-    video_url = maybe_upload_artifact(Path.join(dir, "session.webm"), "video")
-    trace_url = maybe_upload_artifact(Path.join(dir, "session.zip"), "trace")
-
-    parent_id = Keyword.get(opts, :parent_id)
-    body = build_comment(report, uploaded, video_url, trace_url)
-
-    case Tracker.create_comment(issue_id, body, parent_id: parent_id) do
-      {:ok, _id} ->
-        Logger.info(
-          "QA evidence published issue_id=#{issue_id} images=#{length(uploaded)} " <>
-            "video=#{video_url != nil} trace=#{trace_url != nil}"
-        )
-
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("QA evidence comment failed issue_id=#{issue_id} reason=#{inspect(reason)}")
-        :ok
-    end
-  end
-
-  @doc false
-  @spec build_comment(
-          String.t() | nil,
-          [{String.t(), String.t()}],
-          String.t() | nil,
-          String.t() | nil
-        ) :: String.t()
-  def build_comment(report, uploaded, video_url, trace_url \\ nil) do
-    [
-      "## QA self-review" <> status_suffix(report),
-      if(report, do: "\n" <> String.trim_trailing(report)),
-      "\n### Screenshots\n",
-      screenshots_block(uploaded),
-      artifacts_line(video_url, trace_url)
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n")
-    |> Kernel.<>("\n")
-  end
-
-  defp status_suffix(nil), do: ""
-
-  defp status_suffix(report) do
-    case Regex.run(~r/^- Result:\s*(PASS|FAIL|BLOCKED)\b/m, report) do
-      [_, status] -> " · " <> status
-      _ -> ""
-    end
-  end
-
-  defp artifacts_line(nil, nil), do: nil
-  defp artifacts_line(video, nil), do: "\n[session video](#{video})"
-  defp artifacts_line(nil, trace), do: "\n[Playwright trace](#{trace})"
-  defp artifacts_line(video, trace), do: "\n[session video](#{video})\n\n[Playwright trace](#{trace})"
-
-  defp maybe_upload_artifact(path, label) do
-    if File.regular?(path) do
-      case upload_module().upload(path) do
-        {:ok, url} ->
-          url
-
-        {:error, reason} ->
-          Logger.warning("QA evidence #{label} upload failed reason=#{inspect(reason)}")
-          nil
-      end
-    end
-  end
-
-  defp screenshots_block([]), do: "_(no screenshots uploaded)_"
-
-  defp screenshots_block(uploaded) do
-    Enum.map_join(uploaded, "\n", fn {name, url} -> "![#{name}](#{url})" end)
-  end
-
-  defp list_files(dir, exts) do
-    case File.ls(dir) do
-      {:ok, names} ->
-        names
-        |> Enum.filter(fn n -> String.downcase(Path.extname(n)) in exts end)
-        |> Enum.sort()
-        |> Enum.map(&Path.join(dir, &1))
-
-      _ ->
-        []
-    end
-  end
-
-  defp read_optional(path) do
-    case File.read(path) do
-      {:ok, content} -> content
-      _ -> nil
-    end
-  end
-
-  defp upload_module do
-    Application.get_env(:symphony_elixir, :qa_evidence_upload_module, SymphonyElixir.Linear.FileUpload)
+  def publish(issue_id, dir, _opts \\ []) do
+    EvidenceStore.publish(issue_id, dir)
   end
 end

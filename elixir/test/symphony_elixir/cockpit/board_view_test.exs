@@ -130,6 +130,46 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
       assert ticket["pr"]["ci"] == "passing"
     end
 
+    test "maps stored QA evidence into gallery items + report keyed by internal id" do
+      issue = %Issue{id: "uuid-9", identifier: "SODEV-11", title: "T", state: "In Code Review", repos: []}
+
+      manifest = %{
+        "items" => [
+          %{"name" => "01 before.png", "kind" => "image"},
+          %{"name" => "session.webm", "kind" => "video"}
+        ],
+        "report" => "- Result: PASS\n"
+      }
+
+      [ticket] =
+        BoardView.assemble([issue], [], tracker(), evidence: [{"uuid-9", manifest}])["tickets"]
+
+      assert ticket["report"] == "- Result: PASS\n"
+
+      assert ticket["evidence"] == [
+               %{
+                 "id" => "uuid-9-0",
+                 "kind" => "image",
+                 "name" => "01 before.png",
+                 "url" => "/api/evidence/uuid-9/01%20before.png"
+               },
+               %{
+                 "id" => "uuid-9-1",
+                 "kind" => "video",
+                 "name" => "session.webm",
+                 "url" => "/api/evidence/uuid-9/session.webm"
+               }
+             ]
+    end
+
+    test "no evidence manifest yields an empty gallery and a nil report" do
+      issue = %Issue{id: "uuid-x", identifier: "SODEV-12", title: "T", state: "Todo", repos: []}
+
+      [ticket] = BoardView.assemble([issue], [], tracker())["tickets"]
+      assert ticket["evidence"] == []
+      assert ticket["report"] == nil
+    end
+
     test "marks tickets whose internal id is in the running set" do
       running = %Issue{id: "uuid-1", identifier: "SODEV-9", title: "T", state: "In Development", repos: []}
       idle = %Issue{id: "uuid-2", identifier: "SODEV-10", title: "T2", state: "Scheduled", repos: []}
