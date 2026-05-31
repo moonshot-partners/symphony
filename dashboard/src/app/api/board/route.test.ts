@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MOCK_BOARD } from "@/features/board/fixtures";
-import { GET } from "./route";
+import { GET, __resetBoardCache } from "./route";
+
+beforeEach(() => {
+  __resetBoardCache();
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -49,5 +53,18 @@ describe("GET /api/board (BFF)", () => {
       "http://elixir/board",
       expect.objectContaining({ headers: { authorization: "Bearer secret" } })
     );
+  });
+
+  it("serves a cached snapshot within the TTL (one upstream fetch for repeat calls)", async () => {
+    vi.stubEnv("COCKPIT_API_URL", "http://elixir");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => MOCK_BOARD });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await GET();
+    const second = await GET();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
