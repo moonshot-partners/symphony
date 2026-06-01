@@ -30,6 +30,13 @@ describe("TicketDetail", () => {
     expect(screen.getByText(/no loading flicker \| PASS/)).toBeInTheDocument();
   });
 
+  it("renders the ticket description when present", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+    expect(screen.getByText("Description")).toBeInTheDocument();
+    expect(screen.getByText(/Debounce it to 300ms/)).toBeInTheDocument();
+  });
+
   it("renders the run summary when present", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");

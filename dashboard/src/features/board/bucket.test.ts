@@ -43,6 +43,7 @@ describe("columnFor", () => {
       ["Groomed", "queued"],
       ["Approved QA", "done"],
       ["Recently released", "done"],
+      ["In Development", "running"],
     ];
     for (const [state, col] of cases) {
       expect(columnFor(ticket("T", state), states)).toBe(col);

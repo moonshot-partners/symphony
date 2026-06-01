@@ -59,7 +59,8 @@ defmodule SymphonyElixir.Cockpit.Api do
     done = MapSet.new(List.wrap(tracker.terminal_states) ++ cockpit.done_states)
 
     {done_states, active_states} =
-      (BoardView.relevant_states(tracker) ++ cockpit.up_next_states ++ cockpit.done_states)
+      (BoardView.relevant_states(tracker) ++
+         cockpit.up_next_states ++ cockpit.done_states ++ cockpit.in_progress_states)
       |> Enum.uniq()
       |> Enum.split_with(&MapSet.member?(done, &1))
 
@@ -75,7 +76,8 @@ defmodule SymphonyElixir.Cockpit.Api do
       evidence: evidence_map(issues),
       summary: summary_map(issues),
       extra_up_next: cockpit.up_next_states,
-      extra_done: cockpit.done_states
+      extra_done: cockpit.done_states,
+      extra_in_progress: cockpit.in_progress_states
     )
   end
 

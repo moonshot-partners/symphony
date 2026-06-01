@@ -147,6 +147,9 @@ cockpit:
   done_states:
     - Approved QA
     - Recently released
+  # Workflow states shown in "In progress" (not lumped into "Up next").
+  in_progress_states:
+    - In Development
 ---
 
 # Schools Out — Symphony Workflow

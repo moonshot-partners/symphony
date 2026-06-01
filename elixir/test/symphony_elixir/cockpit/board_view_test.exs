@@ -63,21 +63,33 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
                "onReject" => "On Hold",
                "terminal" => ["Done", "Cancelled"],
                "upNextExtra" => [],
-               "doneExtra" => []
+               "doneExtra" => [],
+               "inProgressExtra" => []
              }
 
       assert board["tickets"] == []
     end
 
-    test "carries the cockpit up-next/done display extras into the states map" do
+    test "carries the cockpit display extras (up-next / done / in-progress) into the states map" do
       board =
         BoardView.assemble([], [], tracker(),
           extra_up_next: ["Backlog", "Groomed"],
-          extra_done: ["Approved QA", "Recently released"]
+          extra_done: ["Approved QA", "Recently released"],
+          extra_in_progress: ["In Development"]
         )
 
       assert board["states"]["upNextExtra"] == ["Backlog", "Groomed"]
       assert board["states"]["doneExtra"] == ["Approved QA", "Recently released"]
+      assert board["states"]["inProgressExtra"] == ["In Development"]
+    end
+
+    test "includes the issue description (capped), nil when blank" do
+      with_desc = %Issue{identifier: "SODEV-20", title: "T", state: "Todo", description: "do the thing", repos: []}
+      without = %Issue{identifier: "SODEV-21", title: "T2", state: "Todo", description: nil, repos: []}
+
+      [a, b] = BoardView.assemble([with_desc, without], [], tracker())["tickets"]
+      assert a["description"] == "do the thing"
+      assert b["description"] == nil
     end
 
     test "maps an issue with a PR and an enriching ledger run" do

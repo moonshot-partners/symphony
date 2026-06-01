@@ -21,6 +21,7 @@ export const MOCK_BOARD: BoardPayload = {
     terminal: ["Done", "Cancelled", "Duplicate"],
     upNextExtra: ["Backlog", "Groomed"],
     doneExtra: ["Approved QA", "Recently released"],
+    inProgressExtra: ["In Development"],
   },
   tickets: [
     {
@@ -36,6 +37,7 @@ export const MOCK_BOARD: BoardPayload = {
     {
       id: "SODEV-956",
       title: "Fix collection search debounce",
+      description: "The search input fires a request on every keystroke. Debounce it to 300ms so a burst of typing sends one request.",
       state: "In Progress",
       agent: {
         status: "running",
