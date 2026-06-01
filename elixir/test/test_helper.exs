@@ -11,5 +11,9 @@ System.put_env("SYMPHONY_DECISION_LOG", "0")
 System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", Path.join(System.tmp_dir!(), "symphony-test-evidence"))
 System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", Path.join(System.tmp_dir!(), "symphony-test-summaries"))
 
+# Disable the Linear fetch cache in the suite so memoized I/O never leaks
+# across tests. FetchCacheTest opts back in with an explicit :ttl_ms.
+Application.put_env(:symphony_elixir, :linear_fetch_cache_ttl_ms, 0)
+
 ExUnit.start()
 Code.require_file("support/test_support.exs", __DIR__)

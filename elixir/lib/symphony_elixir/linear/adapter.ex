@@ -5,7 +5,7 @@ defmodule SymphonyElixir.Linear.Adapter do
 
   @behaviour SymphonyElixir.Tracker
 
-  alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.Linear.{Client, FetchCache}
 
   @create_comment_mutation """
   mutation SymphonyCreateComment($issueId: String!, $body: String!, $parentId: String) {
@@ -48,11 +48,18 @@ defmodule SymphonyElixir.Linear.Adapter do
   }
   """
 
+  # SYM rate-limit fix: the dispatch + reconciler scans fire every poll tick,
+  # so their request count scaled with poll frequency and pinned the Linear
+  # 2500 req/hr cap. Memoize them for a short TTL (FetchCache) to collapse
+  # several ticks into one request. `fetch_issue_states_by_ids` stays uncached
+  # because the dispatch-gate revalidation needs the live state.
   @spec fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
-  def fetch_candidate_issues, do: client_module().fetch_candidate_issues()
+  def fetch_candidate_issues,
+    do: FetchCache.fetch(:candidate_issues, fn -> client_module().fetch_candidate_issues() end)
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
-  def fetch_issues_by_states(states), do: client_module().fetch_issues_by_states(states)
+  def fetch_issues_by_states(states),
+    do: FetchCache.fetch({:issues_by_states, states}, fn -> client_module().fetch_issues_by_states(states) end)
 
   @spec fetch_recent_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
   def fetch_recent_issues_by_states(states), do: client_module().fetch_recent_issues_by_states(states)

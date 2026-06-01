@@ -28,6 +28,9 @@ defmodule SymphonyElixir.Application do
       [
         {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
         SymphonyElixir.WorkflowStore,
+        # Owns the Linear fetch cache ETS table; must start before the
+        # Orchestrator, which reads through it on its first poll tick.
+        SymphonyElixir.Linear.FetchCache,
         SymphonyElixir.Orchestrator.WorkpadPersister,
         SymphonyElixir.Orchestrator
       ] ++ cockpit_children()
