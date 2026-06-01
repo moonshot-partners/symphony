@@ -18,24 +18,25 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
     * grounded plan (`:ok`) → `{:continue, state, running_entry}`. The
       `:plan_grounding_checked` flag marks the entry so later turns skip
       the check.
-    * ungrounded plan (`{:violation, reason}`) → posts a parked-issue
-      comment, moves the issue to `tracker.on_reject_state`, calls the
-      orchestrator-supplied `terminate_fn` to kill the running task, and
-      marks the issue completed so reconcile does not redispatch it.
-      Returns `{:halted, state}`.
+    * ungrounded plan (`{:violation, reason}`) → records a parked-issue
+      summary in the cockpit run summary store, moves the issue to
+      `tracker.on_reject_state`, calls the orchestrator-supplied
+      `terminate_fn` to kill the running task, and marks the issue completed
+      so reconcile does not redispatch it. Returns `{:halted, state}`.
 
   Runs once, on turn 1 only. A turn other than the first, an already
   checked entry, or a non-binary `workspace_path` is a silent pass — the
   gate never false-halts a run it cannot evaluate.
 
-  Tracker side effects (comment + state move) run inside a
-  `Task.Supervisor.start_child` so the orchestrator process is never
-  blocked on Tracker I/O.
+  The summary write is a fast, non-raising local-disk write done inline; the
+  state move (tracker I/O) runs inside a `Task.Supervisor.start_child` so the
+  orchestrator process is never blocked on the network.
   """
 
   require Logger
 
-  alias SymphonyElixir.{Config, PlanGrounding, Tracker}
+  alias SymphonyElixir.Cockpit.RunSummaryStore
+  alias SymphonyElixir.{Config, PlanGrounding}
   alias SymphonyElixir.Orchestrator.{DispatchGate, State, StateTransition, TurnArtifacts}
 
   @type opts :: [terminate_fn: (State.t(), String.t(), boolean() -> State.t())]
@@ -95,8 +96,9 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
 
     Logger.warning("Plan-grounding hard halt: issue_id=#{issue_id} issue_identifier=#{identifier} reason=#{inspect(reason)}")
 
+    RunSummaryStore.put(issue_id, violation_comment(reason, identifier))
+
     Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-      Tracker.create_comment(issue_id, violation_comment(reason, identifier))
       StateTransition.apply(issue, on_reject_state)
     end)
 

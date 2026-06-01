@@ -1,6 +1,7 @@
 defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Cockpit.RunSummaryStore
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.{GateCEnforcement, State}
 
@@ -48,7 +49,14 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
 
   defp set_memory_tracker_recipient do
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-    on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
+    summary_dir = Path.join(System.tmp_dir!(), "gce-summary-#{System.unique_integer([:positive])}")
+    System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", summary_dir)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      System.delete_env("SYMPHONY_COCKPIT_SUMMARY_DIR")
+      File.rm_rf(summary_dir)
+    end)
   end
 
   describe "enforce/5 — :ok passthrough" do
@@ -67,7 +75,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
                GateCEnforcement.enforce(:ok, state, "issue-gce-1", entry, terminate_fn: recording_terminate_fn(self()))
 
       refute_receive {:terminate_called, _, _}, 100
-      refute_receive {:memory_tracker_comment, _, _}, 100
+      assert RunSummaryStore.read("issue-gce-1") == nil
       refute_receive {:memory_tracker_state_update, _, _}, 100
     end
   end
@@ -100,7 +108,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
 
       assert_receive {:terminate_called, "issue-gce-1", false}, 500
 
-      assert_receive {:memory_tracker_comment, "issue-gce-1", body}, 500
+      body = RunSummaryStore.read("issue-gce-1")
       assert body =~ "Gate C violation"
       assert body =~ "issue parked"
       assert body =~ "missing_header"
@@ -133,7 +141,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
                  terminate_fn: recording_terminate_fn(self())
                )
 
-      assert_receive {:memory_tracker_comment, "issue-gce-1", body}, 500
+      body = RunSummaryStore.read("issue-gce-1")
       assert body =~ "empty_message"
     end
 
@@ -158,7 +166,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
                )
 
       assert_receive {:terminate_called, "issue-gce-1", false}, 500
-      assert_receive {:memory_tracker_comment, "issue-gce-1", _}, 500
+      assert RunSummaryStore.read("issue-gce-1") =~ "Gate C violation"
       refute_receive {:memory_tracker_state_update, _, _}, 200
 
       assert MapSet.member?(halted_state.completed, "issue-gce-1")
@@ -184,7 +192,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
                  terminate_fn: recording_terminate_fn(self())
                )
 
-      assert_receive {:memory_tracker_comment, "issue-gce-1", body}, 500
+      body = RunSummaryStore.read("issue-gce-1")
       assert body =~ "issue-gce-1"
     end
   end
