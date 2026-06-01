@@ -34,6 +34,20 @@ defmodule SymphonyElixir.Cockpit.BoardView do
   end
 
   @doc """
+  Issues whose CI status is worth fetching over the network: everything not in
+  a terminal state. A Done/Cancelled ticket's PR checks are settled and not
+  actionable, so the board skips the (per-PR `gh`) CI lookup for them. This
+  keeps the per-build CI work bounded by the active pipeline instead of the
+  unbounded history of finished work — which otherwise pushed `assemble_board`
+  past the board cache's 30s call timeout once enough Done tickets piled up.
+  """
+  @spec ci_candidates([Issue.t()], map()) :: [Issue.t()]
+  def ci_candidates(issues, tracker) do
+    terminal = MapSet.new(list(tracker.terminal_states))
+    Enum.reject(issues, fn issue -> MapSet.member?(terminal, issue.state) end)
+  end
+
+  @doc """
   Build the board payload map (string keys, JSON-ready).
   `runs` is a list of decoded ledger maps (string keys).
   `opts[:trace_base]` overrides the Langfuse trace URL prefix.

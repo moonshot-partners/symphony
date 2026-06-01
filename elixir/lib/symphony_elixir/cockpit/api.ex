@@ -54,7 +54,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
     BoardView.assemble(issues, read_runs(), tracker,
       running: read_running(),
-      ci: ci_map(issues),
+      ci: ci_map(BoardView.ci_candidates(issues, tracker)),
       evidence: evidence_map(issues),
       summary: summary_map(issues)
     )
@@ -72,15 +72,22 @@ defmodule SymphonyElixir.Cockpit.Api do
   end
 
   # CI status per PR url, fetched once per board build (bounded by BoardCache).
+  # Each `Checks.status` shells `gh pr view` (network), so the lookups run
+  # concurrently with a per-call timeout: a slow or hung `gh` can no longer
+  # serialize the whole board build past the 30s cache call timeout.
   defp ci_map(issues) do
     issues
     |> Enum.flat_map(&pr_urls/1)
     |> Enum.uniq()
-    |> Enum.flat_map(fn url ->
-      case Checks.status(url) do
-        nil -> []
-        status -> [{url, status}]
-      end
+    |> Task.async_stream(fn url -> {url, Checks.status(url)} end,
+      max_concurrency: 16,
+      timeout: 8_000,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.flat_map(fn
+      {:ok, {url, status}} when is_binary(status) -> [{url, status}]
+      _ -> []
     end)
   end
 

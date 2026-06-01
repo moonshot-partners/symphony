@@ -33,6 +33,23 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
     end
   end
 
+  describe "ci_candidates/2" do
+    test "keeps non-terminal issues and drops terminal ones" do
+      active = %Issue{identifier: "A", state: "In Progress"}
+      review = %Issue{identifier: "B", state: "In Code Review"}
+      done = %Issue{identifier: "C", state: "Done"}
+      cancelled = %Issue{identifier: "D", state: "Cancelled"}
+
+      kept = BoardView.ci_candidates([active, review, done, cancelled], tracker())
+      assert Enum.map(kept, & &1.identifier) == ["A", "B"]
+    end
+
+    test "keeps everything when terminal_states is nil" do
+      issues = [%Issue{identifier: "A", state: "Done"}]
+      assert BoardView.ci_candidates(issues, %{terminal_states: nil}) == issues
+    end
+  end
+
   describe "assemble/4" do
     test "maps tracker states into the contract shape" do
       board = BoardView.assemble([], [], tracker())
