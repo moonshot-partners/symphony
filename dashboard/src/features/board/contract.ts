@@ -65,6 +65,10 @@ export const TrackerStates = z.object({
   onPrMerge: z.string().nullable(),
   onReject: z.string().nullable(),
   terminal: z.array(z.string()),
+  // Cockpit-only display extras (decoupled from the agent's dispatch config):
+  // extra states shown in "Up next" / "Done" beyond active / terminal.
+  upNextExtra: z.array(z.string()).default([]),
+  doneExtra: z.array(z.string()).default([]),
 });
 
 export const BoardPayload = z.object({

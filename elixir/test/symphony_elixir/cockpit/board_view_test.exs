@@ -61,10 +61,23 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
                "onPromote" => "Promote to Staging",
                "onPrMerge" => "Merged",
                "onReject" => "On Hold",
-               "terminal" => ["Done", "Cancelled"]
+               "terminal" => ["Done", "Cancelled"],
+               "upNextExtra" => [],
+               "doneExtra" => []
              }
 
       assert board["tickets"] == []
+    end
+
+    test "carries the cockpit up-next/done display extras into the states map" do
+      board =
+        BoardView.assemble([], [], tracker(),
+          extra_up_next: ["Backlog", "Groomed"],
+          extra_done: ["Approved QA", "Recently released"]
+        )
+
+      assert board["states"]["upNextExtra"] == ["Backlog", "Groomed"]
+      assert board["states"]["doneExtra"] == ["Approved QA", "Recently released"]
     end
 
     test "maps an issue with a PR and an enriching ledger run" do

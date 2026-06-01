@@ -1518,6 +1518,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert settings.qa.evidence_subpaths == []
   end
 
+  test "schema parse — cockpit display states default to [] when the block is omitted" do
+    assert {:ok, settings} = Schema.parse(%{})
+    assert settings.cockpit.up_next_states == []
+    assert settings.cockpit.done_states == []
+  end
+
+  test "schema parse — cockpit up_next_states / done_states parse from YAML" do
+    assert {:ok, settings} =
+             Schema.parse(%{
+               "cockpit" => %{
+                 "up_next_states" => ["Backlog", "Groomed"],
+                 "done_states" => ["Approved QA", "Recently released"]
+               }
+             })
+
+    assert settings.cockpit.up_next_states == ["Backlog", "Groomed"]
+    assert settings.cockpit.done_states == ["Approved QA", "Recently released"]
+  end
+
   test "schema parse — qa.evidence_subpath string YAML coerces to single-element list (backward-compat)" do
     assert {:ok, settings} =
              Schema.parse(%{"qa" => %{"evidence_subpath" => "frontend/qa-evidence"}})

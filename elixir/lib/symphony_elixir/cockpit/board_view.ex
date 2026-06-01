@@ -74,7 +74,9 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "onPromote" => tracker.on_promote_state,
         "onPrMerge" => tracker.on_pr_merge_state,
         "onReject" => tracker.on_reject_state,
-        "terminal" => list(tracker.terminal_states)
+        "terminal" => list(tracker.terminal_states),
+        "upNextExtra" => list(Keyword.get(opts, :extra_up_next)),
+        "doneExtra" => list(Keyword.get(opts, :extra_done))
       },
       "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci, evidence, summary))
     }
