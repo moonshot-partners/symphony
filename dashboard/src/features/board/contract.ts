@@ -41,6 +41,7 @@ export const TimelineStep = z.object({
 export const Ticket = z.object({
   id: z.string(), // "SODEV-956"
   title: z.string(),
+  description: z.string().nullable().optional(), // Linear issue description (markdown)
   state: z.string(), // raw Linear state name
   agent: Agent,
   pr: Pr.nullable(),
@@ -65,6 +66,12 @@ export const TrackerStates = z.object({
   onPrMerge: z.string().nullable(),
   onReject: z.string().nullable(),
   terminal: z.array(z.string()),
+  // Cockpit-only display extras (decoupled from the agent's dispatch config):
+  // extra states shown in "Up next" / "Done" / "In progress" beyond the
+  // active / terminal / running mapping.
+  upNextExtra: z.array(z.string()).default([]),
+  doneExtra: z.array(z.string()).default([]),
+  inProgressExtra: z.array(z.string()).default([]),
 });
 
 export const BoardPayload = z.object({

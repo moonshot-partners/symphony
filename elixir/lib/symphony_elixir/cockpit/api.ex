@@ -49,25 +49,35 @@ defmodule SymphonyElixir.Cockpit.Api do
   @doc false
   @spec assemble_board() :: map()
   def assemble_board do
-    tracker = Config.settings!().tracker
-    terminal = MapSet.new(List.wrap(tracker.terminal_states))
+    settings = Config.settings!()
+    tracker = settings.tracker
+    cockpit = settings.cockpit
 
-    {terminal_states, active_states} =
-      tracker
-      |> BoardView.relevant_states()
-      |> Enum.split_with(&MapSet.member?(terminal, &1))
+    # Board display states: the agent's lifecycle states plus the cockpit-only
+    # extras (Up next backlog, Done post-QA). The extras never touch the agent's
+    # dispatch/terminal config — they only widen what the board shows.
+    done = MapSet.new(List.wrap(tracker.terminal_states) ++ cockpit.done_states)
+
+    {done_states, active_states} =
+      (BoardView.relevant_states(tracker) ++
+         cockpit.up_next_states ++ cockpit.done_states ++ cockpit.in_progress_states)
+      |> Enum.uniq()
+      |> Enum.split_with(&MapSet.member?(done, &1))
 
     # Both groups fetch only the routing-labelled issues (the agent's scope),
     # first page only — never paginate the whole team backlog. That backlog,
     # unfiltered + paginated, is what exhausted the shared Linear rate limit and
     # also put non-agent tickets on the board.
-    issues = fetch_recent_issues(active_states) ++ fetch_recent_issues(terminal_states)
+    issues = fetch_recent_issues(active_states) ++ fetch_recent_issues(done_states)
 
     BoardView.assemble(issues, read_runs(), tracker,
       running: read_running(),
       ci: ci_map(BoardView.ci_candidates(issues, tracker)),
       evidence: evidence_map(issues),
-      summary: summary_map(issues)
+      summary: summary_map(issues),
+      extra_up_next: cockpit.up_next_states,
+      extra_done: cockpit.done_states,
+      extra_in_progress: cockpit.in_progress_states
     )
   end
 

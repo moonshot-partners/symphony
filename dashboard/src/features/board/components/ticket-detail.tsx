@@ -98,6 +98,13 @@ function Body({ ticket }: { ticket: Ticket }) {
       <Separator />
 
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
+        {ticket.description && (
+          <section>
+            <SectionLabel>Description</SectionLabel>
+            <MarkdownBlock>{ticket.description}</MarkdownBlock>
+          </section>
+        )}
+
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <section>
             <SectionLabel>Timeline</SectionLabel>

@@ -74,7 +74,10 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "onPromote" => tracker.on_promote_state,
         "onPrMerge" => tracker.on_pr_merge_state,
         "onReject" => tracker.on_reject_state,
-        "terminal" => list(tracker.terminal_states)
+        "terminal" => list(tracker.terminal_states),
+        "upNextExtra" => list(Keyword.get(opts, :extra_up_next)),
+        "doneExtra" => list(Keyword.get(opts, :extra_done)),
+        "inProgressExtra" => list(Keyword.get(opts, :extra_in_progress))
       },
       "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci, evidence, summary))
     }
@@ -88,6 +91,7 @@ defmodule SymphonyElixir.Cockpit.BoardView do
     %{
       "id" => issue.identifier,
       "title" => issue.title,
+      "description" => description(issue),
       "state" => issue.state,
       "agent" => %{
         "status" => status,
@@ -165,6 +169,14 @@ defmodule SymphonyElixir.Cockpit.BoardView do
   end
 
   defp trace_url(_run, _trace_base), do: nil
+
+  @max_description_chars 4_000
+
+  defp description(%Issue{description: d}) when is_binary(d) and d != "" do
+    String.slice(d, 0, @max_description_chars)
+  end
+
+  defp description(_issue), do: nil
 
   defp int_field(run, key) do
     case run[key] do

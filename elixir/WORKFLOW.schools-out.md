@@ -134,6 +134,22 @@ qa:
   evidence_subpath:
     - fe-next-app/qa-evidence
     - qa-evidence
+cockpit:
+  # Cockpit board display only. Decoupled from the agent's dispatch config
+  # (tracker.active_states / terminal_states): these widen what the board SHOWS,
+  # never what the agent dispatches from or treats as terminal.
+  # Extra states for the "Up next" column (backlog grooming pipeline).
+  up_next_states:
+    - Backlog
+    - Pending Design
+    - Groomed
+  # Extra states for the "Done" column (finished beyond the agent's terminal set).
+  done_states:
+    - Approved QA
+    - Recently released
+  # Workflow states shown in "In progress" (not lumped into "Up next").
+  in_progress_states:
+    - In Development
 ---
 
 # Schools Out — Symphony Workflow

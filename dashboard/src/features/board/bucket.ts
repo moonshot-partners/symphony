@@ -20,11 +20,12 @@ export function columnFor(ticket: Ticket, states: TrackerStates): ColumnKey {
   if (ticket.agent.status === "running") return "running";
 
   const s = ticket.state;
-  if (states.terminal.includes(s)) return "done";
+  if ((states.inProgressExtra ?? []).includes(s)) return "running";
+  if (states.terminal.includes(s) || (states.doneExtra ?? []).includes(s)) return "done";
   if (s === states.onReject) return "blocked";
   if (s === states.onPromote || s === states.onPrMerge) return "staging";
   if (s === states.onComplete || s === states.onExhaust) return "review";
-  if (states.active.includes(s)) return "queued";
+  if (states.active.includes(s) || (states.upNextExtra ?? []).includes(s)) return "queued";
   return "queued"; // unknown state falls back to the entry column
 }
 
