@@ -57,11 +57,11 @@ defmodule SymphonyElixir.Cockpit.Api do
       |> BoardView.relevant_states()
       |> Enum.split_with(&MapSet.member?(terminal, &1))
 
-    # Active pipeline: full (it is small + bounded). Terminal (Done/Cancelled)
-    # grows without bound, so fetch only its first page (recent slice) — never
-    # paginate the whole archive, which otherwise exhausts the shared Linear
-    # rate limit on every board build.
-    issues = fetch_issues(active_states) ++ fetch_recent_issues(terminal_states)
+    # Both groups fetch only the routing-labelled issues (the agent's scope),
+    # first page only — never paginate the whole team backlog. That backlog,
+    # unfiltered + paginated, is what exhausted the shared Linear rate limit and
+    # also put non-agent tickets on the board.
+    issues = fetch_recent_issues(active_states) ++ fetch_recent_issues(terminal_states)
 
     BoardView.assemble(issues, read_runs(), tracker,
       running: read_running(),
@@ -111,15 +111,6 @@ defmodule SymphonyElixir.Cockpit.Api do
   end
 
   defp pr_urls(_), do: []
-
-  defp fetch_issues([]), do: []
-
-  defp fetch_issues(states) do
-    case Tracker.fetch_issues_by_states(states) do
-      {:ok, issues} -> issues
-      _ -> []
-    end
-  end
 
   defp fetch_recent_issues([]), do: []
 

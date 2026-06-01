@@ -825,7 +825,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_kind: "linear",
       tracker_api_token: "token",
-      tracker_project_slug: "project"
+      tracker_project_slug: "project",
+      tracker_routing_label: "agent"
     )
 
     raw_issue = fn id ->
@@ -860,8 +861,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert {:ok, issues} = Client.fetch_recent_issues_by_states(["Done"], graphql_fun)
     assert Enum.map(issues, & &1.id) == ["a", "b"]
 
-    assert_receive {:recent_page, query, %{after: nil, first: 50}}
+    assert_receive {:recent_page, query, %{after: nil, first: 50, filter: filter}}
     assert query =~ "SymphonyLinearPoll"
+    # board fetch is scoped to the routing label server-side
+    assert filter.labels == %{some: %{name: %{eqIgnoreCase: "agent"}}}
     refute_receive {:recent_page, _, _}, 100
   end
 
