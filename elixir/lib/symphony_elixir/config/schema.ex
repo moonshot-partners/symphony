@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Config.Schema do
 
   alias SymphonyElixir.Config.Schema.Agent
   alias SymphonyElixir.Config.Schema.AgentRuntime
+  alias SymphonyElixir.Config.Schema.Cockpit
   alias SymphonyElixir.Config.Schema.Hooks
   alias SymphonyElixir.Config.Schema.Observability
   alias SymphonyElixir.Config.Schema.Polling
@@ -32,6 +33,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:agent_runtime, AgentRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:qa, Qa, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:cockpit, Cockpit, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_many(:repos, Repo, on_replace: :delete)
   end
@@ -126,6 +128,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:agent_runtime, with: &AgentRuntime.changeset/2)
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:qa, with: &Qa.changeset/2)
+    |> cast_embed(:cockpit, with: &Cockpit.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:repos, with: &Repo.changeset/2)
   end

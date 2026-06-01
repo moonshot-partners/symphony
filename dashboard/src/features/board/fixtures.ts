@@ -19,6 +19,8 @@ export const MOCK_BOARD: BoardPayload = {
     onPrMerge: "Merged",
     onReject: "On Hold",
     terminal: ["Done", "Cancelled", "Duplicate"],
+    upNextExtra: ["Backlog", "Groomed"],
+    doneExtra: ["Approved QA", "Recently released"],
   },
   tickets: [
     {
