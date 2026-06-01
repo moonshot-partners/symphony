@@ -40,4 +40,22 @@ defmodule SymphonyElixir.Linear.ClientFilterTest do
              state: %{name: %{in: @state_names}}
            }
   end
+
+  test "build_issue_filter adds a case-insensitive routing-label filter when a label is given" do
+    tracker = %{project_slug: nil, team_key: "SODEV"}
+
+    assert Client.build_issue_filter(tracker, @state_names, "agent") == %{
+             state: %{name: %{in: @state_names}},
+             team: %{key: %{eq: "SODEV"}},
+             labels: %{some: %{name: %{eqIgnoreCase: "agent"}}}
+           }
+  end
+
+  test "build_issue_filter omits the label filter for nil or empty label" do
+    tracker = %{project_slug: nil, team_key: "SODEV"}
+
+    base = %{state: %{name: %{in: @state_names}}, team: %{key: %{eq: "SODEV"}}}
+    assert Client.build_issue_filter(tracker, @state_names, nil) == base
+    assert Client.build_issue_filter(tracker, @state_names, "") == base
+  end
 end

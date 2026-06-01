@@ -334,7 +334,7 @@ defmodule SymphonyElixir.Linear.Client do
   defp do_fetch_by_states_page(tracker, state_names, routing_filter, after_cursor, acc_issues) do
     with {:ok, body} <-
            graphql(@query, %{
-             filter: build_issue_filter(tracker, state_names),
+             filter: build_issue_filter(tracker, state_names, routing_label(routing_filter)),
              first: @issue_page_size,
              relationFirst: @issue_page_size,
              after: after_cursor
@@ -356,11 +356,12 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   @doc false
-  @spec build_issue_filter(map(), [String.t()]) :: map()
-  def build_issue_filter(tracker, state_names) when is_list(state_names) do
+  @spec build_issue_filter(map(), [String.t()], String.t() | nil) :: map()
+  def build_issue_filter(tracker, state_names, label \\ nil) when is_list(state_names) do
     %{state: %{name: %{in: state_names}}}
     |> maybe_put_project_filter(tracker.project_slug)
     |> maybe_put_team_filter(tracker.team_key)
+    |> maybe_put_label_filter(label)
   end
 
   defp maybe_put_project_filter(filter, slug) when is_binary(slug) and slug != "" do
@@ -374,6 +375,20 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp maybe_put_team_filter(filter, _team_key), do: filter
+
+  # Server-side routing-label filter so Linear returns only labelled issues
+  # instead of the whole team backlog (which we used to fetch and then drop
+  # client-side, paginating the entire archive and exhausting the rate limit).
+  # `eqIgnoreCase` so a case mismatch on the label name cannot silently drop
+  # the agent's issues; the client-side filter still runs as a safety net.
+  defp maybe_put_label_filter(filter, label) when is_binary(label) and label != "" do
+    Map.put(filter, :labels, %{some: %{name: %{eqIgnoreCase: label}}})
+  end
+
+  defp maybe_put_label_filter(filter, _label), do: filter
+
+  defp routing_label(%{label: label}) when is_binary(label) and label != "", do: label
+  defp routing_label(_routing_filter), do: nil
 
   defp present_string?(value) when is_binary(value) and value != "", do: true
   defp present_string?(_value), do: false
