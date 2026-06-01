@@ -7,6 +7,11 @@ defmodule SymphonyElixir.Workpad do
   `{:workpad_comment_created, issue_id, comment_id}` message is sent back to
   the requesting process so the comment id can be persisted on subsequent
   turns.
+
+  Disabled by default (`workpad_enabled` defaults to `false`): the cockpit is
+  the live-status surface now, so the agent keeps Linear a clean control plane
+  (state transitions only) and posts no per-turn status comment. The feature
+  stays flag-gated — set `:workpad_enabled` to `true` to bring it back.
   """
 
   require Logger
@@ -89,7 +94,7 @@ defmodule SymphonyElixir.Workpad do
   end
 
   defp enabled? do
-    Application.get_env(:symphony_elixir, :workpad_enabled, true) == true
+    Application.get_env(:symphony_elixir, :workpad_enabled, false) == true
   end
 
   defp should_sync?(%{event: event}), do: MapSet.member?(@sync_events, event)
