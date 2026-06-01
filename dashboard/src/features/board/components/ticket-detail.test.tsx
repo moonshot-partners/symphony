@@ -30,6 +30,15 @@ describe("TicketDetail", () => {
     expect(screen.getByText(/no loading flicker \| PASS/)).toBeInTheDocument();
   });
 
+  it("renders the run summary when present", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+    expect(screen.getByText("Run summary")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Moved to `In Code Review` after PR checks and Symphony gates passed/)
+    ).toBeInTheDocument();
+  });
+
   it("exposes Linear, GitHub PR and Langfuse trace as new-tab links", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");

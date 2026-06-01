@@ -170,6 +170,17 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
       assert ticket["report"] == nil
     end
 
+    test "maps the completion summary markdown keyed by internal id; nil when absent" do
+      with_summary = %Issue{id: "uuid-s", identifier: "SODEV-13", title: "T", state: "In Code Review", repos: []}
+      without = %Issue{id: "uuid-n", identifier: "SODEV-14", title: "T2", state: "Todo", repos: []}
+
+      [a, b] =
+        BoardView.assemble([with_summary, without], [], tracker(), summary: [{"uuid-s", "## Ready for review\n"}])["tickets"]
+
+      assert a["summary"] == "## Ready for review\n"
+      assert b["summary"] == nil
+    end
+
     test "marks tickets whose internal id is in the running set" do
       running = %Issue{id: "uuid-1", identifier: "SODEV-9", title: "T", state: "In Development", repos: []}
       idle = %Issue{id: "uuid-2", identifier: "SODEV-10", title: "T2", state: "Scheduled", repos: []}

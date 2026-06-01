@@ -141,16 +141,29 @@ function Body({ ticket }: { ticket: Ticket }) {
           </section>
         </div>
 
+        {ticket.summary && (
+          <section>
+            <SectionLabel>Run summary</SectionLabel>
+            <MarkdownBlock>{ticket.summary}</MarkdownBlock>
+          </section>
+        )}
+
         {ticket.report && (
           <section>
             <SectionLabel>QA report</SectionLabel>
-            <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-              {ticket.report.trim()}
-            </pre>
+            <MarkdownBlock>{ticket.report}</MarkdownBlock>
           </section>
         )}
       </div>
     </>
+  );
+}
+
+function MarkdownBlock({ children }: { children: string }) {
+  return (
+    <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+      {children.trim()}
+    </pre>
   );
 }
 

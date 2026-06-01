@@ -11,7 +11,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   use Plug.Router
 
-  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks, EvidenceStore}
+  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks, EvidenceStore, RunSummaryStore}
   alias SymphonyElixir.Config
   alias SymphonyElixir.RunLedger.Report
   alias SymphonyElixir.Tracker
@@ -55,7 +55,8 @@ defmodule SymphonyElixir.Cockpit.Api do
     BoardView.assemble(issues, read_runs(), tracker,
       running: read_running(),
       ci: ci_map(issues),
-      evidence: evidence_map(issues)
+      evidence: evidence_map(issues),
+      summary: summary_map(issues)
     )
   end
 
@@ -63,6 +64,11 @@ defmodule SymphonyElixir.Cockpit.Api do
   # local disk reads, bounded by the board cache; keyed by internal issue id.
   defp evidence_map(issues) do
     Map.new(issues, fn issue -> {issue.id, EvidenceStore.read(issue.id)} end)
+  end
+
+  # Completion summary markdown per issue, read from the local cockpit store.
+  defp summary_map(issues) do
+    Map.new(issues, fn issue -> {issue.id, RunSummaryStore.read(issue.id)} end)
   end
 
   # CI status per PR url, fetched once per board build (bounded by BoardCache).

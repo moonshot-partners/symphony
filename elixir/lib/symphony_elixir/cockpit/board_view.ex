@@ -49,6 +49,8 @@ defmodule SymphonyElixir.Cockpit.BoardView do
     ci = Map.new(Keyword.get(opts, :ci, []))
     # QA evidence manifests keyed by internal issue id (cockpit evidence store).
     evidence = Map.new(Keyword.get(opts, :evidence, []))
+    # Completion summary markdown keyed by internal issue id (run summary store).
+    summary = Map.new(Keyword.get(opts, :summary, []))
 
     %{
       "states" => %{
@@ -60,11 +62,11 @@ defmodule SymphonyElixir.Cockpit.BoardView do
         "onReject" => tracker.on_reject_state,
         "terminal" => list(tracker.terminal_states)
       },
-      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci, evidence))
+      "tickets" => Enum.map(issues, &ticket(&1, runs_by_ticket, trace_base, running, ci, evidence, summary))
     }
   end
 
-  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running, ci, evidence) do
+  defp ticket(%Issue{} = issue, runs_by_ticket, trace_base, running, ci, evidence, summary) do
     run = Map.get(runs_by_ticket, issue.identifier)
     status = if MapSet.member?(running, issue.id), do: "running", else: "idle"
     manifest = Map.get(evidence, issue.id, %{})
@@ -83,6 +85,7 @@ defmodule SymphonyElixir.Cockpit.BoardView do
       "pr" => pr(issue, ci),
       "evidence" => evidence_items(issue.id, manifest),
       "report" => Map.get(manifest, "report"),
+      "summary" => Map.get(summary, issue.id),
       "url" => issue.url,
       "traceUrl" => trace_url(run, trace_base),
       "updatedAt" => issue.updated_at || ""
