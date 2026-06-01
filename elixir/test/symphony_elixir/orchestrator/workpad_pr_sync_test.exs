@@ -9,7 +9,11 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     previous_recipient = Application.get_env(:symphony_elixir, :memory_tracker_recipient)
     Application.put_env(:symphony_elixir, :workpad_enabled, true)
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-    Application.put_env(:symphony_elixir, :debug_bundle_upload_module, __MODULE__.FakeUpload)
+    # Completion side effects publish to the cockpit stores; redirect them to a
+    # tmp dir so tests never touch /opt/symphony.
+    cockpit_store = Path.join(System.tmp_dir!(), "wp-cockpit-#{System.unique_integer([:positive])}")
+    System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", Path.join(cockpit_store, "evidence"))
+    System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", Path.join(cockpit_store, "summaries"))
 
     # Default required-checks injection so existing tests (and new ones that
     # don't care about CI routing) don't shell out to `gh pr view`.
@@ -40,7 +44,9 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
       Application.delete_env(:symphony_elixir, :pr_required_checks_status_fn)
       Application.delete_env(:symphony_elixir, :pr_body_fn)
       Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
-      Application.delete_env(:symphony_elixir, :debug_bundle_upload_module)
+      System.delete_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
+      System.delete_env("SYMPHONY_COCKPIT_SUMMARY_DIR")
+      File.rm_rf(cockpit_store)
     end)
 
     :ok
@@ -117,34 +123,6 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     refute_receive {:memory_tracker_state_update, _, _}, 100
-  end
-
-  test "passes the workpad comment id to QaEvidence as parent_id" do
-    issue_id = "issue-pr-sync-4"
-
-    base = Path.join(System.tmp_dir!(), "wp-prsync-#{System.unique_integer([:positive])}")
-    qa_dir = Path.join(base, "fe-next-app/qa-evidence")
-    File.mkdir_p!(qa_dir)
-    File.write!(Path.join(qa_dir, "01.png"), "fake-png")
-    on_exit(fn -> File.rm_rf!(base) end)
-
-    Application.put_env(:symphony_elixir, :qa_evidence_upload_module, __MODULE__.FakeUpload)
-    on_exit(fn -> Application.delete_env(:symphony_elixir, :qa_evidence_upload_module) end)
-
-    running = %{
-      issue_id => %{
-        issue: %Issue{id: issue_id, identifier: "WP-4", state: "Scheduled"},
-        identifier: "WP-4",
-        workpad_comment_id: "wp-comment-pr-sync-4",
-        workspace_path: base
-      }
-    }
-
-    state = build_state(running)
-
-    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
-
-    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-pr-sync-4"}, 2_000
   end
 
   test "routes state to on_reject_state when QA is BLOCKED" do
@@ -364,14 +342,9 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
-
-    # Linear comment naming the red checks lands on the workpad thread.
-    assert_receive {:memory_tracker_comment, ^issue_id, comment_body}, 1_000
-    assert comment_body =~ "## Blocked by CI"
-    assert comment_body =~ "qa-evidence"
-    assert comment_body =~ "lint"
-    assert comment_body =~ "agent-debug.zip"
-    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-ci-red"}, 1_000
+    # The "why" (## Blocked by CI + failing checks) now goes to the cockpit run
+    # summary store, not the tracker thread; its content is unit-tested in
+    # CompletionSummaryTest.
   end
 
   test "does NOT transition when required CI checks are PENDING (retry loop polls)" do
@@ -504,13 +477,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
-
-    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "## Blocked by AC evidence"
-    assert body =~ "AC 1"
-    assert body =~ "AC 2"
-    assert body =~ "agent-debug.zip"
-    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-gated-fail"}, 1_000
+    # Summary (## Blocked by AC evidence) is stored in the cockpit, unit-tested
+    # in CompletionSummaryTest.
   end
 
   test "routes state to on_complete_state when GateDValidator passes (every verified claim has a resolvable ref)" do
@@ -551,10 +519,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
-    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "## Ready for review"
-    assert body =~ "Moved to `In Code Review` after PR checks and Symphony gates passed."
-    assert body =~ "agent-debug.zip"
+    # Ready-for-review summary is stored in the cockpit, unit-tested in
+    # CompletionSummaryTest.
   end
 
   test "routes state to on_reject_state when ConflictDisclosure detects undisclosed extras (SYM-30)" do
@@ -608,13 +574,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
-
-    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "## Blocked by scope disclosure"
-    assert body =~ "app/controllers/users_controller.rb"
-    assert body =~ "config/routes.rb"
-    assert body =~ "agent-debug.zip"
-    assert_receive {:memory_tracker_comment_parent, ^issue_id, "wp-comment-conflict"}, 1_000
+    # Summary (## Blocked by scope disclosure + undisclosed files) is stored in
+    # the cockpit, unit-tested in CompletionSummaryTest.
   end
 
   test "routes state to on_complete_state when extras are disclosed in understanding.md root cause (SYM-30)" do
@@ -728,11 +689,8 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
     refute_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 100
-
-    assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
-    assert body =~ "## Blocked by missing visual QA evidence"
-    assert body =~ "no screenshot, video, or trace artifact was found"
-    assert body =~ "agent-debug.zip"
+    # Summary (## Blocked by missing visual QA evidence) is stored in the
+    # cockpit, unit-tested in CompletionSummaryTest.
   end
 
   test "routes state to on_complete_state when PR claims PASS and qa-evidence artifact is present (SYM-34)" do
@@ -860,11 +818,6 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
-  end
-
-  defmodule FakeUpload do
-    @moduledoc false
-    def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}
   end
 
   describe "DecisionLog emissions" do

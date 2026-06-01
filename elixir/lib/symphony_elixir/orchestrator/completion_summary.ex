@@ -1,15 +1,16 @@
 defmodule SymphonyElixir.Orchestrator.CompletionSummary do
   @moduledoc """
-  Posts the single human-facing completion/blocked comment for a run.
+  Writes the single human-facing completion/blocked summary for a run.
 
-  Detailed internal artifacts are uploaded as one debug zip and linked from
-  this comment instead of being scattered through the Linear thread.
+  The summary used to be a tracker comment; it now goes to the cockpit run
+  summary store (`SymphonyElixir.Cockpit.RunSummaryStore`) and surfaces in the
+  cockpit ticket detail, keeping the tracker a clean control plane. One markdown
+  per issue, overwritten each completion.
   """
 
   require Logger
 
-  alias SymphonyElixir.Orchestrator.DebugBundle
-  alias SymphonyElixir.Tracker
+  alias SymphonyElixir.Cockpit.RunSummaryStore
 
   @max_ac_evidence_chars 3_000
 
@@ -23,38 +24,35 @@ defmodule SymphonyElixir.Orchestrator.CompletionSummary do
     :ok
   end
 
+  # `parent_comment_id` is a tracker-thread leftover, now ignored — the summary
+  # no longer posts to Linear.
   @doc false
   @spec publish(map(), String.t() | nil, map(), term(), String.t() | nil) :: :ok
-  def publish(issue, target_state, running_entry, reason, parent_comment_id) do
-    bundle_result = DebugBundle.create_and_upload(issue, running_entry, reason)
-    body = build_comment(issue, target_state, running_entry, reason, bundle_result)
-    issue_id = Map.get(issue, :id)
-    opts = if is_binary(parent_comment_id), do: [parent_id: parent_comment_id], else: []
+  def publish(issue, target_state, running_entry, reason, _parent_comment_id) do
+    body = build_comment(issue, target_state, running_entry, reason)
 
-    case Tracker.create_comment(issue_id, body, opts) do
-      {:ok, comment_id} ->
-        Logger.info("Completion summary posted issue=#{identifier(issue, running_entry)} comment=#{comment_id}")
+    case Map.get(issue, :id) do
+      issue_id when is_binary(issue_id) ->
+        RunSummaryStore.put(issue_id, body)
+        Logger.info("Completion summary stored issue=#{identifier(issue, running_entry)}")
 
-      {:error, reason} ->
-        Logger.warning("Completion summary failed issue=#{identifier(issue, running_entry)} reason=#{inspect(reason)}")
+      _ ->
+        Logger.warning("Completion summary skipped (missing issue id) issue=#{identifier(issue, running_entry)}")
     end
 
     :ok
   end
 
   @doc false
-  @spec build_comment(map(), String.t() | nil, map(), term(), {:ok, String.t()} | {:error, term()}) :: String.t()
-  def build_comment(issue, target_state, running_entry, reason, bundle_result) do
+  @spec build_comment(map(), String.t() | nil, map(), term()) :: String.t()
+  def build_comment(issue, target_state, running_entry, reason) do
     [
       heading(reason),
       "",
       "**Outcome:** #{outcome(reason, target_state)}",
       pr_line(issue),
       ac_evidence_block(running_entry),
-      qa_line(reason),
-      debug_bundle_line(bundle_result),
-      "",
-      "_Posted by Symphony. Detailed agent artifacts are in the debug bundle._"
+      qa_line(reason)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
@@ -123,21 +121,18 @@ defmodule SymphonyElixir.Orchestrator.CompletionSummary do
         |> String.trim()
         |> String.slice(0, @max_ac_evidence_chars)
 
-      suffix = if String.length(text) > @max_ac_evidence_chars, do: "\n\n_(truncated; full text in debug bundle)_", else: ""
+      suffix = if String.length(text) > @max_ac_evidence_chars, do: "\n\n_(truncated)_", else: ""
       "### AC evidence\n\n#{trimmed}#{suffix}"
     else
-      "**AC evidence:** not captured in the final agent text; see debug bundle for the last message."
+      "**AC evidence:** not captured in the final agent text."
     end
   end
 
   defp qa_line(:qa_artifact_missing), do: "**QA evidence:** missing; visual QA was required."
 
   defp qa_line(_reason) do
-    "**QA evidence:** screenshots/video/trace are published separately when present; raw files are also in the debug bundle."
+    "**QA evidence:** screenshots/video are published to the cockpit when present."
   end
-
-  defp debug_bundle_line({:ok, url}), do: "**Debug bundle:** [agent-debug.zip](#{url})"
-  defp debug_bundle_line({:error, reason}), do: "**Debug bundle:** unavailable (#{inspect(reason)})."
 
   defp inline_list(items) when is_list(items) do
     Enum.map_join(items, ", ", &"`#{&1}`")

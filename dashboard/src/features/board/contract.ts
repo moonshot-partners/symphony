@@ -46,6 +46,7 @@ export const Ticket = z.object({
   pr: Pr.nullable(),
   evidence: z.array(Evidence),
   report: z.string().nullable().optional(), // QA self-review report (markdown), from the evidence store
+  summary: z.string().nullable().optional(), // run completion summary (markdown), from the run summary store
   timeline: z.array(TimelineStep).optional(),
   url: z.string().url().nullable().optional(), // Linear issue link
   traceUrl: z.string().url().nullable().optional(), // Langfuse trace link

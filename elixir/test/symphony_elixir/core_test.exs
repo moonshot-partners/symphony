@@ -1,11 +1,6 @@
 defmodule SymphonyElixir.CoreTest do
   use SymphonyElixir.TestSupport
 
-  defmodule FakeDebugBundleUpload do
-    @moduledoc false
-    def upload(path), do: {:ok, "https://uploads.example/#{Path.basename(path)}"}
-  end
-
   test "config defaults and validation checks" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -294,7 +289,6 @@ defmodule SymphonyElixir.CoreTest do
     Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue -> "" end)
     Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue -> [] end)
     Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
-    Application.put_env(:symphony_elixir, :debug_bundle_upload_module, FakeDebugBundleUpload)
 
     try do
       write_workflow_file!(Workflow.workflow_file_path(),
@@ -355,7 +349,6 @@ defmodule SymphonyElixir.CoreTest do
       Application.delete_env(:symphony_elixir, :pr_body_fn)
       Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
       Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
-      Application.delete_env(:symphony_elixir, :debug_bundle_upload_module)
     end
   end
 
@@ -368,7 +361,6 @@ defmodule SymphonyElixir.CoreTest do
     Application.put_env(:symphony_elixir, :pr_body_fn, fn _issue -> "" end)
     Application.put_env(:symphony_elixir, :pr_changed_files_fn, fn _issue -> [] end)
     Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> false end)
-    Application.put_env(:symphony_elixir, :debug_bundle_upload_module, FakeDebugBundleUpload)
 
     test_root =
       Path.join(
@@ -442,7 +434,6 @@ defmodule SymphonyElixir.CoreTest do
       Application.delete_env(:symphony_elixir, :pr_body_fn)
       Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
       Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn)
-      Application.delete_env(:symphony_elixir, :debug_bundle_upload_module)
 
       case previous_enabled do
         nil -> Application.delete_env(:symphony_elixir, :workpad_enabled)

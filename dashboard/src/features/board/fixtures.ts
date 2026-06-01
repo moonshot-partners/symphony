@@ -51,6 +51,8 @@ export const MOCK_BOARD: BoardPayload = {
       ],
       report:
         "- Result: PASS\n\n| Check | Result |\n| --- | --- |\n| debounce fires one request | PASS |\n| no loading flicker | PASS |\n",
+      summary:
+        "## Ready for review\n\n**Outcome:** Moved to `In Code Review` after PR checks and Symphony gates passed.\n**PR:** https://github.com/schoolsoutapp/fe-next-app/pull/642\n",
       timeline: [
         { label: "Read issue and extracted acceptance criteria", turn: 1, status: "done" },
         { label: "Implemented debounce in SearchInput", turn: 2, status: "done" },
