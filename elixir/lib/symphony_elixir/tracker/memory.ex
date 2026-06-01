@@ -25,6 +25,10 @@ defmodule SymphonyElixir.Tracker.Memory do
      end)}
   end
 
+  # In-memory fixtures have no pagination, so "recent" is the same matching set.
+  @spec fetch_recent_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_recent_issues_by_states(state_names), do: fetch_issues_by_states(state_names)
+
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issue_states_by_ids(issue_ids) do
     wanted_ids = MapSet.new(issue_ids)

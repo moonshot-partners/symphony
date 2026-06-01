@@ -50,7 +50,18 @@ defmodule SymphonyElixir.Cockpit.Api do
   @spec assemble_board() :: map()
   def assemble_board do
     tracker = Config.settings!().tracker
-    issues = fetch_issues(BoardView.relevant_states(tracker))
+    terminal = MapSet.new(List.wrap(tracker.terminal_states))
+
+    {terminal_states, active_states} =
+      tracker
+      |> BoardView.relevant_states()
+      |> Enum.split_with(&MapSet.member?(terminal, &1))
+
+    # Active pipeline: full (it is small + bounded). Terminal (Done/Cancelled)
+    # grows without bound, so fetch only its first page (recent slice) — never
+    # paginate the whole archive, which otherwise exhausts the shared Linear
+    # rate limit on every board build.
+    issues = fetch_issues(active_states) ++ fetch_recent_issues(terminal_states)
 
     BoardView.assemble(issues, read_runs(), tracker,
       running: read_running(),
@@ -101,8 +112,19 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   defp pr_urls(_), do: []
 
+  defp fetch_issues([]), do: []
+
   defp fetch_issues(states) do
     case Tracker.fetch_issues_by_states(states) do
+      {:ok, issues} -> issues
+      _ -> []
+    end
+  end
+
+  defp fetch_recent_issues([]), do: []
+
+  defp fetch_recent_issues(states) do
+    case Tracker.fetch_recent_issues_by_states(states) do
       {:ok, issues} -> issues
       _ -> []
     end

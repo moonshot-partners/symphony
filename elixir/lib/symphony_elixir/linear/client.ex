@@ -167,6 +167,57 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
+  @doc """
+  Fetch only the FIRST page of issues in the given states (no pagination).
+
+  Used by the cockpit board for terminal states (Done/Cancelled), whose history
+  grows without bound: paginating the whole archive every board build was
+  hammering the shared Linear rate limit. The board only needs a recent slice,
+  so this stops after one page.
+  """
+  @spec fetch_recent_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_recent_issues_by_states(state_names) when is_list(state_names) do
+    fetch_recent_issues_by_states(state_names, &graphql/2)
+  end
+
+  @doc false
+  @spec fetch_recent_issues_by_states([String.t()], (String.t(), map() -> {:ok, map()} | {:error, term()})) ::
+          {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_recent_issues_by_states(state_names, graphql_fun)
+      when is_list(state_names) and is_function(graphql_fun, 2) do
+    normalized_states = Enum.map(state_names, &to_string/1) |> Enum.uniq()
+
+    if normalized_states == [] do
+      {:ok, []}
+    else
+      tracker = Config.settings!().tracker
+
+      cond do
+        is_nil(tracker.api_key) ->
+          {:error, :missing_linear_api_token}
+
+        is_nil(tracker.project_slug) and is_nil(tracker.team_key) ->
+          {:error, :missing_linear_project_or_team_key}
+
+        true ->
+          fetch_first_page(tracker, normalized_states, graphql_fun)
+      end
+    end
+  end
+
+  defp fetch_first_page(tracker, state_names, graphql_fun) do
+    with {:ok, body} <-
+           graphql_fun.(@query, %{
+             filter: build_issue_filter(tracker, state_names),
+             first: @issue_page_size,
+             relationFirst: @issue_page_size,
+             after: nil
+           }),
+         {:ok, issues, _page_info} <- decode_linear_page_response(body, nil) do
+      {:ok, issues}
+    end
+  end
+
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issue_states_by_ids(issue_ids) when is_list(issue_ids) do
     ids = Enum.uniq(issue_ids)
