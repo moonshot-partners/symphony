@@ -185,35 +185,39 @@ defmodule SymphonyElixir.Linear.Client do
           {:ok, [Issue.t()]} | {:error, term()}
   def fetch_recent_issues_by_states(state_names, graphql_fun)
       when is_list(state_names) and is_function(graphql_fun, 2) do
-    normalized_states = Enum.map(state_names, &to_string/1) |> Enum.uniq()
-
-    if normalized_states == [] do
-      {:ok, []}
-    else
-      tracker = Config.settings!().tracker
-
-      cond do
-        is_nil(tracker.api_key) ->
-          {:error, :missing_linear_api_token}
-
-        is_nil(tracker.project_slug) and is_nil(tracker.team_key) ->
-          {:error, :missing_linear_project_or_team_key}
-
-        true ->
-          fetch_first_page(tracker, normalized_states, graphql_fun)
-      end
+    case Enum.map(state_names, &to_string/1) |> Enum.uniq() do
+      [] -> {:ok, []}
+      normalized_states -> do_fetch_recent(Config.settings!().tracker, normalized_states, graphql_fun)
     end
   end
 
-  defp fetch_first_page(tracker, state_names, graphql_fun) do
+  defp do_fetch_recent(tracker, state_names, graphql_fun) do
+    cond do
+      is_nil(tracker.api_key) ->
+        {:error, :missing_linear_api_token}
+
+      is_nil(tracker.project_slug) and is_nil(tracker.team_key) ->
+        {:error, :missing_linear_project_or_team_key}
+
+      true ->
+        with {:ok, routing_filter} <- build_routing_filter() do
+          fetch_first_page(tracker, state_names, routing_filter, graphql_fun)
+        end
+    end
+  end
+
+  # Scopes the board's fetch to the routing label (same scope the agent works),
+  # server-side, so the cockpit shows only labelled issues instead of the whole
+  # team backlog — and fetches far fewer of them.
+  defp fetch_first_page(tracker, state_names, routing_filter, graphql_fun) do
     with {:ok, body} <-
            graphql_fun.(@query, %{
-             filter: build_issue_filter(tracker, state_names),
+             filter: build_issue_filter(tracker, state_names, routing_label(routing_filter)),
              first: @issue_page_size,
              relationFirst: @issue_page_size,
              after: nil
            }),
-         {:ok, issues, _page_info} <- decode_linear_page_response(body, nil) do
+         {:ok, issues, _page_info} <- decode_linear_page_response(body, routing_filter) do
       {:ok, issues}
     end
   end
