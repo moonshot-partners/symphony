@@ -1,6 +1,7 @@
 defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Cockpit.RunSummaryStore
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixir.Orchestrator.{PlanGroundingGate, State}
 
@@ -60,7 +61,14 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
     )
 
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
-    on_exit(fn -> Application.delete_env(:symphony_elixir, :memory_tracker_recipient) end)
+    summary_dir = Path.join(System.tmp_dir!(), "pg-summary-#{System.unique_integer([:positive])}")
+    System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", summary_dir)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+      System.delete_env("SYMPHONY_COCKPIT_SUMMARY_DIR")
+      File.rm_rf(summary_dir)
+    end)
   end
 
   # Builds a workspace dir with a real target file and an understanding.md
@@ -160,7 +168,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
 
       assert checked_entry.plan_grounding_checked == true
       refute_receive {:terminate_called, _, _}, 100
-      refute_receive {:memory_tracker_comment, _, _}, 100
+      assert RunSummaryStore.read("issue-pg-1") == nil
     end
   end
 
@@ -182,7 +190,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
 
       assert_receive {:terminate_called, "issue-pg-1", false}, 500
 
-      assert_receive {:memory_tracker_comment, "issue-pg-1", body}, 500
+      body = RunSummaryStore.read("issue-pg-1")
       assert body =~ "Plan-grounding violation"
       assert body =~ "issue parked"
       assert body =~ "ISS-1"
@@ -210,7 +218,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
       assert {:halted, _} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
-      assert_receive {:memory_tracker_comment, "issue-pg-1", body}, 500
+      body = RunSummaryStore.read("issue-pg-1")
       assert body =~ "app/controllers/filter_modal_controller.rb"
     end
 
@@ -224,7 +232,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
       assert {:halted, halted_state} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
-      assert_receive {:memory_tracker_comment, "issue-pg-1", body}, 500
+      body = RunSummaryStore.read("issue-pg-1")
       assert body =~ "Plan-grounding violation"
       assert MapSet.member?(halted_state.completed, "issue-pg-1")
     end
@@ -245,7 +253,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
       assert {:halted, halted_state} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
-      assert_receive {:memory_tracker_comment, "issue-pg-1", body}, 500
+      body = RunSummaryStore.read("issue-pg-1")
       assert body =~ "names no file that exists"
       assert MapSet.member?(halted_state.completed, "issue-pg-1")
     end
@@ -261,7 +269,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
       assert_receive {:terminate_called, "issue-pg-1", false}, 500
-      assert_receive {:memory_tracker_comment, "issue-pg-1", _}, 500
+      assert RunSummaryStore.read("issue-pg-1") =~ "Plan-grounding violation"
       refute_receive {:memory_tracker_state_update, _, _}, 200
 
       assert MapSet.member?(halted_state.completed, "issue-pg-1")
