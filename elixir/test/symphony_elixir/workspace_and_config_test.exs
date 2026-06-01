@@ -821,6 +821,50 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert_receive {:fetch_issue_states_page, ^query, %{ids: ^second_batch_ids, first: 5, relationFirst: 50}}
   end
 
+  test "fetch_recent_issues_by_states fetches only the first page, never the full archive" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "linear",
+      tracker_api_token: "token",
+      tracker_project_slug: "project"
+    )
+
+    raw_issue = fn id ->
+      %{
+        "id" => id,
+        "identifier" => "MT-#{id}",
+        "title" => "Issue #{id}",
+        "description" => "",
+        "state" => %{"name" => "Done"},
+        "labels" => %{"nodes" => []},
+        "inverseRelations" => %{"nodes" => []},
+        "attachments" => %{"nodes" => []}
+      }
+    end
+
+    # Always reports another page: a paginating fetch would loop forever, so
+    # terminating proves only the first page is read.
+    graphql_fun = fn query, variables ->
+      send(self(), {:recent_page, query, variables})
+
+      {:ok,
+       %{
+         "data" => %{
+           "issues" => %{
+             "nodes" => [raw_issue.("a"), raw_issue.("b")],
+             "pageInfo" => %{"hasNextPage" => true, "endCursor" => "cursor-1"}
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} = Client.fetch_recent_issues_by_states(["Done"], graphql_fun)
+    assert Enum.map(issues, & &1.id) == ["a", "b"]
+
+    assert_receive {:recent_page, query, %{after: nil, first: 50}}
+    assert query =~ "SymphonyLinearPoll"
+    refute_receive {:recent_page, _, _}, 100
+  end
+
   test "linear client logs response bodies for non-200 graphql responses" do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
