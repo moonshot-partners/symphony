@@ -43,7 +43,7 @@ defmodule SymphonyElixir.Cockpit.LiveView do
       "issueId" => entry.issue_id,
       "state" => entry.state,
       "turn" => entry.turn_count,
-      "lastAction" => entry.last_agent_message,
+      "lastAction" => action(entry.last_agent_message),
       "lastEvent" => stringify(entry.last_agent_event),
       "runtimeSeconds" => entry.runtime_seconds,
       "startedAt" => iso8601(entry.started_at),
@@ -77,7 +77,39 @@ defmodule SymphonyElixir.Cockpit.LiveView do
     }
   end
 
+  # A human one-liner for the live "last action". `last_agent_message` is the
+  # `summarize_update/1` map (`%{event, message, timestamp}`, atom keys) whose
+  # `message` is the raw agent stream payload — a JSON-RPC map for tool/command
+  # events, sometimes plain text. We surface the command being run or the
+  # method, falling back to the event tag, and always return a string or nil so
+  # the JSON-safe `lastAction` contract holds (a raw map here 502s the BFF).
+  defp action(text) when is_binary(text), do: clip(text)
+
+  defp action(%{} = summary) do
+    message = Map.get(summary, :message) || Map.get(summary, "message")
+    event = Map.get(summary, :event) || Map.get(summary, "event")
+    from_message(message) || stringify(event)
+  end
+
+  defp action(_), do: nil
+
+  defp from_message(%{"params" => %{"command" => cmd}}) when is_binary(cmd),
+    do: "Running " <> clip(first_line(cmd))
+
+  defp from_message(%{"method" => method}) when is_binary(method),
+    do: method |> String.split("/") |> List.last()
+
+  defp from_message(text) when is_binary(text) and text != "", do: clip(text)
+  defp from_message(_), do: nil
+
+  defp first_line(text), do: text |> String.split("\n", parts: 2) |> List.first()
+
+  defp clip(text) when is_binary(text) do
+    if String.length(text) > 80, do: String.slice(text, 0, 79) <> "…", else: text
+  end
+
   defp iso8601(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp iso8601(text) when is_binary(text), do: text
   defp iso8601(_), do: nil
 
   defp stringify(nil), do: nil
