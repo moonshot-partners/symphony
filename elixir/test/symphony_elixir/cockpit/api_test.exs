@@ -236,6 +236,29 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
       assert Jason.decode!(conn.resp_body) == %{"error" => "already_running"}
     end
 
+    test "POST /issues/:identifier/rerun serializes nested cleanup atoms" do
+      Application.put_env(:symphony_elixir, :cockpit_rerun_issue_fn, fn identifier ->
+        {:ok,
+         %{
+           queued: true,
+           identifier: identifier,
+           cleanup: %{linear_comments: :ok, pull_requests: %{closed: [], failed: []}}
+         }}
+      end)
+
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_rerun_issue_fn) end)
+
+      conn = call(:post, "/issues/SODEV-430/rerun")
+
+      assert conn.status == 200
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "queued" => true,
+               "identifier" => "SODEV-430",
+               "cleanup" => %{"linear_comments" => "ok", "pull_requests" => %{"closed" => [], "failed" => []}}
+             }
+    end
+
     test "POST /issues/:identifier/reset resets local orchestrator pointers" do
       Application.put_env(:symphony_elixir, :cockpit_reset_issue_fn, fn identifier ->
         {:ok, %{reset: true, identifier: identifier, preserved: ["workspace"]}}

@@ -381,6 +381,9 @@ defmodule SymphonyElixir.Cockpit.Api do
   end
 
   defp stringify_value(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp stringify_value(value) when is_list(value), do: Enum.map(value, &stringify_value/1)
   defp stringify_value(value) when is_map(value), do: stringify_keys(value)
+  defp stringify_value(value) when value in [true, false, nil], do: value
+  defp stringify_value(value) when is_atom(value), do: Atom.to_string(value)
   defp stringify_value(value), do: value
 end
