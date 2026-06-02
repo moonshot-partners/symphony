@@ -38,10 +38,12 @@ defmodule SymphonyElixir.Orchestrator.Dispatch do
   end
 
   @doc false
+  @spec priority_rank(integer() | term()) :: 1..5
   def priority_rank(priority) when is_integer(priority) and priority in 1..4, do: priority
   def priority_rank(_priority), do: 5
 
   @doc false
+  @spec issue_created_at_sort_key(Issue.t() | term()) :: integer()
   def issue_created_at_sort_key(%Issue{created_at: %DateTime{} = created_at}) do
     DateTime.to_unix(created_at, :microsecond)
   end

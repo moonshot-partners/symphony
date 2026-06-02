@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Orchestrator.AgentTotals do
   `state.agent_totals`. A malformed or empty delta is a no-op so the
   caller can pipe unconditionally.
   """
+  @spec apply_token_delta(map(), map()) :: map()
   def apply_token_delta(
         %{agent_totals: agent_totals} = state,
         %{input_tokens: input, output_tokens: output, total_tokens: total} = token_delta
@@ -37,6 +38,7 @@ defmodule SymphonyElixir.Orchestrator.AgentTotals do
   extracts from this `update`. Updates without rate-limit info leave
   the existing snapshot untouched.
   """
+  @spec apply_rate_limits(map(), map() | term()) :: map()
   def apply_rate_limits(state, update) when is_map(update) do
     case TokenMetrics.extract_rate_limits(update) do
       %{} = rate_limits ->
@@ -55,6 +57,7 @@ defmodule SymphonyElixir.Orchestrator.AgentTotals do
   `started_at` need to land in the cumulative `seconds_running` slot
   so the dashboard reflects total agent time.
   """
+  @spec record_session_completion(map(), map() | term()) :: map()
   def record_session_completion(state, running_entry) when is_map(running_entry) do
     runtime_seconds = running_seconds(running_entry.started_at, DateTime.utc_now())
 
@@ -79,6 +82,7 @@ defmodule SymphonyElixir.Orchestrator.AgentTotals do
   to absorb skewed clocks. Non-`DateTime` inputs collapse to 0 so the
   snapshot path stays total.
   """
+  @spec running_seconds(DateTime.t() | term(), DateTime.t() | term()) :: non_neg_integer()
   def running_seconds(%DateTime{} = started_at, %DateTime{} = now) do
     max(0, DateTime.diff(now, started_at, :second))
   end

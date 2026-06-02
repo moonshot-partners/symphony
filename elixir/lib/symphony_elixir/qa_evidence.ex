@@ -22,6 +22,7 @@ defmodule SymphonyElixir.QaEvidence do
   @spec maybe_publish(String.t() | nil, String.t() | nil, keyword()) :: :ok
   def maybe_publish(issue_id, workspace_path, opts \\ [])
 
+  @spec maybe_publish(String.t(), String.t() | nil, keyword()) :: :ok
   def maybe_publish(issue_id, workspace_path, opts)
       when is_binary(issue_id) and is_list(opts) do
     pending_dir = pending_publish_path(issue_id)

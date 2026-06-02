@@ -89,6 +89,7 @@ defmodule SymphonyElixir.Linear.FileUpload do
   end
 
   @doc false
+  @spec content_type_for(Path.t()) :: String.t()
   def content_type_for(path) do
     ext = path |> Path.extname() |> String.downcase()
     Map.get(@content_types, ext, "application/octet-stream")

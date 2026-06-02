@@ -26,6 +26,7 @@ defmodule SymphonyElixir.Orchestrator.Snapshot do
   (used to compute pending retry due-in deltas and the next-poll
   countdown).
   """
+  @spec build(map(), DateTime.t(), integer()) :: map()
   def build(state, %DateTime{} = now, now_ms) when is_integer(now_ms) do
     %{
       running: running_projection(state, now),

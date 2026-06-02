@@ -23,9 +23,10 @@ defmodule SymphonyElixir.Orchestrator.WorkspaceCleanup do
   `worker_host`. Returns `:ok` (and logs nothing) when `identifier`
   is not a binary.
   """
-  @spec cleanup_for_identifier(any(), String.t() | nil) :: :ok | term()
+  @spec cleanup_for_identifier(term(), String.t() | nil) :: :ok | term()
   def cleanup_for_identifier(identifier, worker_host \\ nil)
 
+  @spec cleanup_for_identifier(String.t(), String.t() | nil) :: :ok | term()
   def cleanup_for_identifier(identifier, worker_host) when is_binary(identifier) do
     Workspace.remove_issue_workspaces(identifier, worker_host)
   end

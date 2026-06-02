@@ -1,6 +1,8 @@
 defmodule SymphonyElixir.CoreTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Cockpit.{EvidenceStore, RunSummaryStore}
+
   test "config defaults and validation checks" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -1040,8 +1042,8 @@ defmodule SymphonyElixir.CoreTest do
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
 
     File.mkdir_p!(Path.join(workspace_root, "SODEV-430"))
-    SymphonyElixir.Cockpit.EvidenceStore.publish("issue-430", Path.join(workspace_root, "SODEV-430"))
-    SymphonyElixir.Cockpit.RunSummaryStore.put("issue-430", "old summary")
+    EvidenceStore.publish("issue-430", Path.join(workspace_root, "SODEV-430"))
+    RunSummaryStore.put("issue-430", "old summary")
 
     state = %Orchestrator.State{
       poll_interval_ms: 30_000,
@@ -1094,8 +1096,8 @@ defmodule SymphonyElixir.CoreTest do
     assert_receive {:memory_tracker_pr_attachments_deleted, "issue-430"}, 500
     assert_receive {:pr_closed, "https://github.com/acme/repo/pull/42"}, 500
     refute File.exists?(Path.join(workspace_root, "SODEV-430"))
-    assert SymphonyElixir.Cockpit.EvidenceStore.read("issue-430") == %{"items" => [], "report" => nil}
-    assert SymphonyElixir.Cockpit.RunSummaryStore.read("issue-430") == nil
+    assert EvidenceStore.read("issue-430") == %{"items" => [], "report" => nil}
+    assert RunSummaryStore.read("issue-430") == nil
     refute Map.has_key?(rerun_state.workpads, "issue-430")
     refute Map.has_key?(rerun_state.retry_attempts, "issue-430")
     refute Map.has_key?(rerun_state.pr_engagements, "issue-430")

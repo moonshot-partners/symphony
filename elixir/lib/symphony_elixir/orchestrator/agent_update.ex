@@ -25,6 +25,7 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
   returning the updated entry plus the token delta extracted from the
   update (so the caller can roll the orchestrator-level token totals).
   """
+  @spec integrate(map(), map()) :: {map(), map()}
   def integrate(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = TokenMetrics.extract_token_delta(running_entry, update)
     agent_input_tokens = Map.get(running_entry, :agent_input_tokens, 0)

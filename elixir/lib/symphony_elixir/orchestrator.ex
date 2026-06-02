@@ -946,18 +946,7 @@ defmodule SymphonyElixir.Orchestrator do
             BoardCache.invalidate()
             notify_dashboard()
 
-            if Map.has_key?(state.running, issue.id) do
-              {:reply,
-               {:ok,
-                %{
-                  queued: true,
-                  mode: Atom.to_string(mode),
-                  issue_id: issue.id,
-                  identifier: issue.identifier
-                }}, state}
-            else
-              {:reply, {:error, :not_dispatchable}, state}
-            end
+            manual_dispatch_reply(state, issue, mode)
         end
     end
   end
@@ -992,6 +981,21 @@ defmodule SymphonyElixir.Orchestrator do
             cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
             preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
           }}, state}
+    end
+  end
+
+  defp manual_dispatch_reply(%State{} = state, %Issue{} = issue, mode) do
+    if Map.has_key?(state.running, issue.id) do
+      {:reply,
+       {:ok,
+        %{
+          queued: true,
+          mode: Atom.to_string(mode),
+          issue_id: issue.id,
+          identifier: issue.identifier
+        }}, state}
+    else
+      {:reply, {:error, :not_dispatchable}, state}
     end
   end
 

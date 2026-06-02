@@ -89,6 +89,7 @@ agent_runtime:
   read_timeout_ms: 120000
   turn_sandbox_policy:
     type: workspaceWrite
+    networkAccess: true
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

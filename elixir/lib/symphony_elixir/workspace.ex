@@ -118,6 +118,7 @@ defmodule SymphonyElixir.Workspace do
   @spec remove_issue_workspaces(term(), term()) :: :ok
   def remove_issue_workspaces(identifier, _worker_host \\ nil)
 
+  @spec remove_issue_workspaces(String.t(), term()) :: :ok
   def remove_issue_workspaces(identifier, _worker_host) when is_binary(identifier) do
     safe_id = safe_identifier(identifier)
 
