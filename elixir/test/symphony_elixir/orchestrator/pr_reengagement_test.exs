@@ -108,6 +108,67 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
       refute_receive :commented, 50
     end
 
+    test "evicts from completed and skips detector when pr_resolved_fn reports a merged or closed PR" do
+      parent = self()
+      pr_url = "https://github.com/org/repo/pull/77"
+      issue = issue("i-77", pr_url)
+      state = build_state(%{"i-77" => issue})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [issue]} end,
+          pr_resolved_fn: fn ^issue -> true end,
+          detector_fn: fn _issue ->
+            send(parent, :detector_called)
+            :none
+          end,
+          state_transition_fn: fn _issue, _target ->
+            send(parent, :transitioned)
+            :ok
+          end,
+          comment_fn: fn _id, _body, _parent ->
+            send(parent, :commented)
+            {:ok, "c"}
+          end
+        })
+
+      new_state = PrReengagement.run(state, opts)
+
+      # Issue dropped from completed so it stops being re-scanned every poll cycle.
+      refute MapSet.member?(new_state.completed, "i-77")
+
+      # A merged/closed PR cannot be re-engaged, so the detector never runs and
+      # no Linear transition or workpad comment is produced.
+      refute_receive :detector_called, 50
+      refute_receive :transitioned, 50
+      refute_receive :commented, 50
+    end
+
+    test "keeps issue in completed and runs detector when pr_resolved_fn reports the PR is still open" do
+      parent = self()
+      pr_url = "https://github.com/org/repo/pull/88"
+      issue = issue("i-88", pr_url)
+      state = build_state(%{"i-88" => issue})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [issue]} end,
+          pr_resolved_fn: fn _issue -> false end,
+          detector_fn: fn ^issue ->
+            send(parent, :detector_called)
+            :none
+          end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent -> {:ok, "c"} end
+        })
+
+      new_state = PrReengagement.run(state, opts)
+
+      # Open PR with no critical review yet: keep watching it.
+      assert MapSet.member?(new_state.completed, "i-88")
+      assert_receive :detector_called, 200
+    end
+
     test "DISPATCH (count == 0): increments counter, removes from completed, transitions to pickup, posts threaded workpad comment" do
       parent = self()
       pr_url = "https://github.com/org/repo/pull/77"
@@ -533,6 +594,24 @@ defmodule SymphonyElixir.Orchestrator.PrReengagementTest do
 
       _ = PrReengagement.run(state, opts)
       assert "pr_reengagement.skip_no_critical" in ledger_events(path)
+    end
+
+    test "emits evict_resolved and drops the issue when its PR is merged or closed", %{ledger_path: path} do
+      pr_url = "https://github.com/o/r/pull/9"
+      iss = issue("i-res", pr_url)
+      state = build_state(%{"i-res" => iss})
+
+      opts =
+        opts(%{
+          issue_fetch_fn: fn _ids -> {:ok, [iss]} end,
+          pr_resolved_fn: fn _issue -> true end,
+          detector_fn: fn _issue -> raise "detector must not run for a resolved PR" end,
+          state_transition_fn: fn _issue, _target -> :ok end,
+          comment_fn: fn _id, _body, _parent -> {:ok, "c"} end
+        })
+
+      _ = PrReengagement.run(state, opts)
+      assert "pr_reengagement.evict_resolved" in ledger_events(path)
     end
 
     test "emits cap_reached_evict and drops the issue when its PR is at the cap", %{ledger_path: path} do

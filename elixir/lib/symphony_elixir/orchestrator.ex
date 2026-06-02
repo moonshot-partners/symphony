@@ -443,6 +443,7 @@ defmodule SymphonyElixir.Orchestrator do
     PrReengagement.run(state, %{
       issue_fetch_fn: &Tracker.fetch_issue_states_by_ids/1,
       detector_fn: &GitHubPr.critical_review_pending?/1,
+      pr_resolved_fn: &GitHubPr.pr_merged_or_closed?/1,
       state_transition_fn: &StateTransition.apply/2,
       comment_fn: fn issue_id, body, parent_id ->
         Tracker.create_comment(issue_id, body, parent_id: parent_id)
