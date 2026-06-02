@@ -166,16 +166,29 @@ sudo systemctl is-active --quiet symphony || {
 }
 
 # Cockpit dashboard. Agent is healthy by here; this is best-effort and never
-# fails the deploy.
-if git -C "$SYMPHONY_DIR" diff --name-only "$old_sha" "$new_sha" | grep -qE '^dashboard/'; then
-  log "dashboard changed — rebuild cockpit"
+# fails the deploy. Gate on a marker of the sha the cockpit was last built from,
+# NOT old_sha/new_sha: WorkflowStore git-pulls this dir on its own timer, so HEAD
+# is often already the new commit before this script runs, making an
+# old_sha..new_sha diff empty and silently skipping a needed rebuild (hit live on
+# PR #235 and #238 — cockpit served a stale bundle until a manual rebuild). The
+# marker reflects what is actually built, so it is immune to that race and the
+# rebuild retries on failure (marker only advances on success). The
+# schoolsout-base image gate above has the same latent race; left as-is for now
+# to avoid forcing a heavier image rebuild on this code path.
+COCKPIT_SHA_FILE="$STATE_DIR/cockpit-deployed-sha"
+cockpit_sha=$(cat "$COCKPIT_SHA_FILE" 2>/dev/null || true)
+if [ -z "$cockpit_sha" ] \
+  || ! git -C "$SYMPHONY_DIR" cat-file -e "${cockpit_sha}^{commit}" 2>/dev/null \
+  || git -C "$SYMPHONY_DIR" diff --name-only "$cockpit_sha" "$new_sha" | grep -qE '^dashboard/'; then
+  log "dashboard changed since last cockpit build — rebuild cockpit"
   if deploy_cockpit; then
-    log "cockpit deployed"
+    echo "$new_sha" > "$COCKPIT_SHA_FILE"
+    log "cockpit deployed (marker -> $new_sha)"
   else
-    log "cockpit deploy FAILED (non-fatal; agent unaffected)"
+    log "cockpit deploy FAILED (non-fatal; agent unaffected; will retry next deploy)"
   fi
 else
-  log "dashboard unchanged; skip cockpit rebuild"
+  log "dashboard unchanged since last cockpit build; skip cockpit rebuild"
 fi
 
 log "done"
