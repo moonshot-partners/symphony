@@ -1,7 +1,8 @@
 defmodule SymphonyElixir.Cockpit.Api do
   @moduledoc """
   Read-only HTTP API for the cockpit dashboard. Serves the board payload
-  assembled from the tracker + run ledger. Started only when
+  assembled from the tracker + run ledger, plus a live runtime snapshot of the
+  agents the orchestrator is running right now. Started only when
   `SYMPHONY_COCKPIT_API_PORT` is set (see `SymphonyElixir.Application`), so it is
   inert in any deployment that does not opt in.
 
@@ -11,7 +12,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   use Plug.Router
 
-  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks, EvidenceStore, RunSummaryStore}
+  alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks, EvidenceStore, LiveView, RunSummaryStore}
   alias SymphonyElixir.Config
   alias SymphonyElixir.RunLedger.Report
   alias SymphonyElixir.Tracker
@@ -30,6 +31,10 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   get "/board" do
     send_json(conn, 200, board())
+  end
+
+  get "/live" do
+    send_json(conn, 200, live())
   end
 
   get "/evidence/:id/:file" do
@@ -55,6 +60,22 @@ defmodule SymphonyElixir.Cockpit.Api do
   @doc false
   @spec board() :: map()
   def board, do: BoardCache.board(&assemble_board/0)
+
+  @doc false
+  @spec live() :: map()
+  def live, do: LiveView.render(snapshot_source().())
+
+  # The orchestrator's in-memory runtime snapshot. Reached in-process (the API
+  # and the orchestrator share the BEAM node) and never cached: this is the live
+  # regime, refreshed every poll the browser makes. Indirected through the app
+  # env so tests inject a canned snapshot instead of standing up the GenServer.
+  defp snapshot_source do
+    Application.get_env(
+      :symphony_elixir,
+      :cockpit_snapshot_fn,
+      &SymphonyElixir.Orchestrator.snapshot/0
+    )
+  end
 
   @doc false
   @spec assemble_board() :: map()
