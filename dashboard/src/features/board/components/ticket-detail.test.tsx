@@ -190,7 +190,28 @@ describe("TicketDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: /actions/i }));
 
     expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /stop run/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /stop run/i })).toBeEnabled();
+  });
+
+  it("disables stop run when the issue is idle", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+    expect(screen.getByRole("button", { name: /stop run/i })).toBeDisabled();
+    expect(screen.getByText("No active run to stop.")).toBeInTheDocument();
+  });
+
+  it("disables run agent while a live run exists but keeps destructive rerun available", async () => {
+    render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+    expect(screen.getByRole("button", { name: /run agent/i })).toBeDisabled();
+    expect(screen.getByText("Already running.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rerun/i })).toBeEnabled();
   });
 
   it("opens status in a concise operational modal", async () => {

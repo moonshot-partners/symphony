@@ -260,6 +260,7 @@ type IssueOperation = {
   rows: Array<{ label: string; value: string }>;
   note?: string;
   backendReady: boolean;
+  disabledReason?: string;
   action?: OperationAction;
   targetIssueId?: string;
 };
@@ -300,7 +301,7 @@ function IssueOperations({
   }
 
   async function executeOperation(op: IssueOperation) {
-    if (!op.action) return;
+    if (!op.action || !op.backendReady) return;
 
     setPending(op.key);
     setResult(null);
@@ -400,7 +401,11 @@ function IssueOperations({
                   disabled={!operation.backendReady || pending === operation.key}
                   onClick={() => executeOperation(operation)}
                 >
-                  {pending === operation.key ? "Working..." : operation.primaryAction}
+                  {pending === operation.key
+                    ? "Working..."
+                    : operation.backendReady
+                      ? operation.primaryAction
+                      : "Unavailable"}
                 </Button>
               </DialogFooter>
             )}
@@ -497,9 +502,10 @@ function OperationGroup({
               key={op.key}
               type="button"
               variant="ghost"
+              disabled={op.kind !== "read" && !op.backendReady}
               className={
                 op.kind === "danger"
-                  ? "h-auto items-start justify-start gap-3 px-3 py-2 text-left whitespace-normal text-destructive hover:bg-destructive/10"
+                  ? "h-auto items-start justify-start gap-3 px-3 py-2 text-left whitespace-normal text-destructive hover:bg-destructive/10 disabled:text-muted-foreground disabled:opacity-50"
                   : "h-auto items-start justify-start gap-3 px-3 py-2 text-left whitespace-normal"
               }
               onClick={() => onSelect(op.key)}
@@ -508,7 +514,7 @@ function OperationGroup({
               <span className="min-w-0">
                 <span className="block text-sm leading-snug">{op.label}</span>
                 <span className="block whitespace-normal text-xs font-normal leading-snug text-muted-foreground">
-                  {op.summary}
+                  {op.disabledReason ?? op.summary}
                 </span>
               </span>
             </Button>
@@ -596,26 +602,29 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       ],
       note: running ? "Stop the active run before starting another one." : undefined,
       backendReady: !running,
+      disabledReason: running ? "Already running." : undefined,
     },
     {
       key: "rerun",
       label: "Rerun",
       icon: RefreshCcw,
       kind: "agent",
-      summary: "Reset local run pointers and move the issue back to the dispatch queue.",
+      summary: "Delete prior run artifacts and queue a fresh agent attempt.",
       primaryAction: "Rerun",
-      description: "Move this issue back to the dispatch queue for a fresh agent run.",
+      description: "Delete prior Symphony artifacts and move this issue back to the dispatch queue.",
       action: "rerun",
       targetIssueId: ticket.id,
       rows: [
         { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
         { label: "Target", value: ticket.id },
+        { label: "Will delete", value: "Workspace, run summary, evidence, Linear comments" },
+        { label: "Will close", value: "Attached pull requests" },
         { label: "Will move", value: "Back to the dispatch state" },
       ],
       note: running
-        ? "Stop the active run before queueing a rerun."
-        : "Preserves workspace, PR, Linear comments, and evidence.",
-      backendReady: !running,
+        ? "This also terminates the active run before queueing the fresh attempt."
+        : "Destructive rerun: previous Symphony UI artifacts and attached PRs are removed before queueing.",
+      backendReady: true,
     },
     {
       key: "stop",
