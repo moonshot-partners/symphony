@@ -63,6 +63,12 @@ defmodule SymphonyElixir.Tracker.Memory do
     :ok
   end
 
+  @spec delete_issue_comments(String.t()) :: :ok | {:error, term()}
+  def delete_issue_comments(issue_id) do
+    send_event({:memory_tracker_comments_deleted, issue_id})
+    :ok
+  end
+
   @spec update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
   def update_issue_state(issue_id, state_name) do
     send_event({:memory_tracker_state_update, issue_id, state_name})

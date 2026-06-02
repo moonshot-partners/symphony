@@ -148,8 +148,10 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_recent_issues_by_states([" in progress ", 42])
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
     assert {:ok, _comment_id} = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
+    assert :ok = SymphonyElixir.Tracker.delete_issue_comments("issue-1")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
+    assert_receive {:memory_tracker_comments_deleted, "issue-1"}
     assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
 
     Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
@@ -211,6 +213,32 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Process.put({FakeLinearClient, :graphql_result}, :unexpected)
     assert {:error, :comment_create_failed} = Adapter.create_comment("issue-1", "odd")
+
+    Process.put(
+      {FakeLinearClient, :graphql_results},
+      [
+        {:ok,
+         %{
+           "data" => %{
+             "issue" => %{
+               "comments" => %{
+                 "nodes" => [%{"id" => "comment-1"}, %{"id" => "comment-2"}],
+                 "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+               }
+             }
+           }
+         }},
+        {:ok, %{"data" => %{"commentDelete" => %{"success" => true}}}},
+        {:ok, %{"data" => %{"commentDelete" => %{"success" => true}}}}
+      ]
+    )
+
+    assert :ok = Adapter.delete_issue_comments("issue-1")
+    assert_receive {:graphql_called, comments_query, %{issueId: "issue-1", after: nil}}
+    assert comments_query =~ "comments"
+    assert_receive {:graphql_called, delete_comment_query, %{commentId: "comment-1"}}
+    assert delete_comment_query =~ "commentDelete"
+    assert_receive {:graphql_called, _, %{commentId: "comment-2"}}
 
     Process.put(
       {FakeLinearClient, :graphql_results},

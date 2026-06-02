@@ -31,6 +31,57 @@ defmodule SymphonyElixir.GitHubPr do
   @github_pr_regex ~r{github\.com/([^/]+)/([^/]+)/pull/(\d+)}
 
   @doc """
+  Close every GitHub PR attached to an issue and ask GitHub to delete each
+  source branch. Used by destructive cockpit reruns.
+
+  Failures are returned per URL so callers can keep the rerun moving while
+  surfacing exactly what did not get cleaned up.
+  """
+  @spec close_for_issue(SymphonyElixir.Linear.Issue.t() | map()) :: %{
+          closed: [String.t()],
+          failed: [map()],
+          skipped: [String.t()]
+        }
+  def close_for_issue(issue) do
+    issue
+    |> pr_urls()
+    |> Enum.reduce(%{closed: [], failed: [], skipped: []}, fn url, acc ->
+      case close_url(url) do
+        :ok -> Map.update!(acc, :closed, &[url | &1])
+        {:skip, reason} -> Map.update!(acc, :skipped, &["#{url}: #{reason}" | &1])
+        {:error, reason} -> Map.update!(acc, :failed, &[%{url: url, reason: inspect(reason)} | &1])
+      end
+    end)
+    |> Map.update!(:closed, &Enum.reverse/1)
+    |> Map.update!(:failed, &Enum.reverse/1)
+    |> Map.update!(:skipped, &Enum.reverse/1)
+  end
+
+  defp close_url(url) when is_binary(url) do
+    close_fn = Application.get_env(:symphony_elixir, :pr_close_fn, &__MODULE__.default_close_url/1)
+    close_fn.(url)
+  end
+
+  @doc false
+  @spec default_close_url(String.t()) :: :ok | {:skip, atom()} | {:error, term()}
+  def default_close_url(url) when is_binary(url) do
+    case Regex.run(@github_pr_regex, url) do
+      [_, owner, repo, number] ->
+        case System.cmd(
+               "gh",
+               ["pr", "close", number, "--repo", "#{owner}/#{repo}", "--delete-branch"],
+               stderr_to_stdout: true
+             ) do
+          {_output, 0} -> :ok
+          {output, code} -> {:error, %{exit_code: code, output: output}}
+        end
+
+      _ ->
+        {:skip, :not_github_pr_url}
+    end
+  end
+
+  @doc """
   Returns true only when every attached GitHub PR is ready (MERGED, or OPEN
   with all CI checks green). Returns false otherwise, including when no PR
   URLs are attached.

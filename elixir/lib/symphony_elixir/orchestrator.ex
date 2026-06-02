@@ -1002,10 +1002,13 @@ defmodule SymphonyElixir.Orchestrator do
       :ok ->
         was_running = Map.has_key?(state.running, issue.id)
 
-        state =
+        {state, cleanup} =
           state
           |> terminate_running_issue(issue.id, true)
           |> destructive_rerun_cleanup(issue)
+
+        state =
+          state
           |> Map.update!(:workpads, &Map.delete(&1, issue.id))
           |> Map.update!(:completed, &MapSet.delete(&1, issue.id))
           |> Map.update!(:claimed, &MapSet.delete(&1, issue.id))
@@ -1028,6 +1031,8 @@ defmodule SymphonyElixir.Orchestrator do
             stopped_running: was_running,
             destroyed: [
               "workspace",
+              "pull_request",
+              "linear_comments",
               "workpad_pointer",
               "completion_summary",
               "evidence",
@@ -1036,7 +1041,8 @@ defmodule SymphonyElixir.Orchestrator do
               "retry_attempt",
               "pr_engagement_marker"
             ],
-            preserved: ["linear_issue", "linear_comments", "run_ledger"]
+            preserved: ["linear_issue", "run_ledger"],
+            cleanup: cleanup
           }}, state}
 
       {:error, reason} ->
@@ -1049,7 +1055,16 @@ defmodule SymphonyElixir.Orchestrator do
     WorkspaceCleanup.cleanup_for_identifier(issue.identifier)
     EvidenceStore.delete(issue.id)
     RunSummaryStore.delete(issue.id)
-    state
+
+    comment_cleanup =
+      case Tracker.delete_issue_comments(issue.id) do
+        :ok -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+
+    pr_cleanup = GitHubPr.close_for_issue(issue)
+
+    {state, %{linear_comments: comment_cleanup, pull_requests: pr_cleanup}}
   end
 
   defp running_identifier?(%State{running: running}, identifier) when is_binary(identifier) do

@@ -1001,12 +1001,19 @@ defmodule SymphonyElixir.CoreTest do
 
     previous_evidence_root = System.get_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
     previous_summary_root = System.get_env("SYMPHONY_COCKPIT_SUMMARY_DIR")
+    test_pid = self()
     System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", evidence_root)
     System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", summary_root)
+
+    Application.put_env(:symphony_elixir, :pr_close_fn, fn url ->
+      send(test_pid, {:pr_closed, url})
+      :ok
+    end)
 
     on_exit(fn ->
       restore_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", previous_evidence_root)
       restore_env("SYMPHONY_COCKPIT_SUMMARY_DIR", previous_summary_root)
+      Application.delete_env(:symphony_elixir, :pr_close_fn)
       File.rm_rf(workspace_root)
       File.rm_rf(evidence_root)
       File.rm_rf(summary_root)
@@ -1025,7 +1032,8 @@ defmodule SymphonyElixir.CoreTest do
       identifier: "SODEV-430",
       title: "Rerun me",
       description: "Acceptance criteria",
-      state: "In Code Review"
+      state: "In Code Review",
+      repos: [%{pr: %{url: "https://github.com/acme/repo/pull/42"}}]
     }
 
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
@@ -1059,6 +1067,8 @@ defmodule SymphonyElixir.CoreTest do
                stopped_running: false,
                destroyed: [
                  "workspace",
+                 "pull_request",
+                 "linear_comments",
                  "workpad_pointer",
                  "completion_summary",
                  "evidence",
@@ -1067,10 +1077,20 @@ defmodule SymphonyElixir.CoreTest do
                  "retry_attempt",
                  "pr_engagement_marker"
                ],
-               preserved: ["linear_issue", "linear_comments", "run_ledger"]
+               preserved: ["linear_issue", "run_ledger"],
+               cleanup: %{
+                 linear_comments: :ok,
+                 pull_requests: %{
+                   closed: ["https://github.com/acme/repo/pull/42"],
+                   failed: [],
+                   skipped: []
+                 }
+               }
              }}, rerun_state} = Orchestrator.handle_call({:manual_dispatch, "SODEV-430", :rerun}, {self(), make_ref()}, state)
 
     assert_receive {:memory_tracker_state_update, "issue-430", "Scheduled"}, 500
+    assert_receive {:memory_tracker_comments_deleted, "issue-430"}, 500
+    assert_receive {:pr_closed, "https://github.com/acme/repo/pull/42"}, 500
     refute File.exists?(Path.join(workspace_root, "SODEV-430"))
     assert SymphonyElixir.Cockpit.EvidenceStore.read("issue-430") == %{"items" => [], "report" => nil}
     assert SymphonyElixir.Cockpit.RunSummaryStore.read("issue-430") == nil

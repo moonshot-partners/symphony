@@ -26,6 +26,30 @@ defmodule SymphonyElixir.Linear.Adapter do
   }
   """
 
+  @issue_comments_query """
+  query SymphonyIssueComments($issueId: String!, $after: String) {
+    issue(id: $issueId) {
+      comments(first: 100, after: $after) {
+        nodes {
+          id
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+  """
+
+  @delete_comment_mutation """
+  mutation SymphonyDeleteComment($commentId: String!) {
+    commentDelete(id: $commentId) {
+      success
+    }
+  }
+  """
+
   @update_state_mutation """
   mutation SymphonyUpdateIssueState($issueId: String!, $stateId: String!) {
     issueUpdate(id: $issueId, input: {stateId: $stateId}) {
@@ -116,6 +140,21 @@ defmodule SymphonyElixir.Linear.Adapter do
     end
   end
 
+  @spec delete_issue_comments(String.t()) :: :ok | {:error, term()}
+  def delete_issue_comments(issue_id) when is_binary(issue_id) do
+    with {:ok, comment_ids} <- list_comment_ids(issue_id) do
+      failures =
+        comment_ids
+        |> Enum.map(&delete_comment/1)
+        |> Enum.reject(&match?(:ok, &1))
+
+      case failures do
+        [] -> :ok
+        _ -> {:error, {:comment_delete_failed, failures}}
+      end
+    end
+  end
+
   @spec update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
   def update_issue_state(issue_id, state_name)
       when is_binary(issue_id) and is_binary(state_name) do
@@ -133,6 +172,50 @@ defmodule SymphonyElixir.Linear.Adapter do
 
   defp client_module do
     Application.get_env(:symphony_elixir, :linear_client_module, Client)
+  end
+
+  defp list_comment_ids(issue_id, after_cursor \\ nil, acc \\ []) do
+    case client_module().graphql(@issue_comments_query, %{issueId: issue_id, after: after_cursor}) do
+      {:ok, response} ->
+        comments = get_in(response, ["data", "issue", "comments"]) || %{}
+        nodes = Map.get(comments, "nodes", [])
+        page_info = Map.get(comments, "pageInfo", %{})
+
+        ids =
+          Enum.flat_map(nodes, fn
+            %{"id" => id} when is_binary(id) -> [id]
+            _ -> []
+          end)
+
+        if Map.get(page_info, "hasNextPage") == true and is_binary(Map.get(page_info, "endCursor")) do
+          list_comment_ids(issue_id, Map.get(page_info, "endCursor"), acc ++ ids)
+        else
+          {:ok, acc ++ ids}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        {:error, :comment_lookup_failed}
+    end
+  end
+
+  defp delete_comment(comment_id) do
+    case client_module().graphql(@delete_comment_mutation, %{commentId: comment_id}) do
+      {:ok, response} ->
+        if get_in(response, ["data", "commentDelete", "success"]) == true do
+          :ok
+        else
+          {:error, {:comment_delete_failed, comment_id}}
+        end
+
+      {:error, reason} ->
+        {:error, {comment_id, reason}}
+
+      _ ->
+        {:error, {:comment_delete_failed, comment_id}}
+    end
   end
 
   defp resolve_state_id(issue_id, state_name) do
