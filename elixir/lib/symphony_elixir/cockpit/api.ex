@@ -60,7 +60,6 @@ defmodule SymphonyElixir.Cockpit.Api do
     case audit_issue(identifier) do
       {:ok, result} -> send_json(conn, 200, stringify_keys(result))
       {:error, :not_found} -> send_json(conn, 404, %{"error" => "not_found"})
-      {:error, :lookup_failed} -> send_json(conn, 502, %{"error" => "lookup_failed"})
     end
   end
 
@@ -224,53 +223,33 @@ defmodule SymphonyElixir.Cockpit.Api do
   defp audit_issue(identifier) when is_binary(identifier) do
     normalized = String.upcase(String.trim(identifier))
 
-    with {:ok, issues} <- Tracker.fetch_recent_issues_by_states(audit_states()),
-         issue when not is_nil(issue) <-
-           Enum.find(issues, &(String.upcase(to_string(&1.identifier)) == normalized)) do
-      {:ok,
-       %{
-         identifier: issue.identifier,
-         issue_id: issue.id,
-         state: issue.state,
-         pr_attached: issue.has_pr_attachment,
-         evidence_items: length(EvidenceStore.read(issue.id)),
-         summary_available: RunSummaryStore.read(issue.id) != nil,
-         url: issue.url
-       }}
-    else
-      {:error, reason} ->
-        require Logger
-        Logger.warning("Cockpit audit lookup failed identifier=#{normalized}: #{inspect(reason)}")
-        {:error, :lookup_failed}
-
+    case Enum.find(board_tickets(), &(String.upcase(to_string(ticket_value(&1, :id))) == normalized)) do
       nil ->
         {:error, :not_found}
+
+      ticket ->
+        {:ok,
+         %{
+           identifier: ticket_value(ticket, :id),
+           state: ticket_value(ticket, :state),
+           pr_attached: not is_nil(ticket_value(ticket, :pr)),
+           evidence_items: length(ticket_value(ticket, :evidence) || []),
+           summary_available: not is_nil(ticket_value(ticket, :summary)),
+           url: ticket_value(ticket, :url)
+         }}
     end
   end
 
-  defp audit_states do
-    settings = Config.settings!()
-    tracker = settings.tracker
-    cockpit = settings.cockpit
+  defp board_tickets do
+    case board() do
+      %{tickets: tickets} when is_list(tickets) -> tickets
+      %{"tickets" => tickets} when is_list(tickets) -> tickets
+      _ -> []
+    end
+  end
 
-    [
-      tracker.active_states,
-      tracker.terminal_states,
-      [
-        tracker.on_pickup_state,
-        tracker.on_complete_state,
-        tracker.on_pr_merge_state,
-        tracker.on_reject_state,
-        tracker.on_exhaust_state,
-        tracker.on_promote_state
-      ],
-      cockpit.up_next_states,
-      cockpit.done_states,
-      cockpit.in_progress_states
-    ]
-    |> List.flatten()
-    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
-    |> Enum.uniq()
+  defp ticket_value(ticket, key) when is_map(ticket) and is_atom(key) do
+    Map.get(ticket, key) || Map.get(ticket, Atom.to_string(key))
   end
 
   defp send_operation_result(conn, {:ok, result}) do
