@@ -72,7 +72,7 @@ describe("TicketDetail", () => {
     );
   });
 
-  it("shows the live panel with turn, runtime and the pipeline rail for a running agent", async () => {
+  it("shows the live panel with turn, runtime and the activity timeline for a running agent", async () => {
     render(
       <TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />,
     );
@@ -81,12 +81,11 @@ describe("TicketDetail", () => {
     expect(screen.getByRole("heading", { name: "Live" })).toBeInTheDocument();
     expect(screen.getByText(/turn 7/)).toBeInTheDocument();
 
-    // The rail renders every lifecycle phase as an ordered step.
-    const rail = screen.getByRole("list", { name: /pipeline position/i });
-    expect(rail).toHaveTextContent("Working");
-    expect(rail).toHaveTextContent("Done");
+    // The live activity timeline lists the agent's recent actions.
+    expect(screen.getByText(/Recent activity \(4\)/)).toBeInTheDocument();
+    expect(screen.getByText("Editing search-input.tsx")).toBeInTheDocument();
 
-    // The live last action shows in the panel (also present as a timeline step).
+    // The live last action shows in the panel.
     expect(screen.getAllByText("Running unit tests + lint").length).toBeGreaterThan(0);
   });
 

@@ -23,6 +23,12 @@ export const MOCK_LIVE: LivePayload = {
       workerHost: "hetzner-1",
       costUsd: 0.42,
       traceUrl: "https://cloud.langfuse.com/trace/live-trace-956",
+      events: [
+        { event: "approval_auto_approved", action: "Running unit tests + lint", at: "2026-05-30T12:46:22Z" },
+        { event: "approval_auto_approved", action: "Editing search-input.tsx", at: "2026-05-30T12:45:40Z" },
+        { event: "notification", action: "Adding a 300ms debounce to the search handler", at: "2026-05-30T12:45:02Z" },
+        { event: "turn_completed", action: "completed", at: "2026-05-30T12:44:30Z" },
+      ],
     },
   ],
   retrying: [],

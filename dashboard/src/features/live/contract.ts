@@ -15,6 +15,14 @@ export const LiveTokens = z.object({
   total: z.number(),
 });
 
+// One row of the live activity timeline: the orchestrator event tag, its
+// human one-liner, and when it happened. Newest first.
+export const LiveEvent = z.object({
+  event: z.string(),
+  action: z.string().nullable(),
+  at: z.string().nullable(),
+});
+
 export const LiveAgent = z.object({
   id: z.string(), // ticket identifier, matches Ticket.id ("SODEV-956")
   issueId: z.string(), // internal tracker id
@@ -30,6 +38,7 @@ export const LiveAgent = z.object({
   workerHost: z.string().nullable(),
   costUsd: z.number().nullable(), // cumulative run cost so far, null before first update
   traceUrl: z.string().url().nullable(), // deep link to the in-flight Langfuse trace
+  events: z.array(LiveEvent).default([]), // recent activity timeline, newest first
 });
 
 export const LiveRetry = z.object({
@@ -56,6 +65,7 @@ export const LivePayload = z.object({
   polling: LivePolling,
 });
 
+export type LiveEvent = z.infer<typeof LiveEvent>;
 export type LiveAgent = z.infer<typeof LiveAgent>;
 export type LiveRetry = z.infer<typeof LiveRetry>;
 export type LivePayload = z.infer<typeof LivePayload>;
