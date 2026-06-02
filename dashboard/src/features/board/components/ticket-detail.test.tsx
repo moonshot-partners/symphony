@@ -95,4 +95,23 @@ describe("TicketDetail", () => {
     await screen.findByText("Timeline");
     expect(screen.queryByRole("heading", { name: "Live" })).toBeNull();
   });
+
+  it("hides the empty ledger Timeline and Evidence while an agent is running", async () => {
+    const bare: Ticket = { ...running, timeline: [], evidence: [], summary: null, report: null };
+    render(<TicketDetail ticket={bare} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Live" });
+
+    expect(screen.queryByText("Timeline")).toBeNull();
+    expect(screen.queryByText(/Evidence \(/)).toBeNull();
+    expect(screen.queryByText("No activity yet.")).toBeNull();
+  });
+
+  it("still shows the empty Timeline and Evidence for an idle ticket", async () => {
+    const bare: Ticket = { ...running, timeline: [], evidence: [], summary: null, report: null };
+    render(<TicketDetail ticket={bare} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    expect(screen.getByText("No activity yet.")).toBeInTheDocument();
+    expect(screen.getByText("No evidence captured.")).toBeInTheDocument();
+  });
 });

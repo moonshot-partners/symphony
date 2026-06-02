@@ -60,6 +60,12 @@ export function TicketDetail({
 function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
   const { agent, pr } = ticket;
   const steps = ticket.timeline ?? [];
+  // While an agent is running, the Live panel is the story; the ledger Timeline
+  // and Evidence only fill in after the run finishes, so hide their empty
+  // placeholders to keep a running ticket from reading as broken. Idle tickets
+  // keep showing them (the ledger is their content, even when empty).
+  const showTimeline = steps.length > 0 || !live;
+  const showEvidence = ticket.evidence.length > 0 || !live;
 
   return (
     <>
@@ -128,7 +134,9 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
           </section>
         )}
 
+        {(showTimeline || showEvidence) && (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {showTimeline && (
           <section>
             <SectionLabel>Timeline</SectionLabel>
             {steps.length === 0 ? (
@@ -156,7 +164,9 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
               </ol>
             )}
           </section>
+          )}
 
+          {showEvidence && (
           <section>
             <SectionLabel>Evidence ({ticket.evidence.length})</SectionLabel>
             {ticket.evidence.length === 0 ? (
@@ -169,7 +179,9 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
               </div>
             )}
           </section>
+          )}
         </div>
+        )}
 
         {ticket.summary && (
           <section>
