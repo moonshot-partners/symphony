@@ -602,17 +602,19 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       label: "Rerun",
       icon: RefreshCcw,
       kind: "agent",
-      summary: "Replay the issue from the current ticket state.",
+      summary: "Reset local run pointers and move the issue back to the dispatch queue.",
       primaryAction: "Rerun",
-      description: "Queue another agent attempt using the current issue state.",
+      description: "Move this issue back to the dispatch queue for a fresh agent run.",
       action: "rerun",
       targetIssueId: ticket.id,
       rows: [
         { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
         { label: "Target", value: ticket.id },
-        { label: "Mode", value: "Replay current state" },
+        { label: "Will move", value: "Back to the dispatch state" },
       ],
-      note: running ? "Stop the active run before queueing a rerun." : undefined,
+      note: running
+        ? "Stop the active run before queueing a rerun."
+        : "Preserves workspace, PR, Linear comments, and evidence.",
       backendReady: !running,
     },
     {

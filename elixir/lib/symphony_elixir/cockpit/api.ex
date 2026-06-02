@@ -265,6 +265,7 @@ defmodule SymphonyElixir.Cockpit.Api do
   defp send_operation_result(conn, {:error, :draining}), do: send_json(conn, 409, %{"error" => "draining"})
   defp send_operation_result(conn, {:error, :not_dispatchable}), do: send_json(conn, 409, %{"error" => "not_dispatchable"})
   defp send_operation_result(conn, {:error, :lookup_failed}), do: send_json(conn, 502, %{"error" => "lookup_failed"})
+  defp send_operation_result(conn, {:error, :state_transition_failed}), do: send_json(conn, 502, %{"error" => "state_transition_failed"})
 
   defp send_operation_result(conn, {:error, reason}) when is_atom(reason) do
     send_json(conn, 500, %{"error" => Atom.to_string(reason)})

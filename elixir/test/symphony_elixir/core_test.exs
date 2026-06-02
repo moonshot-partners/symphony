@@ -989,6 +989,59 @@ defmodule SymphonyElixir.CoreTest do
              Orchestrator.handle_call({:stop_run, "missing"}, {self(), make_ref()}, state)
   end
 
+  test "manual rerun moves a completed issue back to the dispatch state and schedules a fresh poll" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Development"],
+      tracker_on_pickup_state: "In Development",
+      tracker_on_complete_state: "In Code Review"
+    )
+
+    issue = %Issue{
+      id: "issue-430",
+      identifier: "SODEV-430",
+      title: "Rerun me",
+      description: "Acceptance criteria",
+      state: "In Code Review"
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    state = %Orchestrator.State{
+      poll_interval_ms: 30_000,
+      max_concurrent_agents: 1,
+      running: %{},
+      claimed: MapSet.new(),
+      retry_attempts: %{"issue-430" => %{attempt: 2}},
+      workpads: %{"issue-430" => "comment-430"},
+      completed: MapSet.new(["issue-430"]),
+      pr_engagements: %{},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_rate_limits: nil
+    }
+
+    assert {:reply,
+            {:ok,
+             %{
+               queued: true,
+               mode: "rerun",
+               issue_id: "issue-430",
+               identifier: "SODEV-430",
+               moved_to: "Scheduled",
+               cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
+               preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
+             }}, rerun_state} = Orchestrator.handle_call({:manual_dispatch, "SODEV-430", :rerun}, {self(), make_ref()}, state)
+
+    assert_receive {:memory_tracker_state_update, "issue-430", "Scheduled"}, 500
+    refute Map.has_key?(rerun_state.workpads, "issue-430")
+    refute Map.has_key?(rerun_state.retry_attempts, "issue-430")
+    refute MapSet.member?(rerun_state.completed, "issue-430")
+    assert is_reference(rerun_state.tick_timer_ref)
+    assert is_reference(rerun_state.tick_token)
+    assert rerun_state.next_poll_due_at_ms <= System.monotonic_time(:millisecond)
+  end
+
   test "TestHooks.select_worker_host skips full ssh hosts under the shared per-host cap" do
     write_workflow_file!(Workflow.workflow_file_path(),
       worker_ssh_hosts: ["worker-a", "worker-b"],

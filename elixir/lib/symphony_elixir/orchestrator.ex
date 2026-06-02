@@ -938,6 +938,9 @@ defmodule SymphonyElixir.Orchestrator do
           running_identifier?(state, issue.identifier) ->
             {:reply, {:error, :already_running}, state}
 
+          mode == :rerun ->
+            rerun_issue_from_scratch(state, issue)
+
           true ->
             state = dispatch_issue(state, issue)
             BoardCache.invalidate()
@@ -989,6 +992,40 @@ defmodule SymphonyElixir.Orchestrator do
             cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
             preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
           }}, state}
+    end
+  end
+
+  defp rerun_issue_from_scratch(%State{} = state, %Issue{} = issue) do
+    dispatch_state = manual_dispatch_state()
+
+    case Tracker.update_issue_state(issue.id, dispatch_state) do
+      :ok ->
+        state =
+          state
+          |> Map.update!(:workpads, &Map.delete(&1, issue.id))
+          |> Map.update!(:completed, &MapSet.delete(&1, issue.id))
+          |> Map.update!(:retry_attempts, &Map.delete(&1, issue.id))
+          |> persist_workpads()
+          |> TickScheduler.schedule_tick(0, self())
+
+        BoardCache.invalidate()
+        notify_dashboard()
+
+        {:reply,
+         {:ok,
+          %{
+            queued: true,
+            mode: "rerun",
+            issue_id: issue.id,
+            identifier: issue.identifier,
+            moved_to: dispatch_state,
+            cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
+            preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
+          }}, state}
+
+      {:error, reason} ->
+        Logger.warning("Manual rerun state transition failed identifier=#{issue.identifier}: #{inspect(reason)}")
+        {:reply, {:error, :state_transition_failed}, state}
     end
   end
 
@@ -1053,5 +1090,14 @@ defmodule SymphonyElixir.Orchestrator do
     |> List.flatten()
     |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
     |> Enum.uniq()
+  end
+
+  defp manual_dispatch_state do
+    Config.settings!().tracker.active_states
+    |> Enum.find(&(is_binary(&1) and String.trim(&1) != ""))
+    |> case do
+      state when is_binary(state) -> state
+      _ -> Config.settings!().tracker.on_pickup_state || "In Development"
+    end
   end
 end
