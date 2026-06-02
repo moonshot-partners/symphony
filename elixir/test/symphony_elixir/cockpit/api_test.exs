@@ -154,6 +154,64 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
     end
   end
 
+  describe "operations" do
+    test "POST /refresh invalidates and queues an orchestrator refresh" do
+      Application.put_env(:symphony_elixir, :cockpit_refresh_fn, fn ->
+        %{queued: true, coalesced: false, operations: ["poll", "reconcile"]}
+      end)
+
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_refresh_fn) end)
+
+      conn = call(:post, "/refresh")
+
+      assert conn.status == 202
+
+      assert %{"queued" => true, "coalesced" => false, "operations" => ["poll", "reconcile"]} =
+               Jason.decode!(conn.resp_body)
+    end
+
+    test "POST /refresh returns 503 when the orchestrator is unavailable" do
+      Application.put_env(:symphony_elixir, :cockpit_refresh_fn, fn -> :unavailable end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_refresh_fn) end)
+
+      conn = call(:post, "/refresh")
+
+      assert conn.status == 503
+      assert Jason.decode!(conn.resp_body) == %{"error" => "orchestrator_unavailable"}
+    end
+
+    test "POST /runs/:issue_id/stop stops a running issue" do
+      Application.put_env(:symphony_elixir, :cockpit_stop_run_fn, fn issue_id ->
+        send(self(), {:stop_run, issue_id})
+        {:ok, %{stopped: true, issue_id: issue_id, identifier: "SODEV-956"}}
+      end)
+
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_stop_run_fn) end)
+
+      conn = call(:post, "/runs/uuid-956/stop")
+
+      assert conn.status == 200
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "stopped" => true,
+               "issue_id" => "uuid-956",
+               "identifier" => "SODEV-956"
+             }
+
+      assert_received {:stop_run, "uuid-956"}
+    end
+
+    test "POST /runs/:issue_id/stop returns 404 when the issue is not running" do
+      Application.put_env(:symphony_elixir, :cockpit_stop_run_fn, fn _issue_id -> {:error, :not_running} end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_stop_run_fn) end)
+
+      conn = call(:post, "/runs/uuid-956/stop")
+
+      assert conn.status == 404
+      assert Jason.decode!(conn.resp_body) == %{"error" => "not_running"}
+    end
+  end
+
   describe "auth" do
     test "passes through when no token is configured" do
       System.delete_env("SYMPHONY_COCKPIT_API_TOKEN")

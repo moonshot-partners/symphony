@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
 
   alias SymphonyElixir.{AgentRunner, Config, DecisionLog, GitHubPr, Tracker, Workpad}
+  alias SymphonyElixir.Cockpit.BoardCache
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -806,6 +807,18 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @spec stop_run(String.t()) :: {:ok, map()} | {:error, :not_running | :unavailable}
+  def stop_run(issue_id) when is_binary(issue_id), do: stop_run(__MODULE__, issue_id)
+
+  @spec stop_run(GenServer.server(), String.t()) :: {:ok, map()} | {:error, :not_running | :unavailable}
+  def stop_run(server, issue_id) when is_binary(issue_id) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:stop_run, issue_id}, 15_000)
+    else
+      {:error, :unavailable}
+    end
+  end
+
   @spec snapshot() :: map() | :timeout | :unavailable
   def snapshot, do: snapshot(__MODULE__, 15_000)
 
@@ -844,5 +857,34 @@ defmodule SymphonyElixir.Orchestrator do
        requested_at: DateTime.utc_now(),
        operations: ["poll", "reconcile"]
      }, state}
+  end
+
+  def handle_call({:stop_run, issue_id}, _from, %State{} = state) when is_binary(issue_id) do
+    case Map.get(state.running, issue_id) do
+      nil ->
+        {:reply, {:error, :not_running}, state}
+
+      running_entry ->
+        identifier = Map.get(running_entry, :identifier, issue_id)
+        session_id = RunningEntry.session_id(running_entry)
+
+        state =
+          state
+          |> terminate_running_issue(issue_id, false)
+          |> sync_drain_status(status_path(), drain_flag_path())
+
+        BoardCache.invalidate()
+        notify_dashboard()
+
+        {:reply,
+         {:ok,
+          %{
+            stopped: true,
+            issue_id: issue_id,
+            identifier: identifier,
+            session_id: session_id,
+            cleanup_workspace: false
+          }}, state}
+    end
   end
 end

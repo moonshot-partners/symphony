@@ -48,7 +48,8 @@ describe("Board", () => {
     renderBoard();
     const card = await screen.findByText("Fix collection search debounce");
     fireEvent.click(card);
-    expect(await screen.findByText("Timeline")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Agent workflow" })).toBeInTheDocument();
+    expect(screen.queryByText("Timeline")).toBeNull();
     expect(screen.getByText(/Evidence \(/)).toBeInTheDocument();
   });
 

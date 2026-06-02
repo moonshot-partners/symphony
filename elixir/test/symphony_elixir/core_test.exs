@@ -929,6 +929,66 @@ defmodule SymphonyElixir.CoreTest do
     assert {:noreply, ^coalesced_state} = Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
   end
 
+  test "manual stop_run terminates a running issue without deleting workspace state" do
+    issue_id = "issue-stop-1"
+    status_path = Path.join(System.tmp_dir!(), "status_stop_#{System.unique_integer([:positive])}.json")
+    drain_flag_path = Path.join(System.tmp_dir!(), "drain_stop_#{System.unique_integer([:positive])}.flag")
+
+    Application.put_env(:symphony_elixir, :status_path, status_path)
+    Application.put_env(:symphony_elixir, :drain_flag_path, drain_flag_path)
+
+    on_exit(fn ->
+      Application.delete_env(:symphony_elixir, :status_path)
+      Application.delete_env(:symphony_elixir, :drain_flag_path)
+      File.rm(status_path)
+      File.rm(drain_flag_path)
+    end)
+
+    state = %Orchestrator.State{
+      poll_interval_ms: 30_000,
+      max_concurrent_agents: 1,
+      running: %{
+        issue_id => %{
+          pid: nil,
+          ref: nil,
+          identifier: "SODEV-STOP",
+          session_id: "sess-stop",
+          started_at: ~U[2026-06-02 12:00:00Z]
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{issue_id => %{attempt: 1}},
+      workpads: %{issue_id => "comment-1"},
+      completed: MapSet.new(),
+      pr_engagements: %{},
+      agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      agent_rate_limits: nil
+    }
+
+    assert {:reply,
+            {:ok,
+             %{
+               stopped: true,
+               issue_id: ^issue_id,
+               identifier: "SODEV-STOP",
+               session_id: "sess-stop",
+               cleanup_workspace: false
+             }}, stopped_state} = Orchestrator.handle_call({:stop_run, issue_id}, {self(), make_ref()}, state)
+
+    refute Map.has_key?(stopped_state.running, issue_id)
+    refute MapSet.member?(stopped_state.claimed, issue_id)
+    refute Map.has_key?(stopped_state.retry_attempts, issue_id)
+    assert stopped_state.workpads[issue_id] == "comment-1"
+    assert Jason.decode!(File.read!(status_path))["running"] == []
+  end
+
+  test "manual stop_run returns not_running when the issue has no active entry" do
+    state = %Orchestrator.State{running: %{}}
+
+    assert {:reply, {:error, :not_running}, ^state} =
+             Orchestrator.handle_call({:stop_run, "missing"}, {self(), make_ref()}, state)
+  end
+
   test "TestHooks.select_worker_host skips full ssh hosts under the shared per-host cap" do
     write_workflow_file!(Workflow.workflow_file_path(),
       worker_ssh_hosts: ["worker-a", "worker-b"],

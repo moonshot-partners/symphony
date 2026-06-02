@@ -60,6 +60,7 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
                "issueId" => "issue-uuid-1",
                "state" => "In Progress",
                "turn" => 7,
+               "phase" => "building",
                "lastAction" => "Editing collection-detail-page.tsx",
                "lastEvent" => "tool_use",
                "runtimeSeconds" => 142,
@@ -193,6 +194,21 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
       assert nil_event["lastEvent"] == nil
       assert string_event["lastEvent"] == "assistant"
     end
+
+    test "derives a stable live phase for the cockpit workflow" do
+      assert phase_for(%{last_agent_event: nil}) == "starting"
+      assert phase_for(%{last_agent_event: :session_started}) == "planning"
+      assert phase_for(%{last_agent_message: "Editing app.tsx"}) == "building"
+      assert phase_for(%{last_agent_message: "Running pnpm test"}) == "verifying"
+      assert phase_for(%{last_agent_event: :turn_completed}) == "reviewing"
+      assert phase_for(%{last_agent_event: :approval_required}) == "blocked"
+      assert phase_for(%{last_agent_event: :turn_failed}) == "failed"
+    end
+  end
+
+  defp phase_for(overrides) do
+    [agent] = LiveView.render(snapshot(%{running: [running_entry(overrides)]}))["agents"]
+    agent["phase"]
   end
 
   # last_agent_message is summarize_update/1's map (%{event, message, ...}) whose

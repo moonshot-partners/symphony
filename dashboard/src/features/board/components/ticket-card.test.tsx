@@ -81,11 +81,8 @@ describe("TicketCard", () => {
     expect(onSelect).toHaveBeenCalledWith(ticket);
   });
 
-  it("opens via keyboard with Enter", () => {
-    const onSelect = vi.fn();
-    const ticket = byId("SODEV-964");
-    renderCard("SODEV-964", onSelect);
-    fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
-    expect(onSelect).toHaveBeenCalledWith(ticket);
+  it("uses a native button for keyboard activation semantics", () => {
+    renderCard("SODEV-964");
+    expect(screen.getByRole("button").tagName).toBe("BUTTON");
   });
 });

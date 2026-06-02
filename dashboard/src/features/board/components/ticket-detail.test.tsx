@@ -1,11 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TicketDetail } from "./ticket-detail";
 import { MOCK_BOARD } from "../fixtures";
 import { MOCK_LIVE } from "@/features/live/fixtures";
 import type { Ticket } from "../contract";
 
 const running: Ticket = MOCK_BOARD.tickets.find((t) => t.id === "SODEV-956")!;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("TicketDetail", () => {
   it("renders nothing when no ticket is selected", () => {
@@ -72,26 +77,29 @@ describe("TicketDetail", () => {
     );
   });
 
-  it("shows the live panel with turn, runtime and the activity timeline for a running agent", async () => {
+  it("shows the live panel with turn, runtime and the fixed workflow for a running agent", async () => {
     render(
       <TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />,
     );
-    await screen.findByText("Timeline");
+    await screen.findByRole("heading", { name: "Agent workflow" });
 
-    expect(screen.getByRole("heading", { name: "Live" })).toBeInTheDocument();
-    expect(screen.getByText(/turn 7/)).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Agent workflow" })).toBeInTheDocument();
+    expect(screen.getAllByText(/turn 7/i).length).toBeGreaterThan(0);
 
-    // The live activity timeline lists the agent's recent actions.
-    expect(screen.getByText(/Recent activity \(4\)/)).toBeInTheDocument();
-    expect(screen.getByText("Editing search-input.tsx")).toBeInTheDocument();
+    // The live workflow is the fixed e2e pipeline, not the raw event stream.
+    expect(screen.getAllByText("Build").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Verify").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Run checks and capture proof").length).toBeGreaterThan(0);
 
     // The live last action shows in the panel.
     expect(screen.getAllByText("Running unit tests + lint").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Timeline")).toBeNull();
   });
 
   it("deep links the Trace pill to the live trace while an agent is running", async () => {
     render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
-    await screen.findByRole("heading", { name: "Live" });
+    await screen.findByRole("heading", { name: "Agent workflow" });
 
     // The live trace (in flight) wins over the ticket's ledger trace.
     expect(MOCK_LIVE.agents[0].traceUrl).not.toBe(running.traceUrl);
@@ -101,22 +109,120 @@ describe("TicketDetail", () => {
     );
   });
 
-  it("shows the live cost in the live panel", async () => {
+  it("shows one low-noise issue actions entry in the header", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    expect(screen.getByRole("button", { name: /actions/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reset plan/i })).toBeNull();
+    expect(screen.queryByText(/symphony issue status/)).toBeNull();
+  });
+
+  it("opens issue actions with only executable choices", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+    expect(screen.getByRole("heading", { name: "Issue actions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inspect" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /status/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /audit/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /stop run/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /reset plan/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /run agent/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /rerun/i })).toBeNull();
+  });
+
+  it("shows stop run only when there is a live run", async () => {
     render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
-    await screen.findByRole("heading", { name: "Live" });
-    expect(screen.getByText(/\$0\.42/)).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /stop run/i })).toBeInTheDocument();
+  });
+
+  it("opens status in a concise operational modal", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /status/i }));
+
+    expect(screen.getByRole("heading", { name: "Status" })).toBeInTheDocument();
+    expect(screen.getByText("Refresh the verified state for this issue.")).toBeInTheDocument();
+    expect(screen.getAllByText("Linear").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(running.state).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Refresh status" })).toBeEnabled();
+    expect(screen.queryByText(/symphony issue status/)).toBeNull();
+  });
+
+  it("refreshes status through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ queued: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onActionComplete = vi.fn();
+    render(<TicketDetail ticket={running} onClose={() => {}} onActionComplete={onActionComplete} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /status/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/operations/refresh", { method: "POST" }));
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(screen.getByText("Refresh queued.")).toBeInTheDocument();
+  });
+
+  it("stops the live run through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ stopped: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onActionComplete = vi.fn();
+    render(
+      <TicketDetail
+        ticket={running}
+        live={MOCK_LIVE.agents[0]}
+        onClose={() => {}}
+        onActionComplete={onActionComplete}
+      />
+    );
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stop run/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operations/stop-run",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ issueId: MOCK_LIVE.agents[0].issueId }),
+        })
+      )
+    );
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(screen.getByText("Stop requested.")).toBeInTheDocument();
+  });
+
+  it("keeps technical cost out of the nontechnical live panel", async () => {
+    render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Agent workflow" });
+    expect(screen.queryByText(/\$0\.42/)).toBeNull();
   });
 
   it("omits the live panel when no agent is running", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");
-    expect(screen.queryByRole("heading", { name: "Live" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Agent workflow/ })).toBeNull();
   });
 
-  it("hides the empty ledger Timeline and Evidence while an agent is running", async () => {
+  it("hides the ledger Timeline and empty Evidence while an agent is running", async () => {
     const bare: Ticket = { ...running, timeline: [], evidence: [], summary: null, report: null };
     render(<TicketDetail ticket={bare} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
-    await screen.findByRole("heading", { name: "Live" });
+    await screen.findByRole("heading", { name: "Agent workflow" });
 
     expect(screen.queryByText("Timeline")).toBeNull();
     expect(screen.queryByText(/Evidence \(/)).toBeNull();
