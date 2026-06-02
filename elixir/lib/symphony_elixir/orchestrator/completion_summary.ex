@@ -2,15 +2,15 @@ defmodule SymphonyElixir.Orchestrator.CompletionSummary do
   @moduledoc """
   Writes the single human-facing completion/blocked summary for a run.
 
-  The summary used to be a tracker comment; it now goes to the cockpit run
-  summary store (`SymphonyElixir.Cockpit.RunSummaryStore`) and surfaces in the
-  cockpit ticket detail, keeping the tracker a clean control plane. One markdown
-  per issue, overwritten each completion.
+  The summary used to be a tracker comment; it now goes to the optional
+  operational view and surfaces in the cockpit ticket detail, keeping the
+  tracker a clean control plane. One markdown per issue, overwritten each
+  completion.
   """
 
   require Logger
 
-  alias SymphonyElixir.Cockpit.RunSummaryStore
+  alias SymphonyElixir.OperationalView
 
   @max_ac_evidence_chars 3_000
 
@@ -33,7 +33,7 @@ defmodule SymphonyElixir.Orchestrator.CompletionSummary do
 
     case Map.get(issue, :id) do
       issue_id when is_binary(issue_id) ->
-        RunSummaryStore.put(issue_id, body)
+        OperationalView.put_run_summary(issue_id, body)
         Logger.info("Completion summary stored issue=#{identifier(issue, running_entry)}")
 
       _ ->

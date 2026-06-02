@@ -8,8 +8,8 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcement do
 
     * `:ok` → returns `{:continue, state}` and the orchestrator keeps
       the running agent alive.
-    * `{:violation, reason}` → records a parked-issue summary in the cockpit
-      run summary store, moves the issue to `tracker.on_reject_state`, calls
+    * `{:violation, reason}` → records a parked-issue summary in the optional
+      operational view, moves the issue to `tracker.on_reject_state`, calls
       the orchestrator-supplied `terminate_fn` to kill the running task, and
       marks the issue completed so reconcile does not redispatch it. Returns
       `{:halted, state}`.
@@ -21,8 +21,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcement do
 
   require Logger
 
-  alias SymphonyElixir.Cockpit.RunSummaryStore
-  alias SymphonyElixir.Config
+  alias SymphonyElixir.{Config, OperationalView}
   alias SymphonyElixir.Orchestrator.{State, StateTransition}
 
   @type gate_c_result :: :ok | {:violation, atom()}
@@ -41,7 +40,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcement do
 
     Logger.warning("Gate C hard halt: issue_id=#{issue_id} issue_identifier=#{identifier} reason=#{reason}")
 
-    RunSummaryStore.put(issue_id, violation_comment(reason, identifier))
+    OperationalView.put_run_summary(issue_id, violation_comment(reason, identifier))
 
     Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
       StateTransition.apply(issue, on_reject_state)

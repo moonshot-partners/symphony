@@ -1,23 +1,21 @@
 defmodule SymphonyElixir.QaEvidence do
   @moduledoc """
-  Collects a UI-QA-self-review evidence bundle and hands it to the cockpit store.
+  Collects a UI-QA-self-review evidence bundle and hands it to the operational view.
 
   Reads `qa.evidence_subpath` from the active workflow config (defaults to
   `fe-next-app/qa-evidence`) and looks inside the agent's workspace for that
   directory — screenshots, a session `.webm`, a `qa-report.md` table. When the
   agent attaches its PR, the orchestrator calls `maybe_publish/2`: if the
-  directory exists, the bundle is published to the cockpit evidence store
-  (`SymphonyElixir.Cockpit.EvidenceStore`), where the proof surfaces in the
-  cockpit detail. It is no longer posted as a tracker comment — Linear stays a
-  clean control plane.
+  directory exists, the bundle is published to the optional operational view,
+  where the proof surfaces in the cockpit detail. It is no longer posted as a
+  tracker comment — Linear stays a clean control plane.
 
   Fire-and-forget — any failure is logged, never fatal to the completion path.
   """
 
   require Logger
 
-  alias SymphonyElixir.Cockpit.EvidenceStore
-  alias SymphonyElixir.Config
+  alias SymphonyElixir.{Config, OperationalView}
 
   @spec maybe_publish(String.t() | nil, String.t() | nil, keyword()) :: :ok
   def maybe_publish(issue_id, workspace_path, opts \\ [])
@@ -163,6 +161,6 @@ defmodule SymphonyElixir.QaEvidence do
   @doc false
   @spec publish(String.t(), Path.t(), keyword()) :: :ok
   def publish(issue_id, dir, _opts \\ []) do
-    EvidenceStore.publish(issue_id, dir)
+    OperationalView.publish_evidence(issue_id, dir)
   end
 end

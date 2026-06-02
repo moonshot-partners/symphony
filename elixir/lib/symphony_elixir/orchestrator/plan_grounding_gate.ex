@@ -19,7 +19,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
       `:plan_grounding_checked` flag marks the entry so later turns skip
       the check.
     * ungrounded plan (`{:violation, reason}`) → records a parked-issue
-      summary in the cockpit run summary store, moves the issue to
+      summary in the optional operational view, moves the issue to
       `tracker.on_reject_state`, calls the orchestrator-supplied
       `terminate_fn` to kill the running task, and marks the issue completed
       so reconcile does not redispatch it. Returns `{:halted, state}`.
@@ -35,8 +35,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
 
   require Logger
 
-  alias SymphonyElixir.Cockpit.RunSummaryStore
-  alias SymphonyElixir.{Config, PlanGrounding}
+  alias SymphonyElixir.{Config, OperationalView, PlanGrounding}
   alias SymphonyElixir.Orchestrator.{DispatchGate, State, StateTransition, TurnArtifacts}
 
   @type opts :: [terminate_fn: (State.t(), String.t(), boolean() -> State.t())]
@@ -96,7 +95,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
 
     Logger.warning("Plan-grounding hard halt: issue_id=#{issue_id} issue_identifier=#{identifier} reason=#{inspect(reason)}")
 
-    RunSummaryStore.put(issue_id, violation_comment(reason, identifier))
+    OperationalView.put_run_summary(issue_id, violation_comment(reason, identifier))
 
     Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
       StateTransition.apply(issue, on_reject_state)

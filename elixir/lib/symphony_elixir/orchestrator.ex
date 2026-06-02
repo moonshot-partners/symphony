@@ -6,8 +6,7 @@ defmodule SymphonyElixir.Orchestrator do
   use GenServer
   require Logger
 
-  alias SymphonyElixir.{AgentRunner, Config, DecisionLog, GitHubPr, Tracker, Workpad}
-  alias SymphonyElixir.Cockpit.{BoardCache, EvidenceStore, RunSummaryStore}
+  alias SymphonyElixir.{AgentRunner, Config, DecisionLog, GitHubPr, OperationalView, Tracker, Workpad}
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -909,7 +908,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> terminate_running_issue(issue_id, false)
           |> sync_drain_status(status_path(), drain_flag_path())
 
-        BoardCache.invalidate()
+        OperationalView.invalidate_board()
         notify_dashboard()
 
         {:reply,
@@ -943,7 +942,7 @@ defmodule SymphonyElixir.Orchestrator do
 
           true ->
             state = dispatch_issue(state, issue)
-            BoardCache.invalidate()
+            OperationalView.invalidate_board()
             notify_dashboard()
 
             manual_dispatch_reply(state, issue, mode)
@@ -968,7 +967,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> persist_workpads()
           |> sync_drain_status(status_path(), drain_flag_path())
 
-        BoardCache.invalidate()
+        OperationalView.invalidate_board()
         notify_dashboard()
 
         {:reply,
@@ -1021,7 +1020,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> persist_workpads()
           |> TickScheduler.schedule_tick(0, self())
 
-        BoardCache.invalidate()
+        OperationalView.invalidate_board()
         notify_dashboard()
 
         {:reply,
@@ -1057,8 +1056,8 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp destructive_rerun_cleanup(%State{} = state, %Issue{} = issue) do
     WorkspaceCleanup.cleanup_for_identifier(issue.identifier)
-    EvidenceStore.delete(issue.id)
-    RunSummaryStore.delete(issue.id)
+    OperationalView.delete_evidence(issue.id)
+    OperationalView.delete_run_summary(issue.id)
 
     comment_cleanup =
       case Tracker.delete_issue_comments(issue.id) do

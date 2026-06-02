@@ -10,8 +10,8 @@ defmodule SymphonyElixir.Orchestrator.StateTransition do
   """
 
   require Logger
-  alias SymphonyElixir.Cockpit.BoardCache
   alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.OperationalView
   alias SymphonyElixir.Tracker
 
   @spec apply(Issue.t() | term(), String.t() | nil) :: :ok
@@ -20,7 +20,7 @@ defmodule SymphonyElixir.Orchestrator.StateTransition do
     case Tracker.update_issue_state(issue.id, state_name) do
       :ok ->
         Logger.info("Linear state transition: #{issue_context(issue)} → #{state_name}")
-        BoardCache.invalidate()
+        OperationalView.invalidate_board()
 
       {:error, reason} ->
         Logger.warning("Linear state transition failed: #{issue_context(issue)} → #{state_name}: #{inspect(reason)}")
