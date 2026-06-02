@@ -1017,7 +1017,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp fetch_manual_issue(identifier) do
-    case Tracker.fetch_issues_by_states(manual_issue_states()) do
+    case Tracker.fetch_recent_issues_by_states(manual_issue_states()) do
       {:ok, issues} ->
         case Enum.find(issues, &(String.upcase(to_string(&1.identifier)) == identifier)) do
           %Issue{} = issue -> {:ok, issue}

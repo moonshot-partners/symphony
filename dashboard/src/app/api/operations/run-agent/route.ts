@@ -36,6 +36,14 @@ async function proxyIssueOperation(req: Request, operation: string) {
     return NextResponse.json({ error: "cockpit API unreachable" }, { status: 502 });
   }
 
-  const body = await res.json();
+  const body = await responseJson(res);
   return NextResponse.json(body, { status: res.ok ? 200 : res.status });
+}
+
+async function responseJson(res: Response) {
+  try {
+    return await res.json();
+  } catch {
+    return { error: `cockpit API error ${res.status}` };
+  }
 }

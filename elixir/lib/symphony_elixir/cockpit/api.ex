@@ -224,7 +224,7 @@ defmodule SymphonyElixir.Cockpit.Api do
   defp audit_issue(identifier) when is_binary(identifier) do
     normalized = String.upcase(String.trim(identifier))
 
-    with {:ok, issues} <- Tracker.fetch_issues_by_states(audit_states()),
+    with {:ok, issues} <- Tracker.fetch_recent_issues_by_states(audit_states()),
          issue when not is_nil(issue) <-
            Enum.find(issues, &(String.upcase(to_string(&1.identifier)) == normalized)) do
       {:ok,
