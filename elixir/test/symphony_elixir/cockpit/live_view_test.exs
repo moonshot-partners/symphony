@@ -26,7 +26,10 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
         last_agent_event: :tool_use,
         runtime_seconds: 142,
         agent_cost_usd: 0.18,
-        langfuse_trace_id: "trace-abc123"
+        langfuse_trace_id: "trace-abc123",
+        recent_events: [
+          %{event: :approval_auto_approved, action: "Running mix test", at: ~U[2026-06-02 12:02:22Z]}
+        ]
       },
       overrides
     )
@@ -66,8 +69,34 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
                "sessionId" => "sess-abc",
                "workerHost" => "hetzner-1",
                "costUsd" => 0.18,
-               "traceUrl" => "https://cloud.langfuse.com/trace/trace-abc123"
+               "traceUrl" => "https://cloud.langfuse.com/trace/trace-abc123",
+               "events" => [
+                 %{
+                   "event" => "approval_auto_approved",
+                   "action" => "Running mix test",
+                   "at" => "2026-06-02T12:02:22Z"
+                 }
+               ]
              }
+    end
+
+    test "serializes the recent_events ring buffer into the live timeline" do
+      events = [
+        %{event: :approval_auto_approved, action: "Running mix test", at: ~U[2026-06-02 12:02:22Z]},
+        %{event: :notification, action: "Looking at the serializer", at: ~U[2026-06-02 12:02:10Z]}
+      ]
+
+      [agent] = LiveView.render(snapshot(%{running: [running_entry(%{recent_events: events})]}))["agents"]
+
+      assert agent["events"] == [
+               %{"event" => "approval_auto_approved", "action" => "Running mix test", "at" => "2026-06-02T12:02:22Z"},
+               %{"event" => "notification", "action" => "Looking at the serializer", "at" => "2026-06-02T12:02:10Z"}
+             ]
+    end
+
+    test "renders an empty timeline when the agent has no events yet" do
+      [agent] = LiveView.render(snapshot(%{running: [running_entry(%{recent_events: []})]}))["agents"]
+      assert agent["events"] == []
     end
 
     test "builds the live Langfuse trace url from the running trace id" do

@@ -401,6 +401,49 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdateTest do
     end
   end
 
+  describe "integrate/2 — recent_events ring buffer" do
+    defp command_update(cmd, ts) do
+      payload = %{
+        "method" => "item/commandExecution/requestApproval",
+        "params" => %{"command" => cmd}
+      }
+
+      %{event: :approval_auto_approved, timestamp: ts, payload: payload, raw: "", details: payload}
+    end
+
+    test "prepends a compact event (newest first) with a one-liner action and timestamp" do
+      ts = ~U[2026-05-15 13:00:00Z]
+      {updated, _} = AgentUpdate.integrate(base_entry(), command_update("mix test", ts))
+
+      assert [event] = updated.recent_events
+      assert event.event == :approval_auto_approved
+      assert event.action == "Running mix test"
+      assert event.at == ts
+    end
+
+    test "keeps the newest event at the head across successive updates" do
+      e1 = elem(AgentUpdate.integrate(base_entry(), command_update("git status", ~U[2026-05-15 13:00:00Z])), 0)
+      e2 = elem(AgentUpdate.integrate(e1, command_update("mix test", ~U[2026-05-15 13:00:01Z])), 0)
+
+      assert [first, second] = e2.recent_events
+      assert first.action == "Running mix test"
+      assert second.action == "Running git status"
+    end
+
+    test "caps the buffer at 20 events, dropping the oldest" do
+      ts = ~U[2026-05-15 13:00:00Z]
+
+      final =
+        Enum.reduce(1..25, base_entry(), fn n, entry ->
+          elem(AgentUpdate.integrate(entry, command_update("step #{n}", ts)), 0)
+        end)
+
+      assert length(final.recent_events) == 20
+      assert hd(final.recent_events).action == "Running step 25"
+      assert List.last(final.recent_events).action == "Running step 6"
+    end
+  end
+
   defp base_entry do
     %{
       session_id: "sess-1",
