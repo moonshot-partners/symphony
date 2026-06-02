@@ -23,11 +23,14 @@ describe("TicketDetail", () => {
     expect(screen.getByText("flicker-1.png")).toBeInTheDocument();
   });
 
-  it("renders the QA report when present", async () => {
+  it("renders the QA report markdown table as real cells, not raw pipes", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");
     expect(screen.getByText("QA report")).toBeInTheDocument();
-    expect(screen.getByText(/no loading flicker \| PASS/)).toBeInTheDocument();
+    expect(screen.getByText("no loading flicker")).toBeInTheDocument();
+    expect(screen.getByText("debounce fires one request")).toBeInTheDocument();
+    // "PASS" appears once per table row (the bullet "Result: PASS" is a longer node)
+    expect(screen.getAllByText("PASS")).toHaveLength(2);
   });
 
   it("renders the ticket description when present", async () => {
@@ -37,13 +40,16 @@ describe("TicketDetail", () => {
     expect(screen.getByText(/Debounce it to 300ms/)).toBeInTheDocument();
   });
 
-  it("renders the run summary when present", async () => {
+  it("renders the run summary markdown (heading, emphasis, inline code)", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");
     expect(screen.getByText("Run summary")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Moved to `In Code Review` after PR checks and Symphony gates passed/)
-    ).toBeInTheDocument();
+    // "## Ready for review" becomes a heading, not literal "##" text
+    expect(screen.getByRole("heading", { name: "Ready for review" })).toBeInTheDocument();
+    // "**Outcome:**" becomes bold
+    expect(screen.getByText("Outcome:").tagName).toBe("STRONG");
+    // "`In Code Review`" becomes inline code
+    expect(screen.getByText("In Code Review").tagName).toBe("CODE");
   });
 
   it("exposes Linear, GitHub PR and Langfuse trace as new-tab links", async () => {
