@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# local QA screenshots (visual proof lives in the PR, not the source tree)
+/qa-evidence
+
 # next.js
 /.next/
 /out/
