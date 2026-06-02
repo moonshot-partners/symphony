@@ -1062,9 +1062,15 @@ defmodule SymphonyElixir.Orchestrator do
         {:error, reason} -> {:error, reason}
       end
 
+    attachment_cleanup =
+      case Tracker.delete_issue_pr_attachments(issue.id) do
+        :ok -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+
     pr_cleanup = GitHubPr.close_for_issue(issue)
 
-    {state, %{linear_comments: comment_cleanup, pull_requests: pr_cleanup}}
+    {state, %{linear_comments: comment_cleanup, linear_pr_attachments: attachment_cleanup, pull_requests: pr_cleanup}}
   end
 
   defp running_identifier?(%State{running: running}, identifier) when is_binary(identifier) do

@@ -149,9 +149,11 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
     assert {:ok, _comment_id} = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
     assert :ok = SymphonyElixir.Tracker.delete_issue_comments("issue-1")
+    assert :ok = SymphonyElixir.Tracker.delete_issue_pr_attachments("issue-1")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
     assert_receive {:memory_tracker_comments_deleted, "issue-1"}
+    assert_receive {:memory_tracker_pr_attachments_deleted, "issue-1"}
     assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
 
     Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
@@ -239,6 +241,34 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert_receive {:graphql_called, delete_comment_query, %{commentId: "comment-1"}}
     assert delete_comment_query =~ "commentDelete"
     assert_receive {:graphql_called, _, %{commentId: "comment-2"}}
+
+    Process.put(
+      {FakeLinearClient, :graphql_results},
+      [
+        {:ok,
+         %{
+           "data" => %{
+             "issue" => %{
+               "attachments" => %{
+                 "nodes" => [
+                   %{"id" => "attachment-pr", "url" => "https://github.com/acme/repo/pull/42"},
+                   %{"id" => "attachment-doc", "url" => "https://example.com/spec"}
+                 ],
+                 "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+               }
+             }
+           }
+         }},
+        {:ok, %{"data" => %{"attachmentDelete" => %{"success" => true}}}}
+      ]
+    )
+
+    assert :ok = Adapter.delete_issue_pr_attachments("issue-1")
+    assert_receive {:graphql_called, attachments_query, %{issueId: "issue-1", after: nil}}
+    assert attachments_query =~ "attachments"
+    assert_receive {:graphql_called, delete_attachment_query, %{attachmentId: "attachment-pr"}}
+    assert delete_attachment_query =~ "attachmentDelete"
+    refute_received {:graphql_called, _, %{attachmentId: "attachment-doc"}}
 
     Process.put(
       {FakeLinearClient, :graphql_results},

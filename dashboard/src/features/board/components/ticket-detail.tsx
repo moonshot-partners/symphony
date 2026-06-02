@@ -66,7 +66,9 @@ export function TicketDetail({
         side="right"
         className="gap-0 !w-full !max-w-none sm:!w-[64rem] sm:!max-w-[96vw]"
       >
-        {ticket && <Body ticket={ticket} live={live} onActionComplete={onActionComplete} />}
+        {ticket && (
+          <Body ticket={ticket} live={live} onClose={onClose} onActionComplete={onActionComplete} />
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -75,10 +77,12 @@ export function TicketDetail({
 function Body({
   ticket,
   live,
+  onClose,
   onActionComplete,
 }: {
   ticket: Ticket;
   live?: LiveAgent;
+  onClose: () => void;
   onActionComplete?: () => Promise<void> | void;
 }) {
   const { agent, pr } = ticket;
@@ -132,7 +136,12 @@ function Body({
               )}
             </div>
           )}
-          <IssueOperations ticket={ticket} live={live} onActionComplete={onActionComplete} />
+          <IssueOperations
+            ticket={ticket}
+            live={live}
+            onClose={onClose}
+            onActionComplete={onActionComplete}
+          />
         </div>
       </SheetHeader>
 
@@ -268,10 +277,12 @@ type IssueOperation = {
 function IssueOperations({
   ticket,
   live,
+  onClose,
   onActionComplete,
 }: {
   ticket: Ticket;
   live?: LiveAgent;
+  onClose: () => void;
   onActionComplete?: () => Promise<void> | void;
 }) {
   const operations = useMemo(() => issueOperations(ticket, live), [ticket, live]);
@@ -315,6 +326,11 @@ function IssueOperations({
       }
 
       await onActionComplete?.();
+      if (op.action === "rerun") {
+        close(false);
+        onClose();
+        return;
+      }
       setResult(operationSuccessMessage(op.action));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Operation failed.");

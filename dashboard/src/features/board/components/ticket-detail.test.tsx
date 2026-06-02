@@ -305,7 +305,9 @@ describe("TicketDetail", () => {
   it("queues a rerun through the cockpit operation endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ queued: true }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    const onClose = vi.fn();
+    const onActionComplete = vi.fn();
+    render(<TicketDetail ticket={running} onClose={onClose} onActionComplete={onActionComplete} />);
     await screen.findByText("Timeline");
 
     fireEvent.click(screen.getByRole("button", { name: /actions/i }));
@@ -322,7 +324,9 @@ describe("TicketDetail", () => {
         })
       )
     );
-    expect(screen.getByText("Rerun queued.")).toBeInTheDocument();
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+    expect(screen.queryByText("Rerun queued.")).toBeNull();
   });
 
   it("keeps technical cost out of the nontechnical live panel", async () => {

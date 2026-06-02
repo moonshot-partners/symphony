@@ -1080,6 +1080,7 @@ defmodule SymphonyElixir.CoreTest do
                preserved: ["linear_issue", "run_ledger"],
                cleanup: %{
                  linear_comments: :ok,
+                 linear_pr_attachments: :ok,
                  pull_requests: %{
                    closed: ["https://github.com/acme/repo/pull/42"],
                    failed: [],
@@ -1090,6 +1091,7 @@ defmodule SymphonyElixir.CoreTest do
 
     assert_receive {:memory_tracker_state_update, "issue-430", "Scheduled"}, 500
     assert_receive {:memory_tracker_comments_deleted, "issue-430"}, 500
+    assert_receive {:memory_tracker_pr_attachments_deleted, "issue-430"}, 500
     assert_receive {:pr_closed, "https://github.com/acme/repo/pull/42"}, 500
     refute File.exists?(Path.join(workspace_root, "SODEV-430"))
     assert SymphonyElixir.Cockpit.EvidenceStore.read("issue-430") == %{"items" => [], "report" => nil}

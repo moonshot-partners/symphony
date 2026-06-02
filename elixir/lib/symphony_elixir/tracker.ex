@@ -12,6 +12,7 @@ defmodule SymphonyElixir.Tracker do
   @callback create_comment(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   @callback update_comment(String.t(), String.t()) :: :ok | {:error, term()}
   @callback delete_issue_comments(String.t()) :: :ok | {:error, term()}
+  @callback delete_issue_pr_attachments(String.t()) :: :ok | {:error, term()}
   @callback update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
 
   @spec fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
@@ -50,6 +51,11 @@ defmodule SymphonyElixir.Tracker do
   @spec delete_issue_comments(String.t()) :: :ok | {:error, term()}
   def delete_issue_comments(issue_id) do
     adapter().delete_issue_comments(issue_id)
+  end
+
+  @spec delete_issue_pr_attachments(String.t()) :: :ok | {:error, term()}
+  def delete_issue_pr_attachments(issue_id) do
+    adapter().delete_issue_pr_attachments(issue_id)
   end
 
   @spec update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
