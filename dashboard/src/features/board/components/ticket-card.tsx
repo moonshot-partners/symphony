@@ -4,8 +4,8 @@ import type { LiveAgent } from "@/features/live/contract";
 import { stateBadge, type StateTone } from "../bucket";
 import { formatDuration } from "../time";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
 /**
  * Plain-language card for a non-technical audience. The glance shows outcomes,
@@ -35,17 +35,10 @@ export function TicketCard({
   const open = () => onSelect(ticket);
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          open();
-        }
-      }}
-      className="cursor-pointer rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="block w-full cursor-pointer appearance-none rounded-xl border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       <Card
         size="sm"
@@ -55,14 +48,11 @@ export function TicketCard({
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-xs text-muted-foreground">{ticket.id}</span>
             {running ? (
-              <Badge
-                variant="outline"
-                className="border-emerald-200 bg-emerald-50 text-emerald-700"
-              >
+              <StatusBadge tone="success">
                 <LoaderCircle className="animate-spin" aria-hidden />
                 Working
                 {live?.runtimeSeconds != null && ` · ${formatDuration(live.runtimeSeconds)}`}
-              </Badge>
+              </StatusBadge>
             ) : (
               badge && <StatePill label={badge.label} tone={badge.tone} />
             )}
@@ -81,16 +71,16 @@ export function TicketCard({
             <div className="flex flex-wrap items-center gap-1.5">
               {pr?.ci && <CheckBadge status={pr.ci} />}
               {proof > 0 && (
-                <Badge variant="outline" className="font-normal text-muted-foreground">
+                <StatusBadge tone="muted" className="font-normal">
                   <Paperclip aria-hidden />
                   Proof ({proof})
-                </Badge>
+                </StatusBadge>
               )}
             </div>
           )}
         </CardContent>
       </Card>
-    </div>
+    </button>
   );
 }
 
@@ -100,43 +90,46 @@ export function TicketCard({
 // amber for attention, emerald for done. Tints stay light (bg-50) to keep the
 // signal quiet. Killed states recede in struck-through grey so a dropped ticket
 // never reads like the delivered ones beside it.
-const TONE: Record<StateTone, string> = {
-  queued: "border-zinc-200 bg-zinc-50 text-zinc-600",
-  running: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  review: "border-blue-200 bg-blue-50 text-blue-700",
-  staging: "border-violet-200 bg-violet-50 text-violet-700",
-  blocked: "border-amber-200 bg-amber-50 text-amber-700",
-  done: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  killed: "text-muted-foreground line-through decoration-muted-foreground/40",
+const TONE: Record<StateTone, StatusTone> = {
+  queued: "neutral",
+  running: "success",
+  review: "info",
+  staging: "accent",
+  blocked: "warning",
+  done: "success",
+  killed: "muted",
 };
 
 function StatePill({ label, tone }: { label: string; tone: StateTone }) {
   return (
-    <Badge variant="outline" className={`min-w-0 max-w-[62%] shrink truncate font-normal ${TONE[tone]}`}>
+    <StatusBadge
+      tone={TONE[tone]}
+      className={tone === "killed" ? "min-w-0 max-w-[62%] shrink truncate font-normal line-through decoration-muted-foreground/40" : "min-w-0 max-w-[62%] shrink truncate font-normal"}
+    >
       {label}
-    </Badge>
+    </StatusBadge>
   );
 }
 
 function CheckBadge({ status }: { status: CiStatus }) {
   if (status === "failing")
     return (
-      <Badge variant="destructive">
+      <StatusBadge tone="danger">
         <CircleAlert aria-hidden />
         Problem found
-      </Badge>
+      </StatusBadge>
     );
   if (status === "passing")
     return (
-      <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+      <StatusBadge tone="success">
         <Check aria-hidden />
         Checks passed
-      </Badge>
+      </StatusBadge>
     );
   return (
-    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+    <StatusBadge tone="warning">
       <Clock aria-hidden />
       Checking<span className="loading-dots" aria-hidden />
-    </Badge>
+    </StatusBadge>
   );
 }
