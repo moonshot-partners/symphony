@@ -12,6 +12,19 @@ defmodule SymphonyElixir.GitHubPrTest do
 
   alias SymphonyElixir.GitHubPr
 
+  describe "settled_state?/1" do
+    test "true for MERGED and CLOSED (re-engagement can stop)" do
+      assert GitHubPr.settled_state?("MERGED")
+      assert GitHubPr.settled_state?("CLOSED")
+    end
+
+    test "false for OPEN, unknown, and non-string states (keep watching)" do
+      refute GitHubPr.settled_state?("OPEN")
+      refute GitHubPr.settled_state?("_unknown")
+      refute GitHubPr.settled_state?(nil)
+    end
+  end
+
   describe "parse_state/1" do
     test "trims whitespace and newlines" do
       assert GitHubPr.parse_state("  OPEN  \n") == "OPEN"

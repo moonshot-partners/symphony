@@ -45,7 +45,8 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
           required(:state_transition_fn) => (Issue.t(), String.t() -> :ok),
           required(:comment_fn) => (String.t(), String.t(), String.t() | nil -> term()),
           required(:pickup_state) => String.t(),
-          optional(:reject_state) => String.t() | nil
+          optional(:reject_state) => String.t() | nil,
+          optional(:pr_resolved_fn) => (Issue.t() -> boolean())
         }
 
   @doc """
@@ -106,22 +107,46 @@ defmodule SymphonyElixir.Orchestrator.PrReengagement do
         %{state | completed: MapSet.delete(state.completed, issue.id)}
 
       pr_url ->
-        detector_fn = Map.fetch!(opts, :detector_fn)
+        pr_resolved_fn = Map.get(opts, :pr_resolved_fn, fn _issue -> false end)
 
-        case detector_fn.(issue) do
-          {:critical, info} when is_map(info) ->
-            handle_critical(state, issue, critical_pr_url(info, pr_url), info, opts)
-
-          verdict ->
-            DecisionLog.emit("pr_reengagement.skip_no_critical", %{
-              issue_id: issue.id,
-              identifier: issue.identifier,
-              pr_url: pr_url,
-              verdict: inspect(verdict)
-            })
-
-            state
+        if pr_resolved_fn.(issue) do
+          evict_resolved(state, issue, pr_url)
+        else
+          handle_detector_verdict(state, issue, pr_url, opts)
         end
+    end
+  end
+
+  # A MERGED or CLOSED PR can never accept the fixes a re-engagement dispatch
+  # would push, so evict the issue from `state.completed` and stop re-scanning
+  # it every poll cycle — the dominant source of the skip_no_critical
+  # decision-log flood (one merged-PR issue logged ~2300x over 5h).
+  defp evict_resolved(state, %Issue{} = issue, pr_url) do
+    DecisionLog.emit("pr_reengagement.evict_resolved", %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      pr_url: pr_url
+    })
+
+    %{state | completed: MapSet.delete(state.completed, issue.id)}
+  end
+
+  defp handle_detector_verdict(state, %Issue{} = issue, pr_url, opts) do
+    detector_fn = Map.fetch!(opts, :detector_fn)
+
+    case detector_fn.(issue) do
+      {:critical, info} when is_map(info) ->
+        handle_critical(state, issue, critical_pr_url(info, pr_url), info, opts)
+
+      verdict ->
+        DecisionLog.emit("pr_reengagement.skip_no_critical", %{
+          issue_id: issue.id,
+          identifier: issue.identifier,
+          pr_url: pr_url,
+          verdict: inspect(verdict)
+        })
+
+        state
     end
   end
 

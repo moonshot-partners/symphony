@@ -109,6 +109,53 @@ defmodule SymphonyElixir.GitHubPr do
   @spec parse_state(String.t()) :: String.t()
   def parse_state(output) when is_binary(output), do: String.trim(output)
 
+  @doc """
+  Returns true when every attached GitHub PR is settled — MERGED or CLOSED —
+  so the SYM-16 re-engagement loop can evict the issue from `state.completed`
+  and stop re-scanning it every poll cycle. Returns false when any PR is still
+  OPEN, when `gh` cannot answer (treated as still-open, fail-safe toward keeping
+  the watch), or when no PR urls are attached.
+
+  Tests inject a pure function via
+  `Application.put_env(:symphony_elixir, :pr_merged_or_closed_fn, fn issue -> bool end)`.
+  """
+  @spec pr_merged_or_closed?(SymphonyElixir.Linear.Issue.t() | map()) :: boolean()
+  def pr_merged_or_closed?(issue) do
+    check_fn =
+      Application.get_env(
+        :symphony_elixir,
+        :pr_merged_or_closed_fn,
+        &__MODULE__.default_pr_merged_or_closed?/1
+      )
+
+    check_fn.(issue)
+  end
+
+  @doc false
+  @spec default_pr_merged_or_closed?(SymphonyElixir.Linear.Issue.t() | map()) :: boolean()
+  def default_pr_merged_or_closed?(issue) do
+    case pr_urls(issue) do
+      [] -> false
+      urls -> Enum.all?(urls, &settled_url?/1)
+    end
+  end
+
+  @doc """
+  Pure: a PR state string is "settled" (re-engagement can never fire again)
+  when it is MERGED or CLOSED. OPEN, unknown, and error states are not settled,
+  so the re-engagement watch is kept.
+  """
+  @spec settled_state?(term()) :: boolean()
+  def settled_state?(state) when is_binary(state), do: state in ["MERGED", "CLOSED"]
+  def settled_state?(_), do: false
+
+  defp settled_url?(url) do
+    case Regex.run(@github_pr_regex, url) do
+      [_, owner, repo, number] -> settled_state?(pr_state(owner, repo, number, url))
+      _ -> false
+    end
+  end
+
   defp pr_state(owner, repo, number, url) do
     case System.cmd(
            "gh",
