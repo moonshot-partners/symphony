@@ -21,6 +21,8 @@ export const MOCK_LIVE: LivePayload = {
       tokens: { in: 48200, out: 9100, total: 57300 },
       sessionId: "sess-956",
       workerHost: "hetzner-1",
+      costUsd: 0.42,
+      traceUrl: "https://cloud.langfuse.com/trace/live-trace-956",
     },
   ],
   retrying: [],

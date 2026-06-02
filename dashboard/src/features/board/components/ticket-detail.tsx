@@ -66,6 +66,9 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
   // keep showing them (the ledger is their content, even when empty).
   const showTimeline = steps.length > 0 || !live;
   const showEvidence = ticket.evidence.length > 0 || !live;
+  // While running, the in-flight live trace wins over the ticket's ledger trace
+  // (which is the previous finished run, and so stale for a running agent).
+  const traceUrl = live?.traceUrl ?? ticket.traceUrl;
 
   return (
     <>
@@ -82,7 +85,7 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
           )}
         </div>
 
-        {(ticket.url || pr?.url || ticket.traceUrl) && (
+        {(ticket.url || pr?.url || traceUrl) && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {ticket.url && (
               <LinkPill href={ticket.url} icon={ExternalLink} label="Open this ticket in Linear">
@@ -98,8 +101,8 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
                 PR #{pr.number}
               </LinkPill>
             )}
-            {ticket.traceUrl && (
-              <LinkPill href={ticket.traceUrl} icon={Activity} label="View this run's trace in Langfuse">
+            {traceUrl && (
+              <LinkPill href={traceUrl} icon={Activity} label="View this run's trace in Langfuse">
                 Trace
               </LinkPill>
             )}
@@ -123,6 +126,7 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
             {live.lastAction && <p className="mt-3 text-sm leading-snug">{live.lastAction}</p>}
             <p className="mt-2 font-mono text-xs text-muted-foreground">
               {live.tokens.total.toLocaleString()} tokens
+              {live.costUsd != null && ` · $${live.costUsd.toFixed(2)}`}
             </p>
           </section>
         )}
