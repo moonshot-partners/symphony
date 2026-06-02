@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MOCK_BOARD } from "@/features/board/fixtures";
-import { GET, __resetBoardCache } from "./route";
+import { BOARD_CACHE_TTL_MS, GET, __resetBoardCache } from "./route";
 
 beforeEach(() => {
   __resetBoardCache();
@@ -9,6 +9,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("GET /api/board (BFF)", () => {
@@ -59,6 +60,7 @@ describe("GET /api/board (BFF)", () => {
     vi.stubEnv("COCKPIT_API_URL", "http://elixir");
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => MOCK_BOARD });
     vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(Date, "now").mockReturnValue(0);
 
     const first = await GET();
     const second = await GET();
@@ -66,5 +68,22 @@ describe("GET /api/board (BFF)", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the upstream board after the short cache TTL expires", async () => {
+    vi.stubEnv("COCKPIT_API_URL", "http://elixir");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => MOCK_BOARD });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(Date, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(BOARD_CACHE_TTL_MS + 1)
+      .mockReturnValueOnce(BOARD_CACHE_TTL_MS + 1);
+
+    const first = await GET();
+    const second = await GET();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
