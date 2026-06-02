@@ -10,7 +10,7 @@ defmodule SymphonyElixir.Cockpit.BoardCache do
 
   use GenServer
 
-  @ttl_ms 60_000
+  @ttl_ms 10_000
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -21,6 +21,14 @@ defmodule SymphonyElixir.Cockpit.BoardCache do
     if Process.whereis(__MODULE__),
       do: GenServer.call(__MODULE__, {:board, build_fun}, 30_000),
       else: build_fun.()
+  end
+
+  @doc "Drop the cached board so the next read rebuilds it."
+  @spec invalidate() :: :ok
+  def invalidate do
+    if Process.whereis(__MODULE__),
+      do: GenServer.call(__MODULE__, :invalidate),
+      else: :ok
   end
 
   @impl true
@@ -38,5 +46,10 @@ defmodule SymphonyElixir.Cockpit.BoardCache do
       board = build_fun.()
       {:reply, board, %{state | board: board, at: now}}
     end
+  end
+
+  @impl true
+  def handle_call(:invalidate, _from, state) do
+    {:reply, :ok, %{state | board: nil, at: 0}}
   end
 end
