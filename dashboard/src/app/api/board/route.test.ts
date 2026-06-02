@@ -48,7 +48,7 @@ describe("GET /api/board (BFF)", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.tickets).toHaveLength(6);
+    expect(body.tickets).toHaveLength(MOCK_BOARD.tickets.length);
     expect(fetchMock).toHaveBeenCalledWith(
       "http://elixir/board",
       expect.objectContaining({ headers: { authorization: "Bearer secret" } })

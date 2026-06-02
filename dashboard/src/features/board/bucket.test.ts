@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { BoardPayload, type Ticket } from "./contract";
 import { MOCK_BOARD } from "./fixtures";
-import { bucketTickets, columnFor, type ColumnKey } from "./bucket";
+import { bucketTickets, columnFor, stateBadge, type ColumnKey } from "./bucket";
 
 const idle: Ticket["agent"] = {
   status: "idle",
@@ -68,12 +68,46 @@ describe("bucketTickets", () => {
     expect(cols.review.map((t) => t.id)).toEqual(["SODEV-940"]);
     expect(cols.staging.map((t) => t.id)).toEqual(["SODEV-933"]);
     expect(cols.blocked.map((t) => t.id)).toEqual(["SODEV-430"]);
-    expect(cols.done.map((t) => t.id)).toEqual(["SODEV-901"]);
+    expect(cols.done.map((t) => t.id)).toEqual(["SODEV-901", "SODEV-700", "SODEV-880"]);
   });
 
   it("covers every ticket exactly once", () => {
     const cols = bucketTickets(MOCK_BOARD);
     const total = Object.values(cols).reduce((n, ts) => n + ts.length, 0);
     expect(total).toBe(MOCK_BOARD.tickets.length);
+  });
+});
+
+describe("stateBadge", () => {
+  const states = MOCK_BOARD.states;
+
+  it("tags a successful terminal state green", () => {
+    expect(stateBadge(ticket("T", "Done"), states)).toEqual({ label: "Done", tone: "success" });
+  });
+
+  it("tags a done-extra state green", () => {
+    expect(stateBadge(ticket("T", "Approved QA"), states)).toEqual({
+      label: "Approved QA",
+      tone: "success",
+    });
+  });
+
+  it("tags a dropped terminal state (Cancelled / Duplicate) as killed", () => {
+    expect(stateBadge(ticket("T", "Cancelled"), states)?.tone).toBe("killed");
+    expect(stateBadge(ticket("T", "Duplicate"), states)?.tone).toBe("killed");
+  });
+
+  it("tags the reject state as needing attention", () => {
+    expect(stateBadge(ticket("T", "On Hold"), states)?.tone).toBe("attention");
+  });
+
+  it("tags an in-flight state neutral", () => {
+    expect(stateBadge(ticket("T", "Todo"), states)?.tone).toBe("neutral");
+    expect(stateBadge(ticket("T", "In Code Review"), states)?.tone).toBe("neutral");
+  });
+
+  it("returns null while an agent is running (the Working badge covers it)", () => {
+    const running: Ticket["agent"] = { ...idle, status: "running", turn: 2, maxTurns: 20 };
+    expect(stateBadge(ticket("T", "In Progress", running), states)).toBeNull();
   });
 });

@@ -29,6 +29,36 @@ export function columnFor(ticket: Ticket, states: TrackerStates): ColumnKey {
   return "queued"; // unknown state falls back to the entry column
 }
 
+/**
+ * The tone of a card's state pill. A column groups several raw tracker states
+ * (e.g. Done holds Done, Cancelled, Approved QA), so the pill's tone is what
+ * tells them apart at a glance: a finished win reads differently from a kill.
+ */
+export type StateTone = "success" | "killed" | "attention" | "neutral";
+
+// Terminal states whose name signals the work was dropped, not delivered. These
+// share the Done column with genuine successes, so they get a muted, struck tone.
+const KILLED = /cancel|duplicat|abandon|reject|won'?t/i;
+
+/**
+ * The raw tracker state to surface on a card, with a tone derived from the
+ * tracker config. Returns null when the state is already obvious from another
+ * cue: a running agent shows the "Working" badge, so its state is redundant.
+ */
+export function stateBadge(
+  ticket: Ticket,
+  states: TrackerStates,
+): { label: string; tone: StateTone } | null {
+  if (ticket.agent.status === "running") return null;
+
+  const s = ticket.state;
+  if (states.terminal.includes(s) || (states.doneExtra ?? []).includes(s)) {
+    return { label: s, tone: KILLED.test(s) ? "killed" : "success" };
+  }
+  if (s === states.onReject) return { label: s, tone: "attention" };
+  return { label: s, tone: "neutral" };
+}
+
 /** Group every ticket into its column. Pure: same input -> same output. */
 export function bucketTickets(payload: BoardPayload): Record<ColumnKey, Ticket[]> {
   const out = COLUMNS.reduce((acc, c) => {

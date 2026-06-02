@@ -33,7 +33,7 @@ describe("Board", () => {
       "Needs attention",
       "Done",
     ]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: label })).toBeInTheDocument();
     }
   });
 
