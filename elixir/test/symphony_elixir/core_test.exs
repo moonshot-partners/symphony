@@ -989,8 +989,31 @@ defmodule SymphonyElixir.CoreTest do
              Orchestrator.handle_call({:stop_run, "missing"}, {self(), make_ref()}, state)
   end
 
-  test "manual rerun moves a completed issue back to the dispatch state and schedules a fresh poll" do
+  test "manual rerun destructively clears previous artifacts and schedules a fresh poll" do
+    workspace_root =
+      Path.join(System.tmp_dir!(), "symphony-rerun-workspaces-#{System.unique_integer([:positive])}")
+
+    evidence_root =
+      Path.join(System.tmp_dir!(), "symphony-rerun-evidence-#{System.unique_integer([:positive])}")
+
+    summary_root =
+      Path.join(System.tmp_dir!(), "symphony-rerun-summaries-#{System.unique_integer([:positive])}")
+
+    previous_evidence_root = System.get_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
+    previous_summary_root = System.get_env("SYMPHONY_COCKPIT_SUMMARY_DIR")
+    System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", evidence_root)
+    System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", summary_root)
+
+    on_exit(fn ->
+      restore_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", previous_evidence_root)
+      restore_env("SYMPHONY_COCKPIT_SUMMARY_DIR", previous_summary_root)
+      File.rm_rf(workspace_root)
+      File.rm_rf(evidence_root)
+      File.rm_rf(summary_root)
+    end)
+
     write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: workspace_root,
       tracker_kind: "memory",
       tracker_active_states: ["Scheduled", "In Development"],
       tracker_on_pickup_state: "In Development",
@@ -1008,15 +1031,19 @@ defmodule SymphonyElixir.CoreTest do
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
 
+    File.mkdir_p!(Path.join(workspace_root, "SODEV-430"))
+    SymphonyElixir.Cockpit.EvidenceStore.publish("issue-430", Path.join(workspace_root, "SODEV-430"))
+    SymphonyElixir.Cockpit.RunSummaryStore.put("issue-430", "old summary")
+
     state = %Orchestrator.State{
       poll_interval_ms: 30_000,
       max_concurrent_agents: 1,
       running: %{},
-      claimed: MapSet.new(),
+      claimed: MapSet.new(["issue-430"]),
       retry_attempts: %{"issue-430" => %{attempt: 2}},
       workpads: %{"issue-430" => "comment-430"},
       completed: MapSet.new(["issue-430"]),
-      pr_engagements: %{},
+      pr_engagements: %{"issue-430" => %{sha: "old"}},
       agent_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       agent_rate_limits: nil
     }
@@ -1029,14 +1056,29 @@ defmodule SymphonyElixir.CoreTest do
                issue_id: "issue-430",
                identifier: "SODEV-430",
                moved_to: "Scheduled",
-               cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
-               preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
+               stopped_running: false,
+               destroyed: [
+                 "workspace",
+                 "workpad_pointer",
+                 "completion_summary",
+                 "evidence",
+                 "completed_marker",
+                 "claimed_marker",
+                 "retry_attempt",
+                 "pr_engagement_marker"
+               ],
+               preserved: ["linear_issue", "linear_comments", "run_ledger"]
              }}, rerun_state} = Orchestrator.handle_call({:manual_dispatch, "SODEV-430", :rerun}, {self(), make_ref()}, state)
 
     assert_receive {:memory_tracker_state_update, "issue-430", "Scheduled"}, 500
+    refute File.exists?(Path.join(workspace_root, "SODEV-430"))
+    assert SymphonyElixir.Cockpit.EvidenceStore.read("issue-430") == %{"items" => [], "report" => nil}
+    assert SymphonyElixir.Cockpit.RunSummaryStore.read("issue-430") == nil
     refute Map.has_key?(rerun_state.workpads, "issue-430")
     refute Map.has_key?(rerun_state.retry_attempts, "issue-430")
+    refute Map.has_key?(rerun_state.pr_engagements, "issue-430")
     refute MapSet.member?(rerun_state.completed, "issue-430")
+    refute MapSet.member?(rerun_state.claimed, "issue-430")
     assert is_reference(rerun_state.tick_timer_ref)
     assert is_reference(rerun_state.tick_token)
     assert rerun_state.next_poll_due_at_ms <= System.monotonic_time(:millisecond)

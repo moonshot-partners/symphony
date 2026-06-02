@@ -43,6 +43,27 @@ defmodule SymphonyElixir.Cockpit.RunSummaryStore do
     end
   end
 
+  @doc """
+  Remove the stored completion summary for an issue.
+
+  Destructive reruns call this before the new attempt is queued so the cockpit
+  no longer displays stale completion text from the previous run.
+  """
+  @spec delete(String.t()) :: :ok
+  def delete(issue_id) when is_binary(issue_id) do
+    case File.rm(file(issue_id)) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("RunSummaryStore delete failed issue=#{issue_id} reason=#{inspect(reason)}")
+        :ok
+    end
+  end
+
   defp file(issue_id), do: Path.join(dir(), sanitize(issue_id) <> ".md")
 
   defp sanitize(issue_id), do: String.replace(issue_id, ~r/[^A-Za-z0-9._-]/, "_")

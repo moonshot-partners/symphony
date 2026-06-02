@@ -66,6 +66,24 @@ defmodule SymphonyElixir.Cockpit.EvidenceStore do
   end
 
   @doc """
+  Remove every stored evidence file for an issue.
+
+  This is used by destructive reruns so the cockpit reflects a genuinely fresh
+  attempt instead of showing proof from a previous run.
+  """
+  @spec delete(String.t()) :: :ok
+  def delete(issue_id) when is_binary(issue_id) do
+    case File.rm_rf(issue_dir(issue_id)) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason, path} ->
+        Logger.warning("QA evidence delete failed issue_id=#{issue_id} path=#{path} reason=#{inspect(reason)}")
+        :ok
+    end
+  end
+
+  @doc """
   Absolute path of a stored file, or `nil` if it does not exist or the name
   tries to escape the issue folder (path traversal).
   """

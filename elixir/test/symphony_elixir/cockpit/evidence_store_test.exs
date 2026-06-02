@@ -5,10 +5,11 @@ defmodule SymphonyElixir.Cockpit.EvidenceStoreTest do
 
   setup do
     store = Path.join(System.tmp_dir!(), "ev-store-#{System.unique_integer([:positive])}")
+    previous_store = System.get_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
     System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", store)
 
     on_exit(fn ->
-      System.delete_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
+      restore_env_var("SYMPHONY_COCKPIT_EVIDENCE_DIR", previous_store)
       File.rm_rf!(store)
     end)
 
@@ -44,6 +45,15 @@ defmodule SymphonyElixir.Cockpit.EvidenceStoreTest do
     assert EvidenceStore.file_path("issue-trav", "absent.png") == nil
   end
 
+  test "delete removes the issue bundle" do
+    EvidenceStore.publish("issue-delete", src_with([{"ok.png", "x"}, {"qa-report.md", "done"}]))
+
+    assert "ok.png" in names(EvidenceStore.read("issue-delete"))
+    assert :ok = EvidenceStore.delete("issue-delete")
+    assert EvidenceStore.read("issue-delete") == %{"items" => [], "report" => nil}
+    assert EvidenceStore.file_path("issue-delete", "ok.png") == nil
+  end
+
   test "sanitizes issue ids that contain path separators", %{store: store} do
     EvidenceStore.publish("a/b/../c", src_with([{"ok.png", "x"}]))
 
@@ -54,4 +64,7 @@ defmodule SymphonyElixir.Cockpit.EvidenceStoreTest do
   end
 
   defp names(manifest), do: Enum.map(manifest["items"], & &1["name"])
+
+  defp restore_env_var(key, nil), do: System.delete_env(key)
+  defp restore_env_var(key, value), do: System.put_env(key, value)
 end

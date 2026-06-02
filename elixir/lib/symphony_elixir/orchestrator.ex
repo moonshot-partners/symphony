@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
 
   alias SymphonyElixir.{AgentRunner, Config, DecisionLog, GitHubPr, Tracker, Workpad}
-  alias SymphonyElixir.Cockpit.BoardCache
+  alias SymphonyElixir.Cockpit.{BoardCache, EvidenceStore, RunSummaryStore}
   alias SymphonyElixir.Linear.Issue
 
   alias SymphonyElixir.Orchestrator.{
@@ -935,11 +935,11 @@ defmodule SymphonyElixir.Orchestrator do
           state.drain ->
             {:reply, {:error, :draining}, state}
 
-          running_identifier?(state, issue.identifier) ->
-            {:reply, {:error, :already_running}, state}
-
           mode == :rerun ->
             rerun_issue_from_scratch(state, issue)
+
+          running_identifier?(state, issue.identifier) ->
+            {:reply, {:error, :already_running}, state}
 
           true ->
             state = dispatch_issue(state, issue)
@@ -1000,11 +1000,17 @@ defmodule SymphonyElixir.Orchestrator do
 
     case Tracker.update_issue_state(issue.id, dispatch_state) do
       :ok ->
+        was_running = Map.has_key?(state.running, issue.id)
+
         state =
           state
+          |> terminate_running_issue(issue.id, true)
+          |> destructive_rerun_cleanup(issue)
           |> Map.update!(:workpads, &Map.delete(&1, issue.id))
           |> Map.update!(:completed, &MapSet.delete(&1, issue.id))
+          |> Map.update!(:claimed, &MapSet.delete(&1, issue.id))
           |> Map.update!(:retry_attempts, &Map.delete(&1, issue.id))
+          |> Map.update!(:pr_engagements, &Map.delete(&1, issue.id))
           |> persist_workpads()
           |> TickScheduler.schedule_tick(0, self())
 
@@ -1019,14 +1025,31 @@ defmodule SymphonyElixir.Orchestrator do
             issue_id: issue.id,
             identifier: issue.identifier,
             moved_to: dispatch_state,
-            cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
-            preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
+            stopped_running: was_running,
+            destroyed: [
+              "workspace",
+              "workpad_pointer",
+              "completion_summary",
+              "evidence",
+              "completed_marker",
+              "claimed_marker",
+              "retry_attempt",
+              "pr_engagement_marker"
+            ],
+            preserved: ["linear_issue", "linear_comments", "run_ledger"]
           }}, state}
 
       {:error, reason} ->
         Logger.warning("Manual rerun state transition failed identifier=#{issue.identifier}: #{inspect(reason)}")
         {:reply, {:error, :state_transition_failed}, state}
     end
+  end
+
+  defp destructive_rerun_cleanup(%State{} = state, %Issue{} = issue) do
+    WorkspaceCleanup.cleanup_for_identifier(issue.identifier)
+    EvidenceStore.delete(issue.id)
+    RunSummaryStore.delete(issue.id)
+    state
   end
 
   defp running_identifier?(%State{running: running}, identifier) when is_binary(identifier) do
