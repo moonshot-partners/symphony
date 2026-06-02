@@ -40,7 +40,8 @@ describe("Board", () => {
   it("places the running ticket in progress with a Working badge", async () => {
     renderBoard();
     await screen.findByText("Fix collection search debounce");
-    expect(screen.getByText("Working")).toBeInTheDocument();
+    // The live overlay appends a runtime ("Working · 2m"), so match loosely.
+    expect(screen.getByText(/Working/)).toBeInTheDocument();
   });
 
   it("opens the ticket detail when a card is clicked", async () => {

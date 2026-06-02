@@ -1,6 +1,8 @@
 import { Check, CircleAlert, Clock, LoaderCircle, Paperclip } from "lucide-react";
 import type { CiStatus, Ticket, TrackerStates } from "../contract";
+import type { LiveAgent } from "@/features/live/contract";
 import { stateBadge, type StateTone } from "../bucket";
+import { formatDuration } from "../time";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -13,10 +15,12 @@ import { Progress } from "@/components/ui/progress";
 export function TicketCard({
   ticket,
   states,
+  live,
   onSelect,
 }: {
   ticket: Ticket;
   states: TrackerStates;
+  live?: LiveAgent;
   onSelect: (ticket: Ticket) => void;
 }) {
   const { agent, pr } = ticket;
@@ -57,6 +61,7 @@ export function TicketCard({
               >
                 <LoaderCircle className="animate-spin" aria-hidden />
                 Working
+                {live?.runtimeSeconds != null && ` · ${formatDuration(live.runtimeSeconds)}`}
               </Badge>
             ) : (
               badge && <StatePill label={badge.label} tone={badge.tone} />

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TicketCard } from "./ticket-card";
 import { MOCK_BOARD } from "../fixtures";
+import { MOCK_LIVE } from "@/features/live/fixtures";
 import type { Ticket } from "../contract";
 
 const byId = (id: string): Ticket => MOCK_BOARD.tickets.find((t) => t.id === id)!;
@@ -23,6 +24,20 @@ describe("TicketCard", () => {
     renderCard("SODEV-956");
     expect(screen.queryByText(/turn/i)).toBeNull();
     expect(screen.queryByText(/PR #/)).toBeNull();
+    expect(screen.queryByText(/lint/i)).toBeNull();
+  });
+
+  it("appends the live runtime to the Working badge, staying plain (no action text)", () => {
+    render(
+      <TicketCard
+        ticket={byId("SODEV-956")}
+        states={MOCK_BOARD.states}
+        live={MOCK_LIVE.agents[0]}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Working · 2m/)).toBeInTheDocument();
+    // the technical last action stays in the detail, not on the calm card
     expect(screen.queryByText(/lint/i)).toBeNull();
   });
 

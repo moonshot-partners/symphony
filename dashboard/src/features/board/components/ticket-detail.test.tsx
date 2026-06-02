@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { TicketDetail } from "./ticket-detail";
 import { MOCK_BOARD } from "../fixtures";
+import { MOCK_LIVE } from "@/features/live/fixtures";
 import type { Ticket } from "../contract";
 
 const running: Ticket = MOCK_BOARD.tickets.find((t) => t.id === "SODEV-956")!;
@@ -69,5 +70,29 @@ describe("TicketDetail", () => {
       "href",
       running.traceUrl!
     );
+  });
+
+  it("shows the live panel with turn, runtime and the pipeline rail for a running agent", async () => {
+    render(
+      <TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />,
+    );
+    await screen.findByText("Timeline");
+
+    expect(screen.getByRole("heading", { name: "Live" })).toBeInTheDocument();
+    expect(screen.getByText(/turn 7/)).toBeInTheDocument();
+
+    // The rail renders every lifecycle phase as an ordered step.
+    const rail = screen.getByRole("list", { name: /pipeline position/i });
+    expect(rail).toHaveTextContent("Working");
+    expect(rail).toHaveTextContent("Done");
+
+    // The live last action shows in the panel (also present as a timeline step).
+    expect(screen.getAllByText("Running unit tests + lint").length).toBeGreaterThan(0);
+  });
+
+  it("omits the live panel when no agent is running", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+    expect(screen.queryByRole("heading", { name: "Live" })).toBeNull();
   });
 });

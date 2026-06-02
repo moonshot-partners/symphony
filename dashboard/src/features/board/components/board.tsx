@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import type { Ticket } from "../contract";
 import { useBoard } from "../use-board";
+import { useLive } from "@/features/live/use-live";
+import { liveById } from "@/features/live/merge";
 import { bucketTickets, COLUMNS, type ColumnKey } from "../bucket";
 import { filterTickets } from "../filter";
 import { TicketCard } from "./ticket-card";
@@ -44,6 +46,8 @@ export function Board({
   onSelect: (ticket: Ticket | null) => void;
 }) {
   const { data, isPending, isError, refetch, isFetching } = useBoard();
+  const { data: liveData } = useLive();
+  const live = liveById(liveData);
 
   if (isPending) return <BoardSkeleton />;
   if (isError)
@@ -90,7 +94,13 @@ export function Board({
                     <p className="px-1 py-2 text-xs text-muted-foreground">No tickets</p>
                   ) : (
                     tickets.map((t) => (
-                      <TicketCard key={t.id} ticket={t} states={data.states} onSelect={onSelect} />
+                      <TicketCard
+                        key={t.id}
+                        ticket={t}
+                        states={data.states}
+                        live={live.get(t.id)}
+                        onSelect={onSelect}
+                      />
                     ))
                   )}
                 </div>
@@ -99,7 +109,11 @@ export function Board({
           })}
         </div>
       )}
-      <TicketDetail ticket={selected} onClose={() => onSelect(null)} />
+      <TicketDetail
+        ticket={selected}
+        live={selected ? live.get(selected.id) : undefined}
+        onClose={() => onSelect(null)}
+      />
     </>
   );
 }

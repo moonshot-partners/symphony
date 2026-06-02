@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { Board } from "@/features/board/components/board";
 import { LiveStatus } from "@/features/board/components/live-status";
+import { RunningIndicator } from "@/features/live/components/running-indicator";
 import { SearchBar } from "@/features/board/components/search-bar";
 import { useBoard } from "@/features/board/use-board";
 import { filterTickets } from "@/features/board/filter";
@@ -56,7 +57,8 @@ export default function Home() {
           resultCount={searching ? matches.length : undefined}
         />
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-3">
+          <RunningIndicator />
           <LiveStatus />
         </div>
       </header>

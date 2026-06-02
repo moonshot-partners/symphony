@@ -1,6 +1,9 @@
 "use client";
 
 import type { Ticket } from "../contract";
+import type { LiveAgent } from "@/features/live/contract";
+import { formatDuration } from "../time";
+import { PipelineRail } from "./pipeline-rail";
 import {
   Sheet,
   SheetContent,
@@ -34,9 +37,11 @@ import type { Evidence } from "../contract";
 
 export function TicketDetail({
   ticket,
+  live,
   onClose,
 }: {
   ticket: Ticket | null;
+  live?: LiveAgent;
   onClose: () => void;
 }) {
   return (
@@ -46,13 +51,13 @@ export function TicketDetail({
         style={{ width: "44rem", maxWidth: "94vw" }}
         className="gap-0"
       >
-        {ticket && <Body ticket={ticket} />}
+        {ticket && <Body ticket={ticket} live={live} />}
       </SheetContent>
     </Sheet>
   );
 }
 
-function Body({ ticket }: { ticket: Ticket }) {
+function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
   const { agent, pr } = ticket;
   const steps = ticket.timeline ?? [];
 
@@ -99,6 +104,23 @@ function Body({ ticket }: { ticket: Ticket }) {
       <Separator />
 
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
+        {live && (
+          <section className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-emerald-700">Live</h3>
+              <span className="flex items-center gap-1.5 font-mono text-xs text-emerald-700">
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+                turn {live.turn ?? "—"} · {formatDuration(live.runtimeSeconds ?? 0)}
+              </span>
+            </div>
+            <PipelineRail current="running" />
+            {live.lastAction && <p className="mt-3 text-sm leading-snug">{live.lastAction}</p>}
+            <p className="mt-2 font-mono text-xs text-muted-foreground">
+              {live.tokens.total.toLocaleString()} tokens
+            </p>
+          </section>
+        )}
+
         {ticket.description && (
           <section>
             <SectionLabel>Description</SectionLabel>
