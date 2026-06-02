@@ -1,12 +1,13 @@
 defmodule SymphonyElixir.Cockpit.Api do
   @moduledoc """
-  Read-only HTTP API for the cockpit dashboard. Serves the board payload
+  HTTP API for the cockpit dashboard. Serves the board payload
   assembled from the tracker + run ledger, plus a live runtime snapshot of the
   agents the orchestrator is running right now. Started only when
   `SYMPHONY_COCKPIT_API_PORT` is set (see `SymphonyElixir.Application`), so it is
   inert in any deployment that does not opt in.
 
-  Read-only by construction: no route mutates orchestrator or tracker state.
+  Most routes are read-only. Explicit operation routes mutate only orchestrator
+  runtime state and are gated by the same bearer token as reads.
   An optional bearer token (`SYMPHONY_COCKPIT_API_TOKEN`) gates access.
   """
 
@@ -14,6 +15,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   alias SymphonyElixir.Cockpit.{BoardCache, BoardView, Checks, EvidenceStore, LiveView, RunSummaryStore}
   alias SymphonyElixir.Config
+  alias SymphonyElixir.Orchestrator
   alias SymphonyElixir.RunLedger.Report
   alias SymphonyElixir.Tracker
 
@@ -35,6 +37,23 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   get "/live" do
     send_json(conn, 200, live())
+  end
+
+  post "/refresh" do
+    BoardCache.invalidate()
+
+    case refresh_source().() do
+      :unavailable -> send_json(conn, 503, %{"error" => "orchestrator_unavailable"})
+      result when is_map(result) -> send_json(conn, 202, stringify_keys(result))
+    end
+  end
+
+  post "/runs/:issue_id/stop" do
+    case stop_run_source().(issue_id) do
+      {:ok, result} -> send_json(conn, 200, stringify_keys(result))
+      {:error, :not_running} -> send_json(conn, 404, %{"error" => "not_running"})
+      {:error, :unavailable} -> send_json(conn, 503, %{"error" => "orchestrator_unavailable"})
+    end
   end
 
   get "/evidence/:id/:file" do
@@ -75,6 +94,14 @@ defmodule SymphonyElixir.Cockpit.Api do
       :cockpit_snapshot_fn,
       &SymphonyElixir.Orchestrator.snapshot/0
     )
+  end
+
+  defp refresh_source do
+    Application.get_env(:symphony_elixir, :cockpit_refresh_fn, &Orchestrator.request_refresh/0)
+  end
+
+  defp stop_run_source do
+    Application.get_env(:symphony_elixir, :cockpit_stop_run_fn, &Orchestrator.stop_run/1)
   end
 
   @doc false
@@ -266,4 +293,12 @@ defmodule SymphonyElixir.Cockpit.Api do
     |> Plug.Conn.put_resp_content_type("application/json")
     |> Plug.Conn.send_resp(status, Jason.encode!(body))
   end
+
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn {key, value} -> {to_string(key), stringify_value(value)} end)
+  end
+
+  defp stringify_value(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp stringify_value(value) when is_map(value), do: stringify_keys(value)
+  defp stringify_value(value), do: value
 end

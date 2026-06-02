@@ -1,11 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TicketDetail } from "./ticket-detail";
 import { MOCK_BOARD } from "../fixtures";
 import { MOCK_LIVE } from "@/features/live/fixtures";
 import type { Ticket } from "../contract";
 
 const running: Ticket = MOCK_BOARD.tickets.find((t) => t.id === "SODEV-956")!;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("TicketDetail", () => {
   it("renders nothing when no ticket is selected", () => {
@@ -113,7 +118,7 @@ describe("TicketDetail", () => {
     expect(screen.queryByText(/symphony issue status/)).toBeNull();
   });
 
-  it("opens issue actions as grouped choices", async () => {
+  it("opens issue actions with only executable choices", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");
 
@@ -121,12 +126,22 @@ describe("TicketDetail", () => {
 
     expect(screen.getByRole("heading", { name: "Issue actions" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Inspect" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /status/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /audit/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /reset plan/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /run agent/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /rerun/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /audit/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /stop run/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /reset plan/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /run agent/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /rerun/i })).toBeNull();
+  });
+
+  it("shows stop run only when there is a live run", async () => {
+    render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /stop run/i })).toBeInTheDocument();
   });
 
   it("opens status in a concise operational modal", async () => {
@@ -140,24 +155,56 @@ describe("TicketDetail", () => {
     expect(screen.getByText("Refresh the verified state for this issue.")).toBeInTheDocument();
     expect(screen.getAllByText("Linear").length).toBeGreaterThan(0);
     expect(screen.getAllByText(running.state).length).toBeGreaterThan(0);
-    expect(screen.queryByText("Refresh status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh status" })).toBeEnabled();
     expect(screen.queryByText(/symphony issue status/)).toBeNull();
   });
 
-  it("opens reset as a concise plan without technical command noise", async () => {
-    render(<TicketDetail ticket={running} onClose={() => {}} />);
+  it("refreshes status through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ queued: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onActionComplete = vi.fn();
+    render(<TicketDetail ticket={running} onClose={() => {}} onActionComplete={onActionComplete} />);
     await screen.findByText("Timeline");
 
     fireEvent.click(screen.getByRole("button", { name: /actions/i }));
-    fireEvent.click(screen.getByRole("button", { name: /reset plan/i }));
+    fireEvent.click(screen.getByRole("button", { name: /status/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
 
-    expect(screen.getByRole("heading", { name: "Reset Plan" })).toBeInTheDocument();
-    expect(screen.getByText("Preview cleanup for this attempt before anything is changed.")).toBeInTheDocument();
-    expect(screen.getByText("Will preserve")).toBeInTheDocument();
-    expect(screen.getByText("Human work and prod")).toBeInTheDocument();
-    expect(screen.getByText("Reset never runs directly from the first click.")).toBeInTheDocument();
-    expect(screen.getByText("Execute reset")).toBeDisabled();
-    expect(screen.queryByText(/symphony issue reset/)).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/operations/refresh", { method: "POST" }));
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(screen.getByText("Refresh queued.")).toBeInTheDocument();
+  });
+
+  it("stops the live run through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ stopped: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onActionComplete = vi.fn();
+    render(
+      <TicketDetail
+        ticket={running}
+        live={MOCK_LIVE.agents[0]}
+        onClose={() => {}}
+        onActionComplete={onActionComplete}
+      />
+    );
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stop run/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operations/stop-run",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ issueId: MOCK_LIVE.agents[0].issueId }),
+        })
+      )
+    );
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(screen.getByText("Stop requested.")).toBeInTheDocument();
   });
 
   it("keeps technical cost out of the nontechnical live panel", async () => {

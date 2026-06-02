@@ -46,7 +46,7 @@ export function Board({
   onSelect: (ticket: Ticket | null) => void;
 }) {
   const { data, isPending, isError, refetch, isFetching } = useBoard();
-  const { data: liveData } = useLive();
+  const { data: liveData, refetch: refetchLive } = useLive();
   const live = liveById(liveData);
 
   if (isPending) return <BoardSkeleton />;
@@ -113,6 +113,9 @@ export function Board({
         ticket={selected}
         live={selected ? live.get(selected.id) : undefined}
         onClose={() => onSelect(null)}
+        onActionComplete={async () => {
+          await Promise.all([refetch(), refetchLive()]);
+        }}
       />
     </>
   );

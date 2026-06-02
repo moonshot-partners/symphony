@@ -22,15 +22,12 @@ import {
 } from "@/components/ui/dialog";
 import {
   Activity,
-  ClipboardCheck,
   Check,
   ChevronLeft,
   GitPullRequest,
   LoaderCircle,
-  Play,
   Radar,
-  RefreshCcw,
-  RotateCcw,
+  Square,
   Wrench,
 } from "lucide-react";
 import { ExternalAction } from "@/components/external-action";
@@ -52,10 +49,12 @@ export function TicketDetail({
   ticket,
   live,
   onClose,
+  onActionComplete,
 }: {
   ticket: Ticket | null;
   live?: LiveAgent;
   onClose: () => void;
+  onActionComplete?: () => Promise<void> | void;
 }) {
   return (
     <Sheet open={!!ticket} onOpenChange={(open) => !open && onClose()}>
@@ -63,13 +62,21 @@ export function TicketDetail({
         side="right"
         className="gap-0 !w-full !max-w-none sm:!w-[64rem] sm:!max-w-[96vw]"
       >
-        {ticket && <Body ticket={ticket} live={live} />}
+        {ticket && <Body ticket={ticket} live={live} onActionComplete={onActionComplete} />}
       </SheetContent>
     </Sheet>
   );
 }
 
-function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
+function Body({
+  ticket,
+  live,
+  onActionComplete,
+}: {
+  ticket: Ticket;
+  live?: LiveAgent;
+  onActionComplete?: () => Promise<void> | void;
+}) {
   const { agent, pr } = ticket;
   const steps = ticket.timeline ?? [];
   // While an agent is running, the fixed Live workflow is the story. The ledger
@@ -121,7 +128,7 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
               )}
             </div>
           )}
-          <IssueOperations ticket={ticket} live={live} />
+          <IssueOperations ticket={ticket} live={live} onActionComplete={onActionComplete} />
         </div>
       </SheetHeader>
 
@@ -235,7 +242,8 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
   );
 }
 
-type OperationKey = "status" | "audit" | "reset" | "run" | "rerun";
+type OperationKey = "status" | "stop";
+type OperationAction = "refresh" | "stop";
 
 type IssueOperation = {
   key: OperationKey;
@@ -248,19 +256,73 @@ type IssueOperation = {
   rows: Array<{ label: string; value: string }>;
   note?: string;
   backendReady: boolean;
+  action?: OperationAction;
+  targetIssueId?: string;
 };
 
-function IssueOperations({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
+function IssueOperations({
+  ticket,
+  live,
+  onActionComplete,
+}: {
+  ticket: Ticket;
+  live?: LiveAgent;
+  onActionComplete?: () => Promise<void> | void;
+}) {
   const operations = useMemo(() => issueOperations(ticket, live), [ticket, live]);
   const [active, setActive] = useState<OperationKey | null>(null);
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState<OperationKey | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const operation = operations.find((op) => op.key === active) ?? null;
   const inspectOperations = operations.filter((op) => op.kind === "read");
   const actionOperations = operations.filter((op) => op.kind !== "read");
 
   function close(open: boolean) {
     setOpen(open);
-    if (!open) setActive(null);
+    if (!open) {
+      setActive(null);
+      setPending(null);
+      setResult(null);
+      setError(null);
+    }
+  }
+
+  function select(key: OperationKey) {
+    setActive(key);
+    setResult(null);
+    setError(null);
+  }
+
+  async function executeOperation(op: IssueOperation) {
+    if (!op.action) return;
+
+    setPending(op.key);
+    setResult(null);
+    setError(null);
+
+    try {
+      const response =
+        op.action === "refresh"
+          ? await fetch("/api/operations/refresh", { method: "POST" })
+          : await fetch("/api/operations/stop-run", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ issueId: op.targetIssueId }),
+            });
+
+      if (!response.ok) {
+        throw new Error(`Operation failed: ${response.status}`);
+      }
+
+      await onActionComplete?.();
+      setResult(op.action === "refresh" ? "Refresh queued." : "Stop requested.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Operation failed.");
+    } finally {
+      setPending(null);
+    }
   }
 
   return (
@@ -285,7 +347,11 @@ function IssueOperations({ ticket, live }: { ticket: Ticket; live?: LiveAgent })
                 variant="ghost"
                 size="sm"
                 className="-ml-2 w-fit text-muted-foreground"
-                onClick={() => setActive(null)}
+                onClick={() => {
+                  setActive(null);
+                  setResult(null);
+                  setError(null);
+                }}
               >
                 <ChevronLeft className="size-3.5" aria-hidden />
                 Actions
@@ -314,7 +380,19 @@ function IssueOperations({ ticket, live }: { ticket: Ticket; live?: LiveAgent })
               </p>
             )}
 
-            {operation.kind !== "read" && (
+            {result && (
+              <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm leading-snug text-emerald-700">
+                {result}
+              </p>
+            )}
+
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm leading-snug text-destructive">
+                {error}
+              </p>
+            )}
+
+            {(operation.kind !== "read" || operation.action) && (
               <DialogFooter className="items-center sm:justify-between">
                 {!operation.backendReady && (
                   <span className="text-xs text-muted-foreground">Preview only</span>
@@ -322,9 +400,10 @@ function IssueOperations({ ticket, live }: { ticket: Ticket; live?: LiveAgent })
                 <Button
                   type="button"
                   variant={operation.kind === "danger" ? "destructive" : "default"}
-                  disabled={!operation.backendReady}
+                  disabled={!operation.backendReady || pending === operation.key}
+                  onClick={() => executeOperation(operation)}
                 >
-                  {operation.primaryAction}
+                  {pending === operation.key ? "Working..." : operation.primaryAction}
                 </Button>
               </DialogFooter>
             )}
@@ -338,8 +417,8 @@ function IssueOperations({ ticket, live }: { ticket: Ticket; live?: LiveAgent })
               </DialogDescription>
             </DialogHeader>
 
-            <OperationGroup label="Inspect" operations={inspectOperations} onSelect={setActive} />
-            <OperationGroup label="Act" operations={actionOperations} onSelect={setActive} />
+            <OperationGroup label="Inspect" operations={inspectOperations} onSelect={select} />
+            <OperationGroup label="Act" operations={actionOperations} onSelect={select} />
           </DialogContent>
         )}
       </Dialog>
@@ -356,6 +435,8 @@ function OperationGroup({
   operations: IssueOperation[];
   onSelect: (key: OperationKey) => void;
 }) {
+  if (operations.length === 0) return null;
+
   return (
     <section aria-labelledby={`issue-actions-${label.toLowerCase()}`} className="space-y-2">
       <h3
@@ -400,8 +481,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
   const ci = ticket.pr?.ci ?? "unknown";
   const running = Boolean(live);
   const hasEvidence = ticket.evidence.length > 0;
-
-  return [
+  const operations: IssueOperation[] = [
     {
       key: "status",
       label: "Status",
@@ -410,77 +490,43 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       summary: "Current Linear, run, PR, and evidence state.",
       primaryAction: "Refresh status",
       description: "Refresh the verified state for this issue.",
+      action: "refresh",
       rows: [
         { label: "Linear", value: ticket.state },
         { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
         { label: "PR", value: hasPr ? `#${ticket.pr?.number} · ${ci}` : "None" },
         { label: "Evidence", value: hasEvidence ? `${ticket.evidence.length} item(s)` : "None" },
       ],
-      backendReady: false,
-    },
-    {
-      key: "audit",
-      label: "Audit",
-      icon: ClipboardCheck,
-      kind: "read",
-      summary: "Read-only trust check for stale or noisy output.",
-      primaryAction: "Run audit",
-      description: "Check whether the agent output is clean enough to trust.",
-      rows: [
-        { label: "Scope", value: "Read-only" },
-        { label: "Anchor", value: hasPr ? `PR #${ticket.pr?.number}` : "Issue only" },
-        { label: "Looks for", value: "Noise, stale traces, bad timing" },
-      ],
-      backendReady: false,
-    },
-    {
-      key: "reset",
-      label: "Reset Plan",
-      icon: RefreshCcw,
-      kind: "danger",
-      summary: "Preview cleanup before anything changes.",
-      primaryAction: "Execute reset",
-      description: "Preview cleanup for this attempt before anything is changed.",
-      rows: [
-        { label: "Will target", value: "Agent PR, branch, comments" },
-        { label: "Will preserve", value: "Human work and prod" },
-        { label: "Requires", value: "Ownership checks and confirmation" },
-      ],
-      note: "Reset never runs directly from the first click.",
-      backendReady: false,
-    },
-    {
-      key: "run",
-      label: "Run Agent",
-      icon: Play,
-      kind: "agent",
-      summary: running ? "Agent is already running on this issue." : "Start from the current issue state.",
-      primaryAction: "Start agent",
-      description: running ? "An agent is already running on this issue." : "Start a new agent run from the current issue state.",
-      rows: [
-        { label: "Mode", value: "Agentic" },
-        { label: "Stack", value: "Resolved by agent" },
-        { label: "Cockpit", value: "Streams live progress" },
-      ],
-      backendReady: false,
-    },
-    {
-      key: "rerun",
-      label: "Rerun",
-      icon: RotateCcw,
-      kind: "danger",
-      summary: "Reset the attempt, then start a fresh run.",
-      primaryAction: "Reset and run",
-      description: "Clean the previous attempt, then start the agent again.",
-      rows: [
-        { label: "Step 1", value: "Preview reset" },
-        { label: "Step 2", value: "Confirm cleanup" },
-        { label: "Step 3", value: "Run and watch" },
-      ],
-      note: "Use this for controlled end-to-end retesting.",
-      backendReady: false,
+      backendReady: true,
     },
   ];
+
+  if (running) {
+    operations.push(
+    {
+      key: "stop",
+      label: "Stop run",
+      icon: Square,
+      kind: "danger",
+      summary: running ? "Terminate the active agent and preserve workspace state." : "No active run to stop.",
+      primaryAction: "Stop run",
+      description: running
+        ? "Terminate the active agent run without deleting the workspace."
+        : "This issue does not have an active agent run.",
+      action: "stop",
+      targetIssueId: live?.issueId,
+      rows: [
+        { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
+        { label: "Will stop", value: running ? live?.sessionId ?? "Active session" : "Nothing" },
+        { label: "Will preserve", value: "Workspace, PR, comments, evidence" },
+      ],
+      note: "Use this when the current run is wrong, stuck, or no longer useful.",
+      backendReady: running && Boolean(live?.issueId),
+    }
+    );
+  }
+
+  return operations;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
