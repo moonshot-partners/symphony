@@ -96,6 +96,8 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
             last_agent_timestamp: ~U[2026-06-02 12:01:00Z],
             last_agent_message: "Running tests",
             last_agent_event: :tool_use,
+            agent_cost_usd: 0.27,
+            langfuse_trace_id: "trace-xyz",
             runtime_seconds: 60
           }
         ],
@@ -117,6 +119,8 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
       assert agent["id"] == "SODEV-956"
       assert agent["turn"] == 5
       assert agent["lastAction"] == "Running tests"
+      assert agent["costUsd"] == 0.27
+      assert agent["traceUrl"] == "https://cloud.langfuse.com/trace/trace-xyz"
       assert body["polling"]["nextPollInMs"] == 9_000
     end
 

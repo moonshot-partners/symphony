@@ -57,7 +57,9 @@ defmodule SymphonyElixir.Orchestrator.SnapshotTest do
           started_at: started,
           last_agent_timestamp: now,
           last_agent_message: %{event: :tool_used, message: "hi", timestamp: now},
-          last_agent_event: :tool_used
+          last_agent_event: :tool_used,
+          agent_cost_usd: 0.42,
+          langfuse_trace_id: "trace-abc"
         }
       }
 
@@ -65,6 +67,8 @@ defmodule SymphonyElixir.Orchestrator.SnapshotTest do
 
       assert [entry] = snap.running
       assert entry.issue_id == "iss-1"
+      assert entry.agent_cost_usd == 0.42
+      assert entry.langfuse_trace_id == "trace-abc"
       assert entry.identifier == "TIC-1"
       assert entry.state == "In Development"
       assert entry.worker_host == "host-a"
@@ -103,6 +107,8 @@ defmodule SymphonyElixir.Orchestrator.SnapshotTest do
       assert entry.turn_count == 0
       assert entry.worker_host == nil
       assert entry.workspace_path == nil
+      assert entry.agent_cost_usd == nil
+      assert entry.langfuse_trace_id == nil
     end
 
     test "projects retry attempts with clamped due_in_ms" do

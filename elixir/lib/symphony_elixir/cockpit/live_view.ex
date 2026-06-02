@@ -19,6 +19,11 @@ defmodule SymphonyElixir.Cockpit.LiveView do
 
   @empty %{"available" => false, "agents" => [], "retrying" => [], "polling" => nil}
 
+  # Same Langfuse prefix the board uses (`Cockpit.BoardView`); the running
+  # agent's trace id is already in the snapshot, so the live overlay can deep
+  # link to the in-flight trace exactly like a finished card links to its run.
+  @trace_base "https://cloud.langfuse.com/trace/"
+
   @doc """
   Render the runtime snapshot into the `/live` payload. Non-map inputs
   (`:timeout`, `:unavailable`) yield an empty payload flagged `available: false`
@@ -54,9 +59,14 @@ defmodule SymphonyElixir.Cockpit.LiveView do
         "total" => entry.agent_total_tokens
       },
       "sessionId" => entry.session_id,
-      "workerHost" => entry.worker_host
+      "workerHost" => entry.worker_host,
+      "costUsd" => entry.agent_cost_usd,
+      "traceUrl" => trace_url(entry.langfuse_trace_id)
     }
   end
+
+  defp trace_url(id) when is_binary(id) and id != "", do: @trace_base <> id
+  defp trace_url(_), do: nil
 
   defp retry(entry) do
     %{
