@@ -55,6 +55,8 @@ defmodule SymphonyElixir.Orchestrator.Snapshot do
         last_agent_timestamp: metadata.last_agent_timestamp,
         last_agent_message: metadata.last_agent_message,
         last_agent_event: metadata.last_agent_event,
+        agent_cost_usd: Map.get(metadata, :agent_cost_usd),
+        langfuse_trace_id: Map.get(metadata, :langfuse_trace_id),
         runtime_seconds: AgentTotals.running_seconds(metadata.started_at, now)
       }
     end)

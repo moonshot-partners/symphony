@@ -24,7 +24,9 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
         last_agent_timestamp: ~U[2026-06-02 12:02:22Z],
         last_agent_message: "Editing collection-detail-page.tsx",
         last_agent_event: :tool_use,
-        runtime_seconds: 142
+        runtime_seconds: 142,
+        agent_cost_usd: 0.18,
+        langfuse_trace_id: "trace-abc123"
       },
       overrides
     )
@@ -62,8 +64,23 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
                "lastActivityAt" => "2026-06-02T12:02:22Z",
                "tokens" => %{"in" => 12_000, "out" => 3_400, "total" => 15_400},
                "sessionId" => "sess-abc",
-               "workerHost" => "hetzner-1"
+               "workerHost" => "hetzner-1",
+               "costUsd" => 0.18,
+               "traceUrl" => "https://cloud.langfuse.com/trace/trace-abc123"
              }
+    end
+
+    test "builds the live Langfuse trace url from the running trace id" do
+      [agent] = LiveView.render(snapshot())["agents"]
+      assert agent["traceUrl"] == "https://cloud.langfuse.com/trace/trace-abc123"
+    end
+
+    test "yields a nil trace url and nil cost before the agent's first update" do
+      snap = snapshot(%{running: [running_entry(%{langfuse_trace_id: nil, agent_cost_usd: nil})]})
+      [agent] = LiveView.render(snap)["agents"]
+
+      assert agent["traceUrl"] == nil
+      assert agent["costUsd"] == nil
     end
 
     test "drops the agent pid and workspace path so they never reach the browser" do
