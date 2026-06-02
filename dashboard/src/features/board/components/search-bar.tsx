@@ -48,8 +48,8 @@ export function SearchBar({
   const hasQuery = value.trim() !== "";
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
-      <div role="search" className="relative w-full max-w-xs">
+    <div className={cn("relative flex items-center justify-center", className)}>
+      <div role="search" className="relative w-80 max-w-full">
         <Search
           className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
           aria-hidden
@@ -87,7 +87,7 @@ export function SearchBar({
       </div>
       {hasQuery && resultCount !== undefined && (
         <span
-          className="shrink-0 text-xs text-muted-foreground tabular-nums"
+          className="absolute top-1/2 left-full ml-3 -translate-y-1/2 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
           aria-live="polite"
           role="status"
         >
