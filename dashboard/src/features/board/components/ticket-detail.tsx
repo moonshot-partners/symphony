@@ -3,7 +3,7 @@
 import type { Ticket } from "../contract";
 import type { LiveAgent } from "@/features/live/contract";
 import { formatDuration } from "../time";
-import { PipelineRail } from "./pipeline-rail";
+import { AgentTimeline } from "@/features/live/components/agent-timeline";
 import {
   Sheet,
   SheetContent,
@@ -122,8 +122,8 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
                 turn {live.turn ?? "—"} · {formatDuration(live.runtimeSeconds ?? 0)}
               </span>
             </div>
-            <PipelineRail current="running" />
             {live.lastAction && <p className="mt-3 text-sm leading-snug">{live.lastAction}</p>}
+            <AgentTimeline events={live.events} />
             <p className="mt-2 font-mono text-xs text-muted-foreground">
               {live.tokens.total.toLocaleString()} tokens
               {live.costUsd != null && ` · $${live.costUsd.toFixed(2)}`}
