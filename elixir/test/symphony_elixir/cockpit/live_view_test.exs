@@ -200,9 +200,15 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
       assert phase_for(%{last_agent_event: :session_started}) == "planning"
       assert phase_for(%{last_agent_message: "Editing app.tsx"}) == "building"
       assert phase_for(%{last_agent_message: "Running pnpm test"}) == "verifying"
+      assert phase_for(%{last_agent_message: "Reading context"}) == "building"
+      assert phase_for(%{last_agent_message: %{event: nil, message: %{"unknown" => "shape"}}}) == "building"
+      assert phase_for(%{last_agent_event: :pr_attached}) == "reviewing"
       assert phase_for(%{last_agent_event: :turn_completed}) == "reviewing"
+      assert phase_for(%{last_agent_event: :turn_input_required}) == "blocked"
       assert phase_for(%{last_agent_event: :approval_required}) == "blocked"
       assert phase_for(%{last_agent_event: :turn_failed}) == "failed"
+      assert phase_for(%{last_agent_event: :turn_ended_with_error}) == "failed"
+      assert phase_for(%{last_agent_event: :turn_cancelled}) == "cancelled"
     end
   end
 

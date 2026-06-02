@@ -502,8 +502,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
   ];
 
   if (running) {
-    operations.push(
-    {
+    operations.push({
       key: "stop",
       label: "Stop run",
       icon: Square,
@@ -522,8 +521,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       ],
       note: "Use this when the current run is wrong, stuck, or no longer useful.",
       backendReady: running && Boolean(live?.issueId),
-    }
-    );
+    });
   }
 
   return operations;
