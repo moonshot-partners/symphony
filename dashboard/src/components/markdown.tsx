@@ -11,7 +11,36 @@ import rehypeSanitize from "rehype-sanitize";
  * dense detail panel.
  */
 
+const LINEAR_UPLOAD_PREFIX = "https://uploads.linear.app/";
+
+/**
+ * Linear hosts issue-description images behind `uploads.linear.app`, which 401s
+ * without the tracker API token, so a raw <img> renders broken. Route those
+ * through the same-origin BFF proxy, which injects the token server-side. Any
+ * other image source is left as-is.
+ */
+function proxyImageSrc(src?: string): string | undefined {
+  if (!src) return undefined;
+  if (src.startsWith(LINEAR_UPLOAD_PREFIX)) {
+    return "/api/linear-asset/" + src.slice(LINEAR_UPLOAD_PREFIX.length);
+  }
+  return src;
+}
+
 const components: Components = {
+  img: ({ src, alt }) => {
+    const resolved = proxyImageSrc(typeof src === "string" ? src : undefined);
+    if (!resolved) return null;
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={resolved}
+        alt={alt ?? ""}
+        loading="lazy"
+        className="my-2 max-w-full rounded-md border"
+      />
+    );
+  },
   h1: ({ children }) => (
     <h3 className="mt-4 mb-2 text-sm font-semibold first:mt-0">{children}</h3>
   ),

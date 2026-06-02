@@ -65,6 +65,24 @@ describe("Markdown", () => {
     expect(img?.getAttribute("onerror") ?? null).toBeNull();
   });
 
+  it("rewrites Linear upload images to the same-origin asset proxy", () => {
+    const md = "![Screenshot](https://uploads.linear.app/ws-id/dir-id/file-id)";
+    const { container } = render(<Markdown>{md}</Markdown>);
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    // the raw uploads.linear.app URL 401s in a browser; it must be proxied
+    expect(img!.getAttribute("src")).toBe("/api/linear-asset/ws-id/dir-id/file-id");
+    expect(img!.getAttribute("alt")).toBe("Screenshot");
+  });
+
+  it("leaves non-Linear image sources untouched", () => {
+    const md = "![logo](https://example.com/logo.png)";
+    const { container } = render(<Markdown>{md}</Markdown>);
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toBe("https://example.com/logo.png");
+  });
+
   it("trims surrounding whitespace", () => {
     const { container } = render(<Markdown>{"\n\n  hello  \n\n"}</Markdown>);
     expect(container.textContent?.trim()).toBe("hello");

@@ -49,6 +49,33 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
     end
   end
 
+  describe "GET /linear-asset/*path" do
+    test "proxies a Linear upload, injecting auth, and streams the bytes back" do
+      png = <<137, 80, 78, 71, 13, 10, 26, 10>>
+
+      Application.put_env(:symphony_elixir, :linear_asset_fetcher, fn url ->
+        send(self(), {:fetched, url})
+        {:ok, %{body: png, content_type: "image/png"}}
+      end)
+
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :linear_asset_fetcher) end)
+
+      conn = call(:get, "/linear-asset/ws-id/dir-id/file-id")
+
+      assert conn.status == 200
+      assert get_resp_header(conn, "content-type") == ["image/png"]
+      assert conn.resp_body == png
+      assert_received {:fetched, "https://uploads.linear.app/ws-id/dir-id/file-id"}
+    end
+
+    test "returns 404 when the upstream asset cannot be fetched" do
+      Application.put_env(:symphony_elixir, :linear_asset_fetcher, fn _url -> {:error, :upstream} end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :linear_asset_fetcher) end)
+
+      assert call(:get, "/linear-asset/ws-id/dir-id/missing").status == 404
+    end
+  end
+
   describe "auth" do
     test "passes through when no token is configured" do
       System.delete_env("SYMPHONY_COCKPIT_API_TOKEN")
