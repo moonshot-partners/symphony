@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   @default_runs_path "/opt/symphony/state/runs.jsonl"
   @default_status_path "/opt/symphony/state/status.json"
+  @linear_asset_base "https://uploads.linear.app"
 
   plug(:auth)
   plug(:match)
@@ -36,6 +37,15 @@ defmodule SymphonyElixir.Cockpit.Api do
       nil -> send_json(conn, 404, %{"error" => "not_found"})
       path -> serve_file(conn, path)
     end
+  end
+
+  # Linear stores issue-description images on `uploads.linear.app`, which 401s
+  # without the tracker API token, so a browser <img> renders a broken image.
+  # This proxies the fetch server-side with the token the dashboard never sees,
+  # mirroring the evidence proxy. The host is fixed, so the path glob cannot be
+  # steered at another origin.
+  get "/linear-asset/*path" do
+    serve_linear_asset(conn, path)
   end
 
   match _ do
@@ -164,6 +174,50 @@ defmodule SymphonyElixir.Cockpit.Api do
 
       _ ->
         conn
+    end
+  end
+
+  defp serve_linear_asset(conn, segments) do
+    url = @linear_asset_base <> "/" <> Enum.map_join(segments, "/", &URI.encode/1)
+
+    case asset_fetcher().(url) do
+      {:ok, %{body: body, content_type: ctype}} ->
+        conn
+        |> Plug.Conn.put_resp_content_type(ctype, nil)
+        |> Plug.Conn.put_resp_header("cache-control", "private, max-age=300")
+        |> Plug.Conn.send_resp(200, body)
+
+      _ ->
+        send_json(conn, 404, %{"error" => "not_found"})
+    end
+  end
+
+  defp asset_fetcher do
+    Application.get_env(:symphony_elixir, :linear_asset_fetcher, &default_asset_fetch/1)
+  end
+
+  defp default_asset_fetch(url) do
+    case Config.settings!().tracker.api_key do
+      nil ->
+        {:error, :missing_token}
+
+      token ->
+        case Req.get(url, headers: [{"authorization", token}], decode_body: false) do
+          {:ok, %Req.Response{status: 200, body: body} = resp} ->
+            ctype =
+              resp
+              |> Req.Response.get_header("content-type")
+              |> List.first()
+              |> Kernel.||("application/octet-stream")
+
+            {:ok, %{body: body, content_type: ctype}}
+
+          {:ok, %Req.Response{status: status}} ->
+            {:error, {:http, status}}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
