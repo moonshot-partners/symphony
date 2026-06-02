@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Search, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -72,17 +73,19 @@ export function SearchBar({
           className="px-8 [&::-webkit-search-cancel-button]:hidden"
         />
         {hasQuery && (
-          <button
+          <Button
             type="button"
             aria-label="Clear search"
+            size="icon-xs"
+            variant="ghost"
             onClick={() => {
               onClear();
               ref.current?.focus();
             }}
-            className="absolute top-1/2 right-1.5 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             <X className="size-3.5" aria-hidden />
-          </button>
+          </Button>
         )}
       </div>
       {hasQuery && resultCount !== undefined && (

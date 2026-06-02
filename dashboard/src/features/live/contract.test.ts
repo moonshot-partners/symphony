@@ -9,6 +9,7 @@ describe("LivePayload contract", () => {
 
   it("carries the live trace url and cost on the agent", () => {
     const agent = LivePayload.parse(MOCK_LIVE).agents[0];
+    expect(agent.phase).toBe("verifying");
     expect(agent.traceUrl).toBe("https://cloud.langfuse.com/trace/live-trace-956");
     expect(agent.costUsd).toBe(0.42);
   });

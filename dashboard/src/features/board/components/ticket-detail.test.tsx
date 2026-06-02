@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { TicketDetail } from "./ticket-detail";
 import { MOCK_BOARD } from "../fixtures";
 import { MOCK_LIVE } from "@/features/live/fixtures";
@@ -72,26 +72,29 @@ describe("TicketDetail", () => {
     );
   });
 
-  it("shows the live panel with turn, runtime and the activity timeline for a running agent", async () => {
+  it("shows the live panel with turn, runtime and the fixed workflow for a running agent", async () => {
     render(
       <TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />,
     );
-    await screen.findByText("Timeline");
+    await screen.findByRole("heading", { name: "Agent workflow" });
 
-    expect(screen.getByRole("heading", { name: "Live" })).toBeInTheDocument();
-    expect(screen.getByText(/turn 7/)).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Agent workflow" })).toBeInTheDocument();
+    expect(screen.getAllByText(/turn 7/i).length).toBeGreaterThan(0);
 
-    // The live activity timeline lists the agent's recent actions.
-    expect(screen.getByText(/Recent activity \(4\)/)).toBeInTheDocument();
-    expect(screen.getByText("Editing search-input.tsx")).toBeInTheDocument();
+    // The live workflow is the fixed e2e pipeline, not the raw event stream.
+    expect(screen.getAllByText("Build").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Verify").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Run checks and capture proof").length).toBeGreaterThan(0);
 
     // The live last action shows in the panel.
     expect(screen.getAllByText("Running unit tests + lint").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Timeline")).toBeNull();
   });
 
   it("deep links the Trace pill to the live trace while an agent is running", async () => {
     render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
-    await screen.findByRole("heading", { name: "Live" });
+    await screen.findByRole("heading", { name: "Agent workflow" });
 
     // The live trace (in flight) wins over the ticket's ledger trace.
     expect(MOCK_LIVE.agents[0].traceUrl).not.toBe(running.traceUrl);
@@ -101,22 +104,78 @@ describe("TicketDetail", () => {
     );
   });
 
-  it("shows the live cost in the live panel", async () => {
+  it("shows one low-noise issue actions entry in the header", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    expect(screen.getByRole("button", { name: /actions/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reset plan/i })).toBeNull();
+    expect(screen.queryByText(/symphony issue status/)).toBeNull();
+  });
+
+  it("opens issue actions as grouped choices", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+
+    expect(screen.getByRole("heading", { name: "Issue actions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inspect" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /audit/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reset plan/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rerun/i })).toBeInTheDocument();
+  });
+
+  it("opens status in a concise operational modal", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /status/i }));
+
+    expect(screen.getByRole("heading", { name: "Status" })).toBeInTheDocument();
+    expect(screen.getByText("Refresh the verified state for this issue.")).toBeInTheDocument();
+    expect(screen.getAllByText("Linear").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(running.state).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Refresh status")).toBeNull();
+    expect(screen.queryByText(/symphony issue status/)).toBeNull();
+  });
+
+  it("opens reset as a concise plan without technical command noise", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reset plan/i }));
+
+    expect(screen.getByRole("heading", { name: "Reset Plan" })).toBeInTheDocument();
+    expect(screen.getByText("Preview cleanup for this attempt before anything is changed.")).toBeInTheDocument();
+    expect(screen.getByText("Will preserve")).toBeInTheDocument();
+    expect(screen.getByText("Human work and prod")).toBeInTheDocument();
+    expect(screen.getByText("Reset never runs directly from the first click.")).toBeInTheDocument();
+    expect(screen.getByText("Execute reset")).toBeDisabled();
+    expect(screen.queryByText(/symphony issue reset/)).toBeNull();
+  });
+
+  it("keeps technical cost out of the nontechnical live panel", async () => {
     render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
-    await screen.findByRole("heading", { name: "Live" });
-    expect(screen.getByText(/\$0\.42/)).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Agent workflow" });
+    expect(screen.queryByText(/\$0\.42/)).toBeNull();
   });
 
   it("omits the live panel when no agent is running", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");
-    expect(screen.queryByRole("heading", { name: "Live" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Agent workflow/ })).toBeNull();
   });
 
-  it("hides the empty ledger Timeline and Evidence while an agent is running", async () => {
+  it("hides the ledger Timeline and empty Evidence while an agent is running", async () => {
     const bare: Ticket = { ...running, timeline: [], evidence: [], summary: null, report: null };
     render(<TicketDetail ticket={bare} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
-    await screen.findByRole("heading", { name: "Live" });
+    await screen.findByRole("heading", { name: "Agent workflow" });
 
     expect(screen.queryByText("Timeline")).toBeNull();
     expect(screen.queryByText(/Evidence \(/)).toBeNull();

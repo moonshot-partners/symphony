@@ -13,6 +13,7 @@ export const MOCK_LIVE: LivePayload = {
       issueId: "uuid-956",
       state: "In Progress",
       turn: 7,
+      phase: "verifying",
       lastAction: "Running unit tests + lint",
       lastEvent: "tool_use",
       runtimeSeconds: 142,
