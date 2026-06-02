@@ -137,6 +137,16 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
 
       assert agent["startedAt"] == nil
     end
+
+    test "renders a nil last event as nil and a string event unchanged" do
+      [atom_event] = LiveView.render(snapshot(%{running: [running_entry(%{last_agent_event: :pr_attached})]}))["agents"]
+      [nil_event] = LiveView.render(snapshot(%{running: [running_entry(%{last_agent_event: nil})]}))["agents"]
+      [string_event] = LiveView.render(snapshot(%{running: [running_entry(%{last_agent_event: "assistant"})]}))["agents"]
+
+      assert atom_event["lastEvent"] == "pr_attached"
+      assert nil_event["lastEvent"] == nil
+      assert string_event["lastEvent"] == "assistant"
+    end
   end
 
   describe "render/1 when the orchestrator is unreachable" do

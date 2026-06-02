@@ -13,8 +13,8 @@ defmodule SymphonyElixir.Cockpit.LiveView do
   Pure by construction: `render/1` takes the snapshot map, or the `:timeout` /
   `:unavailable` atoms the snapshot wrapper returns when the orchestrator is
   busy or absent, and returns a fully materialized, `Jason`-encodable map.
-  `DateTime`s become ISO8601 strings, event atoms become strings, and the agent
-  pid and workspace path are dropped — never exposed to the browser.
+  `DateTime`s become ISO8601 strings, the event tag becomes a string, and the
+  agent pid and workspace path are dropped — never exposed to the browser.
   """
 
   @empty %{"available" => false, "agents" => [], "retrying" => [], "polling" => nil}
@@ -81,7 +81,5 @@ defmodule SymphonyElixir.Cockpit.LiveView do
   defp iso8601(_), do: nil
 
   defp stringify(nil), do: nil
-  defp stringify(value) when is_binary(value), do: value
-  defp stringify(value) when is_atom(value), do: Atom.to_string(value)
-  defp stringify(value), do: inspect(value)
+  defp stringify(event), do: to_string(event)
 end
