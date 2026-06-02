@@ -15,6 +15,18 @@ export const LiveTokens = z.object({
   total: z.number(),
 });
 
+export const LivePhase = z.enum([
+  "starting",
+  "planning",
+  "building",
+  "verifying",
+  "reviewing",
+  "handoff",
+  "blocked",
+  "failed",
+  "cancelled",
+]);
+
 // One row of the live activity timeline: the orchestrator event tag, its
 // human one-liner, and when it happened. Newest first.
 export const LiveEvent = z.object({
@@ -28,6 +40,7 @@ export const LiveAgent = z.object({
   issueId: z.string(), // internal tracker id
   state: z.string(), // raw tracker state (pipeline position)
   turn: z.number().int().nullable(),
+  phase: LivePhase,
   lastAction: z.string().nullable(),
   lastEvent: z.string().nullable(),
   runtimeSeconds: z.number().nullable(),
@@ -66,6 +79,7 @@ export const LivePayload = z.object({
 });
 
 export type LiveEvent = z.infer<typeof LiveEvent>;
+export type LivePhase = z.infer<typeof LivePhase>;
 export type LiveAgent = z.infer<typeof LiveAgent>;
 export type LiveRetry = z.infer<typeof LiveRetry>;
 export type LivePayload = z.infer<typeof LivePayload>;

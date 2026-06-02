@@ -4,25 +4,29 @@ import { AgentTimeline } from "./agent-timeline";
 import { MOCK_LIVE } from "../fixtures";
 
 describe("AgentTimeline", () => {
-  it("renders a row per event with its action text", () => {
-    render(<AgentTimeline events={MOCK_LIVE.agents[0].events} />);
-    expect(screen.getByText("Running unit tests + lint")).toBeInTheDocument();
-    expect(screen.getByText("Editing search-input.tsx")).toBeInTheDocument();
-    expect(screen.getByText("Adding a 300ms debounce to the search handler")).toBeInTheDocument();
+  it("renders the fixed e2e agent pipeline", () => {
+    render(<AgentTimeline live={MOCK_LIVE.agents[0]} />);
+    expect(screen.getAllByText("Start").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Plan").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Build").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Verify").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Review").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Handoff").length).toBeGreaterThan(0);
   });
 
-  it("labels the trigger with the event count", () => {
-    render(<AgentTimeline events={MOCK_LIVE.agents[0].events} />);
-    expect(screen.getByText(/Recent activity \(4\)/)).toBeInTheDocument();
+  it("marks the verify step as current when the agent is running checks", () => {
+    render(<AgentTimeline live={MOCK_LIVE.agents[0]} />);
+    expect(screen.getAllByText("current").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Run checks and capture proof").length).toBeGreaterThan(0);
   });
 
-  it("renders nothing when there are no events", () => {
-    const { container } = render(<AgentTimeline events={[]} />);
-    expect(container).toBeEmptyDOMElement();
+  it("labels the mobile trigger with the fixed workflow count", () => {
+    render(<AgentTimeline live={MOCK_LIVE.agents[0]} />);
+    expect(screen.getByRole("button", { name: "6 workflow steps" })).toBeInTheDocument();
   });
 
-  it("falls back to the event tag when an action is null", () => {
-    render(<AgentTimeline events={[{ event: "session_started", action: null, at: null }]} />);
-    expect(screen.getByText("session_started")).toBeInTheDocument();
+  it("moves editing work to the build step", () => {
+    render(<AgentTimeline live={{ ...MOCK_LIVE.agents[0], phase: "building", lastAction: "Editing search-input.tsx", lastEvent: "approval_auto_approved" }} />);
+    expect(screen.getAllByText("Edit code and address the request").length).toBeGreaterThan(0);
   });
 });

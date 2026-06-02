@@ -45,13 +45,17 @@ defmodule SymphonyElixir.Cockpit.LiveView do
   def render(_unavailable), do: @empty
 
   defp agent(entry) do
+    last_action = AgentAction.line(entry.last_agent_message)
+    last_event = stringify(entry.last_agent_event)
+
     %{
       "id" => entry.identifier,
       "issueId" => entry.issue_id,
       "state" => entry.state,
       "turn" => entry.turn_count,
-      "lastAction" => AgentAction.line(entry.last_agent_message),
-      "lastEvent" => stringify(entry.last_agent_event),
+      "phase" => phase(entry.last_agent_event, last_action),
+      "lastAction" => last_action,
+      "lastEvent" => last_event,
       "events" => Enum.map(entry.recent_events, &live_event/1),
       "runtimeSeconds" => entry.runtime_seconds,
       "startedAt" => iso8601(entry.started_at),
@@ -89,6 +93,26 @@ defmodule SymphonyElixir.Cockpit.LiveView do
       "intervalMs" => Map.get(polling, :poll_interval_ms)
     }
   end
+
+  defp phase(nil, _action), do: "starting"
+  defp phase(:session_started, _action), do: "planning"
+  defp phase(:turn_input_required, _action), do: "blocked"
+  defp phase(:approval_required, _action), do: "blocked"
+  defp phase(:turn_failed, _action), do: "failed"
+  defp phase(:turn_ended_with_error, _action), do: "failed"
+  defp phase(:turn_cancelled, _action), do: "cancelled"
+  defp phase(:pr_attached, _action), do: "reviewing"
+  defp phase(:turn_completed, _action), do: "reviewing"
+
+  defp phase(_event, action) when is_binary(action) do
+    cond do
+      String.starts_with?(action, "Running") -> "verifying"
+      String.starts_with?(action, "Editing") -> "building"
+      true -> "building"
+    end
+  end
+
+  defp phase(_event, _action), do: "building"
 
   # One timeline row: the event tag, its one-liner action, and when it
   # happened. The action string is `AgentAction.line/1` so the timeline and
