@@ -7,6 +7,20 @@ describe("LivePayload contract", () => {
     expect(() => LivePayload.parse(MOCK_LIVE)).not.toThrow();
   });
 
+  it("carries the live trace url and cost on the agent", () => {
+    const agent = LivePayload.parse(MOCK_LIVE).agents[0];
+    expect(agent.traceUrl).toBe("https://cloud.langfuse.com/trace/live-trace-956");
+    expect(agent.costUsd).toBe(0.42);
+  });
+
+  it("accepts a null trace url and null cost (before the agent's first update)", () => {
+    const fresh = {
+      ...MOCK_LIVE,
+      agents: [{ ...MOCK_LIVE.agents[0], traceUrl: null, costUsd: null }],
+    };
+    expect(() => LivePayload.parse(fresh)).not.toThrow();
+  });
+
   it("accepts the unavailable shape (orchestrator unreachable)", () => {
     const unavailable = { available: false, agents: [], retrying: [], polling: null };
     expect(() => LivePayload.parse(unavailable)).not.toThrow();

@@ -90,6 +90,24 @@ describe("TicketDetail", () => {
     expect(screen.getAllByText("Running unit tests + lint").length).toBeGreaterThan(0);
   });
 
+  it("deep links the Trace pill to the live trace while an agent is running", async () => {
+    render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Live" });
+
+    // The live trace (in flight) wins over the ticket's ledger trace.
+    expect(MOCK_LIVE.agents[0].traceUrl).not.toBe(running.traceUrl);
+    expect(screen.getByRole("link", { name: /trace/i })).toHaveAttribute(
+      "href",
+      MOCK_LIVE.agents[0].traceUrl!,
+    );
+  });
+
+  it("shows the live cost in the live panel", async () => {
+    render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Live" });
+    expect(screen.getByText(/\$0\.42/)).toBeInTheDocument();
+  });
+
   it("omits the live panel when no agent is running", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");

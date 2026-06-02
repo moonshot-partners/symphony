@@ -28,6 +28,8 @@ export const LiveAgent = z.object({
   tokens: LiveTokens,
   sessionId: z.string().nullable(),
   workerHost: z.string().nullable(),
+  costUsd: z.number().nullable(), // cumulative run cost so far, null before first update
+  traceUrl: z.string().url().nullable(), // deep link to the in-flight Langfuse trace
 });
 
 export const LiveRetry = z.object({
