@@ -89,7 +89,9 @@ export function Board({
                   {tickets.length === 0 ? (
                     <p className="px-1 py-2 text-xs text-muted-foreground">No tickets</p>
                   ) : (
-                    tickets.map((t) => <TicketCard key={t.id} ticket={t} onSelect={onSelect} />)
+                    tickets.map((t) => (
+                      <TicketCard key={t.id} ticket={t} states={data.states} onSelect={onSelect} />
+                    ))
                   )}
                 </div>
               </section>

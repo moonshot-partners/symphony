@@ -17,7 +17,7 @@ describe("fetchBoard — http adapter", () => {
     const { fetchBoard } = await import("./source");
     const board = await fetchBoard();
 
-    expect(board.tickets).toHaveLength(6);
+    expect(board.tickets).toHaveLength(MOCK_BOARD.tickets.length);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/board",
       expect.objectContaining({ cache: "no-store" })

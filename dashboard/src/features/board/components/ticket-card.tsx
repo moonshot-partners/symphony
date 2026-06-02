@@ -1,5 +1,6 @@
 import { Check, CircleAlert, Clock, LoaderCircle, Paperclip } from "lucide-react";
-import type { CiStatus, Ticket } from "../contract";
+import type { CiStatus, Ticket, TrackerStates } from "../contract";
+import { stateBadge, type StateTone } from "../bucket";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -11,13 +12,16 @@ import { Progress } from "@/components/ui/progress";
  */
 export function TicketCard({
   ticket,
+  states,
   onSelect,
 }: {
   ticket: Ticket;
+  states: TrackerStates;
   onSelect: (ticket: Ticket) => void;
 }) {
   const { agent, pr } = ticket;
   const running = agent.status === "running";
+  const badge = stateBadge(ticket, states);
   const pct =
     agent.turn && agent.maxTurns
       ? Math.min(100, Math.round((agent.turn / agent.maxTurns) * 100))
@@ -46,7 +50,7 @@ export function TicketCard({
         <CardHeader className="gap-1.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-xs text-muted-foreground">{ticket.id}</span>
-            {running && (
+            {running ? (
               <Badge
                 variant="outline"
                 className="border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -54,6 +58,8 @@ export function TicketCard({
                 <LoaderCircle className="animate-spin" aria-hidden />
                 Working
               </Badge>
+            ) : (
+              badge && <StatePill label={badge.label} tone={badge.tone} />
             )}
           </div>
           <CardTitle className="text-sm">{ticket.title}</CardTitle>
@@ -80,6 +86,24 @@ export function TicketCard({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// Tones tuned for visual silence: success/attention reuse the card's existing
+// emerald/amber accents; killed is de-emphasized and struck through so a dropped
+// ticket never reads like a delivered one; neutral is a quiet in-flight label.
+const TONE: Record<StateTone, string> = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  killed: "text-muted-foreground line-through decoration-muted-foreground/40",
+  attention: "border-amber-200 bg-amber-50 text-amber-700",
+  neutral: "text-muted-foreground",
+};
+
+function StatePill({ label, tone }: { label: string; tone: StateTone }) {
+  return (
+    <Badge variant="outline" className={`min-w-0 max-w-[62%] shrink truncate font-normal ${TONE[tone]}`}>
+      {label}
+    </Badge>
   );
 }
 
