@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // which is rate limited (and shared with the live agent). Without this, an open
 // cockpit tab would hammer Linear and starve the agent. Serve a recent snapshot
 // instead so Linear is hit at most once per TTL regardless of client count.
-const TTL_MS = 20_000;
+export const BOARD_CACHE_TTL_MS = 2_000;
 let cache: { data: BoardPayloadType; at: number } | null = null;
 
 /** Test-only: reset the module cache between cases. */
@@ -20,10 +20,10 @@ export function __resetBoardCache() {
  * BFF route: proxies the Elixir read-only cockpit API and validates the payload
  * against the board contract before it reaches the browser. Secrets (the API
  * URL and bearer token) stay server-side. Successful responses are cached for
- * TTL_MS; errors are never cached.
+ * BOARD_CACHE_TTL_MS; errors are never cached.
  */
 export async function GET() {
-  if (cache && Date.now() - cache.at < TTL_MS) {
+  if (cache && Date.now() - cache.at < BOARD_CACHE_TTL_MS) {
     return NextResponse.json(cache.data);
   }
 
