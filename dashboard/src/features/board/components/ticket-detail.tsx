@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Markdown } from "@/components/markdown";
 import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
@@ -101,7 +102,7 @@ function Body({ ticket }: { ticket: Ticket }) {
         {ticket.description && (
           <section>
             <SectionLabel>Description</SectionLabel>
-            <MarkdownBlock>{ticket.description}</MarkdownBlock>
+            <Markdown>{ticket.description}</Markdown>
           </section>
         )}
 
@@ -151,26 +152,18 @@ function Body({ ticket }: { ticket: Ticket }) {
         {ticket.summary && (
           <section>
             <SectionLabel>Run summary</SectionLabel>
-            <MarkdownBlock>{ticket.summary}</MarkdownBlock>
+            <Markdown>{ticket.summary}</Markdown>
           </section>
         )}
 
         {ticket.report && (
           <section>
             <SectionLabel>QA report</SectionLabel>
-            <MarkdownBlock>{ticket.report}</MarkdownBlock>
+            <Markdown>{ticket.report}</Markdown>
           </section>
         )}
       </div>
     </>
-  );
-}
-
-function MarkdownBlock({ children }: { children: string }) {
-  return (
-    <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-      {children.trim()}
-    </pre>
   );
 }
 
