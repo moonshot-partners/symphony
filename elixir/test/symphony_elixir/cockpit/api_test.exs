@@ -210,6 +210,44 @@ defmodule SymphonyElixir.Cockpit.ApiTest do
       assert conn.status == 404
       assert Jason.decode!(conn.resp_body) == %{"error" => "not_running"}
     end
+
+    test "POST /issues/:identifier/run queues a manual run" do
+      Application.put_env(:symphony_elixir, :cockpit_run_issue_fn, fn identifier ->
+        send(self(), {:run_issue, identifier})
+        {:ok, %{queued: true, mode: "run", identifier: identifier}}
+      end)
+
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_run_issue_fn) end)
+
+      conn = call(:post, "/issues/SODEV-430/run")
+
+      assert conn.status == 200
+      assert Jason.decode!(conn.resp_body) == %{"queued" => true, "mode" => "run", "identifier" => "SODEV-430"}
+      assert_received {:run_issue, "SODEV-430"}
+    end
+
+    test "POST /issues/:identifier/rerun preserves already-running conflicts" do
+      Application.put_env(:symphony_elixir, :cockpit_rerun_issue_fn, fn _identifier -> {:error, :already_running} end)
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_rerun_issue_fn) end)
+
+      conn = call(:post, "/issues/SODEV-430/rerun")
+
+      assert conn.status == 409
+      assert Jason.decode!(conn.resp_body) == %{"error" => "already_running"}
+    end
+
+    test "POST /issues/:identifier/reset resets local orchestrator pointers" do
+      Application.put_env(:symphony_elixir, :cockpit_reset_issue_fn, fn identifier ->
+        {:ok, %{reset: true, identifier: identifier, preserved: ["workspace"]}}
+      end)
+
+      on_exit(fn -> Application.delete_env(:symphony_elixir, :cockpit_reset_issue_fn) end)
+
+      conn = call(:post, "/issues/SODEV-430/reset")
+
+      assert conn.status == 200
+      assert Jason.decode!(conn.resp_body) == %{"reset" => true, "identifier" => "SODEV-430", "preserved" => ["workspace"]}
+    end
   end
 
   describe "auth" do

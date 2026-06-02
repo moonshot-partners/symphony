@@ -118,7 +118,7 @@ describe("TicketDetail", () => {
     expect(screen.queryByText(/symphony issue status/)).toBeNull();
   });
 
-  it("opens issue actions with only executable choices", async () => {
+  it("opens issue actions with all operational choices", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
     await screen.findByText("Timeline");
 
@@ -126,15 +126,64 @@ describe("TicketDetail", () => {
 
     expect(screen.getByRole("heading", { name: "Issue actions" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Inspect" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /status/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /audit/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /stop run/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /reset plan/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /run agent/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /rerun/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /audit/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /stop run/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reset plan/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rerun/i })).toBeInTheDocument();
   });
 
-  it("shows stop run only when there is a live run", async () => {
+  it("resets the local plan pointers through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reset: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onActionComplete = vi.fn();
+    render(<TicketDetail ticket={running} onClose={() => {}} onActionComplete={onActionComplete} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reset plan/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset plan" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operations/reset-plan",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier: running.id }),
+        })
+      )
+    );
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(screen.getByText("Plan reset.")).toBeInTheDocument();
+  });
+
+  it("audits the issue through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ identifier: running.id }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /audit/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run audit" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operations/audit",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier: running.id }),
+        })
+      )
+    );
+    expect(screen.getByText("Audit complete.")).toBeInTheDocument();
+  });
+
+  it("enables stop run only when there is a live run", async () => {
     render(<TicketDetail ticket={running} live={MOCK_LIVE.agents[0]} onClose={() => {}} />);
     await screen.findByRole("heading", { name: "Agent workflow" });
 
@@ -205,6 +254,54 @@ describe("TicketDetail", () => {
     );
     await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
     expect(screen.getByText("Stop requested.")).toBeInTheDocument();
+  });
+
+  it("queues a new agent run through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ queued: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onActionComplete = vi.fn();
+    render(<TicketDetail ticket={running} onClose={() => {}} onActionComplete={onActionComplete} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /run agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operations/run-agent",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier: running.id }),
+        })
+      )
+    );
+    await waitFor(() => expect(onActionComplete).toHaveBeenCalled());
+    expect(screen.getByText("Agent queued.")).toBeInTheDocument();
+  });
+
+  it("queues a rerun through the cockpit operation endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ queued: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /rerun/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Rerun" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/operations/rerun",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier: running.id }),
+        })
+      )
+    );
+    expect(screen.getByText("Rerun queued.")).toBeInTheDocument();
   });
 
   it("keeps technical cost out of the nontechnical live panel", async () => {

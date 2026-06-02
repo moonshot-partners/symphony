@@ -56,6 +56,26 @@ defmodule SymphonyElixir.Cockpit.Api do
     end
   end
 
+  post "/issues/:identifier/audit" do
+    case audit_issue(identifier) do
+      {:ok, result} -> send_json(conn, 200, stringify_keys(result))
+      {:error, :not_found} -> send_json(conn, 404, %{"error" => "not_found"})
+      {:error, :lookup_failed} -> send_json(conn, 502, %{"error" => "lookup_failed"})
+    end
+  end
+
+  post "/issues/:identifier/run" do
+    send_operation_result(conn, run_issue_source().(identifier))
+  end
+
+  post "/issues/:identifier/rerun" do
+    send_operation_result(conn, rerun_issue_source().(identifier))
+  end
+
+  post "/issues/:identifier/reset" do
+    send_operation_result(conn, reset_issue_source().(identifier))
+  end
+
   get "/evidence/:id/:file" do
     case EvidenceStore.file_path(id, file) do
       nil -> send_json(conn, 404, %{"error" => "not_found"})
@@ -102,6 +122,18 @@ defmodule SymphonyElixir.Cockpit.Api do
 
   defp stop_run_source do
     Application.get_env(:symphony_elixir, :cockpit_stop_run_fn, &Orchestrator.stop_run/1)
+  end
+
+  defp run_issue_source do
+    Application.get_env(:symphony_elixir, :cockpit_run_issue_fn, &Orchestrator.run_issue/1)
+  end
+
+  defp rerun_issue_source do
+    Application.get_env(:symphony_elixir, :cockpit_rerun_issue_fn, &Orchestrator.rerun_issue/1)
+  end
+
+  defp reset_issue_source do
+    Application.get_env(:symphony_elixir, :cockpit_reset_issue_fn, &Orchestrator.reset_issue/1)
   end
 
   @doc false
@@ -187,6 +219,76 @@ defmodule SymphonyElixir.Cockpit.Api do
       {:ok, issues} -> issues
       _ -> []
     end
+  end
+
+  defp audit_issue(identifier) when is_binary(identifier) do
+    normalized = String.upcase(String.trim(identifier))
+
+    with {:ok, issues} <- Tracker.fetch_issues_by_states(audit_states()),
+         issue when not is_nil(issue) <-
+           Enum.find(issues, &(String.upcase(to_string(&1.identifier)) == normalized)) do
+      {:ok,
+       %{
+         identifier: issue.identifier,
+         issue_id: issue.id,
+         state: issue.state,
+         pr_attached: issue.has_pr_attachment,
+         evidence_items: length(EvidenceStore.read(issue.id)),
+         summary_available: RunSummaryStore.read(issue.id) != nil,
+         url: issue.url
+       }}
+    else
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Cockpit audit lookup failed identifier=#{normalized}: #{inspect(reason)}")
+        {:error, :lookup_failed}
+
+      nil ->
+        {:error, :not_found}
+    end
+  end
+
+  defp audit_states do
+    settings = Config.settings!()
+    tracker = settings.tracker
+    cockpit = settings.cockpit
+
+    [
+      tracker.active_states,
+      tracker.terminal_states,
+      [
+        tracker.on_pickup_state,
+        tracker.on_complete_state,
+        tracker.on_pr_merge_state,
+        tracker.on_reject_state,
+        tracker.on_exhaust_state,
+        tracker.on_promote_state
+      ],
+      cockpit.up_next_states,
+      cockpit.done_states,
+      cockpit.in_progress_states
+    ]
+    |> List.flatten()
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.uniq()
+  end
+
+  defp send_operation_result(conn, {:ok, result}) do
+    BoardCache.invalidate()
+    send_json(conn, 200, stringify_keys(result))
+  end
+
+  defp send_operation_result(conn, {:error, :unavailable}),
+    do: send_json(conn, 503, %{"error" => "orchestrator_unavailable"})
+
+  defp send_operation_result(conn, {:error, :not_found}), do: send_json(conn, 404, %{"error" => "not_found"})
+  defp send_operation_result(conn, {:error, :already_running}), do: send_json(conn, 409, %{"error" => "already_running"})
+  defp send_operation_result(conn, {:error, :draining}), do: send_json(conn, 409, %{"error" => "draining"})
+  defp send_operation_result(conn, {:error, :not_dispatchable}), do: send_json(conn, 409, %{"error" => "not_dispatchable"})
+  defp send_operation_result(conn, {:error, :lookup_failed}), do: send_json(conn, 502, %{"error" => "lookup_failed"})
+
+  defp send_operation_result(conn, {:error, reason}) when is_atom(reason) do
+    send_json(conn, 500, %{"error" => Atom.to_string(reason)})
   end
 
   defp read_runs do

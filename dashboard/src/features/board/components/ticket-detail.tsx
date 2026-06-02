@@ -24,9 +24,13 @@ import {
   Activity,
   Check,
   ChevronLeft,
+  ClipboardCheck,
   GitPullRequest,
   LoaderCircle,
+  Play,
   Radar,
+  RefreshCcw,
+  RotateCcw,
   Square,
   Wrench,
 } from "lucide-react";
@@ -242,8 +246,8 @@ function Body({
   );
 }
 
-type OperationKey = "status" | "stop";
-type OperationAction = "refresh" | "stop";
+type OperationKey = "status" | "audit" | "reset" | "run" | "rerun" | "stop";
+type OperationAction = "refresh" | "audit" | "reset" | "run" | "rerun" | "stop";
 
 type IssueOperation = {
   key: OperationKey;
@@ -303,21 +307,14 @@ function IssueOperations({
     setError(null);
 
     try {
-      const response =
-        op.action === "refresh"
-          ? await fetch("/api/operations/refresh", { method: "POST" })
-          : await fetch("/api/operations/stop-run", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ issueId: op.targetIssueId }),
-            });
+      const response = await operationRequest(op);
 
       if (!response.ok) {
         throw new Error(`Operation failed: ${response.status}`);
       }
 
       await onActionComplete?.();
-      setResult(op.action === "refresh" ? "Refresh queued." : "Stop requested.");
+      setResult(operationSuccessMessage(op.action));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Operation failed.");
     } finally {
@@ -426,6 +423,52 @@ function IssueOperations({
   );
 }
 
+function operationRequest(op: IssueOperation) {
+  if (op.action === "refresh") {
+    return fetch("/api/operations/refresh", { method: "POST" });
+  }
+
+  if (op.action === "stop") {
+    return fetch("/api/operations/stop-run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ issueId: op.targetIssueId }),
+    });
+  }
+
+  const endpoint =
+    op.action === "audit"
+      ? "/api/operations/audit"
+      : op.action === "reset"
+        ? "/api/operations/reset-plan"
+        : op.action === "run"
+          ? "/api/operations/run-agent"
+          : "/api/operations/rerun";
+
+  return fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier: op.targetIssueId }),
+  });
+}
+
+function operationSuccessMessage(action: OperationAction) {
+  switch (action) {
+    case "refresh":
+      return "Refresh queued.";
+    case "audit":
+      return "Audit complete.";
+    case "reset":
+      return "Plan reset.";
+    case "run":
+      return "Agent queued.";
+    case "rerun":
+      return "Rerun queued.";
+    case "stop":
+      return "Stop requested.";
+  }
+}
+
 function OperationGroup({
   label,
   operations,
@@ -499,10 +542,80 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       ],
       backendReady: true,
     },
-  ];
-
-  if (running) {
-    operations.push({
+    {
+      key: "audit",
+      label: "Audit",
+      icon: ClipboardCheck,
+      kind: "read",
+      summary: "Review PR, CI, trace, QA report, and evidence readiness.",
+      primaryAction: "Run audit",
+      description: "Check the issue's delivery signals before taking action.",
+      action: "audit",
+      targetIssueId: ticket.id,
+      rows: [
+        { label: "PR", value: hasPr ? `#${ticket.pr?.number} · ${ci}` : "None" },
+        { label: "Trace", value: ticket.traceUrl || live?.traceUrl ? "Available" : "None" },
+        { label: "QA report", value: ticket.report ? "Available" : "None" },
+        { label: "Evidence", value: hasEvidence ? `${ticket.evidence.length} item(s)` : "None" },
+      ],
+      note: "Read-only check; it does not mutate the issue.",
+      backendReady: true,
+    },
+    {
+      key: "reset",
+      label: "Reset plan",
+      icon: RotateCcw,
+      kind: "agent",
+      summary: "Clear the run plan and prepare the issue for a fresh agent attempt.",
+      primaryAction: "Reset plan",
+      description: "Prepare this issue for a clean planning pass.",
+      action: "reset",
+      targetIssueId: ticket.id,
+      rows: [
+        { label: "Will reset", value: "Local run pointers" },
+        { label: "Will preserve", value: "Workspace, PR, comments, evidence" },
+        { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
+      ],
+      note: "Conservative reset only; it does not delete Linear comments, PRs, workspaces, or evidence.",
+      backendReady: true,
+    },
+    {
+      key: "run",
+      label: "Run agent",
+      icon: Play,
+      kind: "agent",
+      summary: running ? "An agent is already running." : "Start a new agent run for this issue.",
+      primaryAction: "Run agent",
+      description: running ? "This issue already has an active agent run." : "Start a new agent run for this issue.",
+      action: "run",
+      targetIssueId: ticket.id,
+      rows: [
+        { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
+        { label: "Target", value: ticket.id },
+        { label: "Mode", value: "Fresh run" },
+      ],
+      note: running ? "Stop the active run before starting another one." : undefined,
+      backendReady: !running,
+    },
+    {
+      key: "rerun",
+      label: "Rerun",
+      icon: RefreshCcw,
+      kind: "agent",
+      summary: "Replay the issue from the current ticket state.",
+      primaryAction: "Rerun",
+      description: "Queue another agent attempt using the current issue state.",
+      action: "rerun",
+      targetIssueId: ticket.id,
+      rows: [
+        { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
+        { label: "Target", value: ticket.id },
+        { label: "Mode", value: "Replay current state" },
+      ],
+      note: running ? "Stop the active run before queueing a rerun." : undefined,
+      backendReady: !running,
+    },
+    {
       key: "stop",
       label: "Stop run",
       icon: Square,
@@ -512,17 +625,19 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       description: running
         ? "Terminate the active agent run without deleting the workspace."
         : "This issue does not have an active agent run.",
-      action: "stop",
+      action: running ? "stop" : undefined,
       targetIssueId: live?.issueId,
       rows: [
         { label: "Run", value: running ? `Live, turn ${live?.turn ?? "unknown"}` : "Idle" },
         { label: "Will stop", value: running ? live?.sessionId ?? "Active session" : "Nothing" },
         { label: "Will preserve", value: "Workspace, PR, comments, evidence" },
       ],
-      note: "Use this when the current run is wrong, stuck, or no longer useful.",
+      note: running
+        ? "Use this when the current run is wrong, stuck, or no longer useful."
+        : "Available only while an agent is running.",
       backendReady: running && Boolean(live?.issueId),
-    });
-  }
+    },
+  ];
 
   return operations;
 }

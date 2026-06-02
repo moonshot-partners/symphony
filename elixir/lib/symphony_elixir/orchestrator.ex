@@ -819,6 +819,42 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @spec run_issue(String.t()) :: {:ok, map()} | {:error, atom()}
+  def run_issue(identifier) when is_binary(identifier), do: run_issue(__MODULE__, identifier)
+
+  @spec run_issue(GenServer.server(), String.t()) :: {:ok, map()} | {:error, atom()}
+  def run_issue(server, identifier) when is_binary(identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:manual_dispatch, identifier, :run}, 15_000)
+    else
+      {:error, :unavailable}
+    end
+  end
+
+  @spec rerun_issue(String.t()) :: {:ok, map()} | {:error, atom()}
+  def rerun_issue(identifier) when is_binary(identifier), do: rerun_issue(__MODULE__, identifier)
+
+  @spec rerun_issue(GenServer.server(), String.t()) :: {:ok, map()} | {:error, atom()}
+  def rerun_issue(server, identifier) when is_binary(identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:manual_dispatch, identifier, :rerun}, 15_000)
+    else
+      {:error, :unavailable}
+    end
+  end
+
+  @spec reset_issue(String.t()) :: {:ok, map()} | {:error, atom()}
+  def reset_issue(identifier) when is_binary(identifier), do: reset_issue(__MODULE__, identifier)
+
+  @spec reset_issue(GenServer.server(), String.t()) :: {:ok, map()} | {:error, atom()}
+  def reset_issue(server, identifier) when is_binary(identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:reset_issue, identifier}, 15_000)
+    else
+      {:error, :unavailable}
+    end
+  end
+
   @spec snapshot() :: map() | :timeout | :unavailable
   def snapshot, do: snapshot(__MODULE__, 15_000)
 
@@ -886,5 +922,136 @@ defmodule SymphonyElixir.Orchestrator do
             cleanup_workspace: false
           }}, state}
     end
+  end
+
+  def handle_call({:manual_dispatch, identifier, mode}, _from, %State{} = state)
+      when is_binary(identifier) and mode in [:run, :rerun] do
+    case manual_issue(identifier, state) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      {:ok, %Issue{} = issue} ->
+        cond do
+          state.drain ->
+            {:reply, {:error, :draining}, state}
+
+          running_identifier?(state, issue.identifier) ->
+            {:reply, {:error, :already_running}, state}
+
+          true ->
+            state = dispatch_issue(state, issue)
+            BoardCache.invalidate()
+            notify_dashboard()
+
+            if Map.has_key?(state.running, issue.id) do
+              {:reply,
+               {:ok,
+                %{
+                  queued: true,
+                  mode: Atom.to_string(mode),
+                  issue_id: issue.id,
+                  identifier: issue.identifier
+                }}, state}
+            else
+              {:reply, {:error, :not_dispatchable}, state}
+            end
+        end
+    end
+  end
+
+  def handle_call({:reset_issue, identifier}, _from, %State{} = state) when is_binary(identifier) do
+    case manual_issue(identifier, state) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      {:ok, %Issue{} = issue} ->
+        was_running = Map.has_key?(state.running, issue.id)
+
+        state =
+          state
+          |> terminate_running_issue(issue.id, false)
+          |> Map.update!(:workpads, &Map.delete(&1, issue.id))
+          |> Map.update!(:completed, &MapSet.delete(&1, issue.id))
+          |> Map.update!(:retry_attempts, &Map.delete(&1, issue.id))
+          |> persist_workpads()
+          |> sync_drain_status(status_path(), drain_flag_path())
+
+        BoardCache.invalidate()
+        notify_dashboard()
+
+        {:reply,
+         {:ok,
+          %{
+            reset: true,
+            issue_id: issue.id,
+            identifier: issue.identifier,
+            stopped_running: was_running,
+            cleared: ["workpad_pointer", "completed_marker", "retry_attempt"],
+            preserved: ["workspace", "pull_request", "linear_comments", "evidence"]
+          }}, state}
+    end
+  end
+
+  defp running_identifier?(%State{running: running}, identifier) when is_binary(identifier) do
+    Enum.any?(running, fn
+      {_issue_id, %{identifier: ^identifier}} -> true
+      _ -> false
+    end)
+  end
+
+  defp running_identifier?(_state, _identifier), do: false
+
+  defp manual_issue(identifier, %State{} = state) do
+    normalized = String.upcase(String.trim(identifier))
+
+    state.running
+    |> Map.values()
+    |> Enum.find_value(fn
+      %{identifier: ^normalized, issue: %Issue{} = issue} -> {:ok, issue}
+      _ -> nil
+    end)
+    |> case do
+      {:ok, %Issue{} = issue} -> {:ok, issue}
+      nil -> fetch_manual_issue(normalized)
+    end
+  end
+
+  defp fetch_manual_issue(identifier) do
+    case Tracker.fetch_issues_by_states(manual_issue_states()) do
+      {:ok, issues} ->
+        case Enum.find(issues, &(String.upcase(to_string(&1.identifier)) == identifier)) do
+          %Issue{} = issue -> {:ok, issue}
+          nil -> {:error, :not_found}
+        end
+
+      {:error, reason} ->
+        Logger.warning("Manual issue lookup failed identifier=#{identifier}: #{inspect(reason)}")
+        {:error, :lookup_failed}
+    end
+  end
+
+  defp manual_issue_states do
+    settings = Config.settings!()
+    tracker = settings.tracker
+    cockpit = settings.cockpit
+
+    [
+      tracker.active_states,
+      tracker.terminal_states,
+      [
+        tracker.on_pickup_state,
+        tracker.on_complete_state,
+        tracker.on_pr_merge_state,
+        tracker.on_reject_state,
+        tracker.on_exhaust_state,
+        tracker.on_promote_state
+      ],
+      cockpit.up_next_states,
+      cockpit.done_states,
+      cockpit.in_progress_states
+    ]
+    |> List.flatten()
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.uniq()
   end
 end
