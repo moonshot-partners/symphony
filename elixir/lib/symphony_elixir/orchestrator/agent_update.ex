@@ -14,7 +14,11 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
   public entry point is `integrate/2`.
   """
 
-  alias SymphonyElixir.Orchestrator.TokenMetrics
+  alias SymphonyElixir.Orchestrator.{AgentAction, TokenMetrics}
+
+  # Last N agent actions kept for the cockpit's live timeline. Bounded so a
+  # long run can't grow the running entry without limit.
+  @max_recent_events 20
 
   @doc """
   Apply a single agent worker update to the existing `running_entry`,
@@ -31,11 +35,13 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
     last_reported_output = Map.get(running_entry, :agent_last_reported_output_tokens, 0)
     last_reported_total = Map.get(running_entry, :agent_last_reported_total_tokens, 0)
     turn_count = Map.get(running_entry, :turn_count, 0)
+    summary = summarize_update(update)
 
     {
       Map.merge(running_entry, %{
         last_agent_timestamp: timestamp,
-        last_agent_message: summarize_update(update),
+        last_agent_message: summary,
+        recent_events: push_event(running_entry, event, summary, timestamp),
         session_id: session_id_for_update(running_entry.session_id, update),
         langfuse_trace_id: trace_id_for_update(Map.get(running_entry, :langfuse_trace_id), update),
         agent_cost_usd: cost_for_update(Map.get(running_entry, :agent_cost_usd), update),
@@ -122,5 +128,12 @@ defmodule SymphonyElixir.Orchestrator.AgentUpdate do
       message: update[:payload] || update[:raw],
       timestamp: update[:timestamp]
     }
+  end
+
+  defp push_event(running_entry, event, summary, timestamp) do
+    entry = %{event: event, action: AgentAction.line(summary), at: timestamp}
+
+    [entry | Map.get(running_entry, :recent_events, [])]
+    |> Enum.take(@max_recent_events)
   end
 end
