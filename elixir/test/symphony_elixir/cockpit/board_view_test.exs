@@ -232,6 +232,41 @@ defmodule SymphonyElixir.Cockpit.BoardViewTest do
       assert b["agent"]["status"] == "idle"
     end
 
+    test "withholds the stale ledger turn / outcome / trace while an agent is running" do
+      issue = %Issue{
+        id: "uuid-r",
+        identifier: "SODEV-15",
+        title: "T",
+        state: "In Progress",
+        repos: [],
+        updated_at: "2026-05-30T00:00:00Z"
+      }
+
+      # The ledger row is the previous finished run; it must not leak onto the
+      # card while the agent is running again (live data comes from /live).
+      runs = [%{"ticket" => "SODEV-15", "turns" => 9, "langfuse_trace_id" => "old", "outcome" => "pr_open"}]
+
+      [ticket] =
+        BoardView.assemble([issue], runs, tracker(), running: ["uuid-r"], trace_base: "https://lf/t/")["tickets"]
+
+      assert ticket["agent"]["status"] == "running"
+      assert ticket["agent"]["turn"] == nil
+      assert ticket["agent"]["lastAction"] == nil
+      assert ticket["traceUrl"] == nil
+    end
+
+    test "still surfaces the ledger turn / outcome / trace once the agent is idle" do
+      issue = %Issue{id: "uuid-i", identifier: "SODEV-16", title: "T", state: "In Code Review", repos: []}
+      runs = [%{"ticket" => "SODEV-16", "turns" => 9, "langfuse_trace_id" => "abc", "outcome" => "pr_open"}]
+
+      [ticket] = BoardView.assemble([issue], runs, tracker(), trace_base: "https://lf/t/")["tickets"]
+
+      assert ticket["agent"]["status"] == "idle"
+      assert ticket["agent"]["turn"] == 9
+      assert ticket["agent"]["lastAction"] == "pr_open"
+      assert ticket["traceUrl"] == "https://lf/t/abc"
+    end
+
     test "ignores unusable ledger fields without fabricating data" do
       issue = %Issue{identifier: "SODEV-3", title: "T3", state: "On Hold", url: "u", repos: []}
 

@@ -88,6 +88,12 @@ defmodule SymphonyElixir.Cockpit.BoardView do
     status = if MapSet.member?(running, issue.id), do: "running", else: "idle"
     manifest = Map.get(evidence, issue.id, %{})
 
+    # A running agent's ledger row describes its PREVIOUS finished run, so its
+    # turn / outcome / trace would misreport the work in flight. The live
+    # in-flight values come from the /live snapshot, merged client-side; here we
+    # withhold the stale ledger-derived fields while an agent is running.
+    ledger_run = if status == "running", do: nil, else: run
+
     %{
       "id" => issue.identifier,
       "title" => issue.title,
@@ -95,17 +101,17 @@ defmodule SymphonyElixir.Cockpit.BoardView do
       "state" => issue.state,
       "agent" => %{
         "status" => status,
-        "turn" => run && int_field(run, "turns"),
+        "turn" => ledger_run && int_field(ledger_run, "turns"),
         "maxTurns" => nil,
         "costUsd" => nil,
-        "lastAction" => run && string_field(run, "outcome")
+        "lastAction" => ledger_run && string_field(ledger_run, "outcome")
       },
       "pr" => pr(issue, ci),
       "evidence" => evidence_items(issue.id, manifest),
       "report" => Map.get(manifest, "report"),
       "summary" => Map.get(summary, issue.id),
       "url" => issue.url,
-      "traceUrl" => trace_url(run, trace_base),
+      "traceUrl" => trace_url(ledger_run, trace_base),
       "updatedAt" => issue.updated_at || ""
     }
   end
