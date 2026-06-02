@@ -16,23 +16,20 @@ import {
   Check,
   ExternalLink,
   GitPullRequest,
-  Image as ImageIcon,
   LoaderCircle,
-  Video,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Markdown } from "@/components/markdown";
 import { Separator } from "@/components/ui/separator";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+  type AttachmentData,
+} from "@/components/ai-elements/attachments";
+import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task";
 import type { Evidence } from "../contract";
 
 export function TicketDetail({
@@ -146,9 +143,11 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
             {steps.length === 0 ? (
               <p className="text-sm text-muted-foreground">No activity yet.</p>
             ) : (
-              <ol className="space-y-3">
+              <Task defaultOpen>
+                <TaskTrigger title={`${steps.length} ${steps.length === 1 ? "step" : "steps"}`} />
+                <TaskContent>
                 {steps.map((s, i) => (
-                  <li key={i} className="flex gap-2.5">
+                  <TaskItem key={i} className="flex items-start gap-2.5">
                     {s.status === "active" ? (
                       <LoaderCircle
                         className="mt-0.5 size-3.5 flex-none animate-spin text-emerald-600"
@@ -163,9 +162,10 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
                         <p className="font-mono text-xs text-muted-foreground">turn {s.turn}</p>
                       )}
                     </div>
-                  </li>
+                  </TaskItem>
                 ))}
-              </ol>
+                </TaskContent>
+              </Task>
             )}
           </section>
           )}
@@ -176,11 +176,11 @@ function Body({ ticket, live }: { ticket: Ticket; live?: LiveAgent }) {
             {ticket.evidence.length === 0 ? (
               <p className="text-sm text-muted-foreground">No evidence captured.</p>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <Attachments variant="list" className="w-full">
                 {ticket.evidence.map((item) => (
                   <EvidenceThumb key={item.id} item={item} />
                 ))}
-              </div>
+              </Attachments>
             )}
           </section>
           )}
@@ -240,81 +240,36 @@ function LinkPill({
 }
 
 function EvidenceThumb({ item }: { item: Evidence }) {
+  const attachment = evidenceToAttachment(item);
+
   return (
-    <Dialog>
-      <DialogTrigger className="group block overflow-hidden rounded border text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <EvidenceTile item={item} className="aspect-video text-[10px]" />
-        <span className="block truncate px-1.5 py-1 text-[11px] text-muted-foreground">
-          {item.name}
-        </span>
-      </DialogTrigger>
-      <DialogContent
-        showCloseButton={false}
-        className="fixed inset-0 top-0 left-0 z-50 grid h-screen w-screen max-w-none translate-x-0 translate-y-0 grid-rows-[auto_1fr] gap-4 rounded-none border-0 bg-neutral-950/95 p-5 text-white ring-0 sm:max-w-none"
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <DialogTitle className="truncate text-sm text-white">{item.name}</DialogTitle>
-            <DialogDescription className="text-xs text-white/60">
-              {item.kind === "video" ? "video" : "image"}
-            </DialogDescription>
-          </div>
-          <DialogClose
-            aria-label="Close"
-            className="rounded-md p-1.5 text-white/80 outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white"
-          >
-            <X className="size-5" aria-hidden />
-          </DialogClose>
-        </div>
-        <div className="flex min-h-0 items-center justify-center">
-          <EvidenceTile item={item} large className="max-h-full max-w-full" />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <a
+      href={item.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block w-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <Attachment data={attachment}>
+        <AttachmentPreview />
+        <AttachmentInfo showMediaType />
+      </Attachment>
+    </a>
   );
 }
 
-function EvidenceTile({
-  item,
-  className = "",
-  large = false,
-}: {
-  item: Evidence;
-  className?: string;
-  large?: boolean;
-}) {
-  const hasMedia = item.url && item.url !== "#";
-  if (hasMedia && item.kind === "image") {
-    return (
-      // Evidence URLs are arbitrary/dynamic from the backend; next/image remote
-      // config is impractical here, so a plain img is intentional.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={item.url}
-        alt={item.name}
-        className={`${large ? "max-h-full max-w-full object-contain" : "w-full object-cover"} ${className}`}
-      />
-    );
-  }
-  if (hasMedia && item.kind === "video") {
-    return (
-      <video
-        src={item.url}
-        controls
-        className={`${large ? "max-h-full max-w-full" : "w-full"} ${className}`}
-      />
-    );
-  }
-  const tint = large
-    ? "text-white/60"
-    : item.kind === "video"
-      ? "bg-rose-50 text-rose-800"
-      : "bg-sky-50 text-sky-800";
-  const Icon = item.kind === "video" ? Video : ImageIcon;
-  return (
-    <div className={`flex flex-col items-center justify-center gap-2 ${tint} ${className}`}>
-      <Icon className={large ? "size-12" : "size-4"} aria-hidden />
-      {large && <span className="text-sm font-normal">No preview available</span>}
-    </div>
-  );
+function evidenceToAttachment(item: Evidence): AttachmentData {
+  return {
+    id: item.id,
+    type: "file",
+    filename: item.name,
+    mediaType: mediaTypeFor(item),
+    url: item.url === "#" ? "" : item.url,
+  };
+}
+
+function mediaTypeFor(item: Evidence): string {
+  if (item.kind === "video") return item.name.endsWith(".mp4") ? "video/mp4" : "video/webm";
+  if (item.name.endsWith(".jpg") || item.name.endsWith(".jpeg")) return "image/jpeg";
+  if (item.name.endsWith(".gif")) return "image/gif";
+  return "image/png";
 }
