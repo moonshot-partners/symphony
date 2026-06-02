@@ -149,6 +149,73 @@ defmodule SymphonyElixir.Cockpit.LiveViewTest do
     end
   end
 
+  # last_agent_message is summarize_update/1's map (%{event, message, ...}) whose
+  # `message` is the raw agent stream payload, not a clean string. A raw map
+  # reaching lastAction 502s the BFF, so it must always coerce to a string.
+  defp action_for(msg) do
+    [agent] = LiveView.render(snapshot(%{running: [running_entry(%{last_agent_message: msg})]}))["agents"]
+    agent["lastAction"]
+  end
+
+  describe "render/1 lastAction coercion" do
+    test "passes a plain string action through" do
+      assert action_for("Running unit tests") == "Running unit tests"
+    end
+
+    test "extracts the command from a JSON-RPC tool-call summary" do
+      msg = %{
+        event: "notification",
+        message: %{
+          "method" => "item/commandExecution/requestApproval",
+          "params" => %{"command" => "mix test\nignored second line"}
+        },
+        timestamp: "2026-06-02T17:04:43Z"
+      }
+
+      assert action_for(msg) == "Running mix test"
+    end
+
+    test "falls back to the JSON-RPC method's last segment" do
+      msg = %{event: "notification", message: %{"method" => "item/agentMessage/delta"}, timestamp: nil}
+      assert action_for(msg) == "delta"
+    end
+
+    test "falls back to the event tag when the message has nothing usable" do
+      assert action_for(%{event: "assistant", message: nil, timestamp: nil}) == "assistant"
+    end
+
+    test "yields nil (never a raw map) for an unrecognized message and no event" do
+      assert action_for(%{event: nil, message: %{"unknown" => "shape"}, timestamp: nil}) == nil
+    end
+
+    test "always produces Jason-encodable output for a raw map message" do
+      payload = LiveView.render(snapshot(%{running: [running_entry(%{last_agent_message: %{event: "x", message: %{"a" => 1}}})]}))
+      assert is_binary(Jason.encode!(payload))
+    end
+
+    test "clips a very long action to 80 characters" do
+      clipped = action_for(String.duplicate("x", 200))
+      assert String.length(clipped) == 80
+      assert String.ends_with?(clipped, "…")
+    end
+
+    test "uses a plain-text message carried inside the summary map" do
+      assert action_for(%{event: "assistant", message: "Thinking about the fix", timestamp: nil}) ==
+               "Thinking about the fix"
+    end
+
+    test "yields nil when there is no last message at all" do
+      assert action_for(nil) == nil
+    end
+
+    test "passes a string activity timestamp through unchanged" do
+      [agent] =
+        LiveView.render(snapshot(%{running: [running_entry(%{last_agent_timestamp: "2026-06-02T17:04:43Z"})]}))["agents"]
+
+      assert agent["lastActivityAt"] == "2026-06-02T17:04:43Z"
+    end
+  end
+
   describe "render/1 when the orchestrator is unreachable" do
     test ":timeout yields an empty payload flagged unavailable" do
       assert LiveView.render(:timeout) == %{
