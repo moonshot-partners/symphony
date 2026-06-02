@@ -89,14 +89,20 @@ export function TicketCard({
   );
 }
 
-// Tones tuned for visual silence: success/attention reuse the card's existing
-// emerald/amber accents; killed is de-emphasized and struck through so a dropped
-// ticket never reads like a delivered one; neutral is a quiet in-flight label.
+// One soft hue per lifecycle phase, matched to each column's header colour so
+// the board reads as a calm, coherent colour map rather than a grey wall: zinc
+// for waiting, emerald for in progress, blue for review, violet for staging,
+// amber for attention, emerald for done. Tints stay light (bg-50) to keep the
+// signal quiet. Killed states recede in struck-through grey so a dropped ticket
+// never reads like the delivered ones beside it.
 const TONE: Record<StateTone, string> = {
-  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  queued: "border-zinc-200 bg-zinc-50 text-zinc-600",
+  running: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  review: "border-blue-200 bg-blue-50 text-blue-700",
+  staging: "border-violet-200 bg-violet-50 text-violet-700",
+  blocked: "border-amber-200 bg-amber-50 text-amber-700",
+  done: "border-emerald-200 bg-emerald-50 text-emerald-700",
   killed: "text-muted-foreground line-through decoration-muted-foreground/40",
-  attention: "border-amber-200 bg-amber-50 text-amber-700",
-  neutral: "text-muted-foreground",
 };
 
 function StatePill({ label, tone }: { label: string; tone: StateTone }) {

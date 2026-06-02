@@ -30,19 +30,22 @@ export function columnFor(ticket: Ticket, states: TrackerStates): ColumnKey {
 }
 
 /**
- * The tone of a card's state pill. A column groups several raw tracker states
- * (e.g. Done holds Done, Cancelled, Approved QA), so the pill's tone is what
- * tells them apart at a glance: a finished win reads differently from a kill.
+ * The tone of a card's state pill. It mirrors the lifecycle column, so each
+ * phase carries one consistent hue (waiting, in progress, in review, staging,
+ * attention, done) — the same colour the column header already uses. The lone
+ * exception is `killed`: dropped terminals (Cancelled, Duplicate) share the Done
+ * column with real successes, so they recede in muted grey instead of reading
+ * green. Colour encodes the phase; the text label tells apart states that share
+ * one column.
  */
-export type StateTone = "success" | "killed" | "attention" | "neutral";
+export type StateTone = ColumnKey | "killed";
 
-// Terminal states whose name signals the work was dropped, not delivered. These
-// share the Done column with genuine successes, so they get a muted, struck tone.
+// Terminal states whose name signals the work was dropped, not delivered.
 const KILLED = /cancel|duplicat|abandon|reject|won'?t/i;
 
 /**
  * The raw tracker state to surface on a card, with a tone derived from the
- * tracker config. Returns null when the state is already obvious from another
+ * lifecycle column. Returns null when the state is already obvious from another
  * cue: a running agent shows the "Working" badge, so its state is redundant.
  */
 export function stateBadge(
@@ -52,11 +55,9 @@ export function stateBadge(
   if (ticket.agent.status === "running") return null;
 
   const s = ticket.state;
-  if (states.terminal.includes(s) || (states.doneExtra ?? []).includes(s)) {
-    return { label: s, tone: KILLED.test(s) ? "killed" : "success" };
-  }
-  if (s === states.onReject) return { label: s, tone: "attention" };
-  return { label: s, tone: "neutral" };
+  const col = columnFor(ticket, states);
+  if (col === "done" && KILLED.test(s)) return { label: s, tone: "killed" };
+  return { label: s, tone: col };
 }
 
 /** Group every ticket into its column. Pure: same input -> same output. */

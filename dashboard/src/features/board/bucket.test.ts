@@ -81,29 +81,25 @@ describe("bucketTickets", () => {
 describe("stateBadge", () => {
   const states = MOCK_BOARD.states;
 
-  it("tags a successful terminal state green", () => {
-    expect(stateBadge(ticket("T", "Done"), states)).toEqual({ label: "Done", tone: "success" });
+  it("tones each state to its lifecycle column", () => {
+    const cases: Array<[string, string]> = [
+      ["Done", "done"],
+      ["Approved QA", "done"],
+      ["On Hold", "blocked"],
+      ["Todo", "queued"],
+      ["Backlog", "queued"],
+      ["In Code Review", "review"],
+      ["Promote to Staging", "staging"],
+      ["In Development", "running"],
+    ];
+    for (const [state, tone] of cases) {
+      expect(stateBadge(ticket("T", state), states)).toEqual({ label: state, tone });
+    }
   });
 
-  it("tags a done-extra state green", () => {
-    expect(stateBadge(ticket("T", "Approved QA"), states)).toEqual({
-      label: "Approved QA",
-      tone: "success",
-    });
-  });
-
-  it("tags a dropped terminal state (Cancelled / Duplicate) as killed", () => {
+  it("recedes a dropped terminal state (Cancelled / Duplicate) into killed grey", () => {
     expect(stateBadge(ticket("T", "Cancelled"), states)?.tone).toBe("killed");
     expect(stateBadge(ticket("T", "Duplicate"), states)?.tone).toBe("killed");
-  });
-
-  it("tags the reject state as needing attention", () => {
-    expect(stateBadge(ticket("T", "On Hold"), states)?.tone).toBe("attention");
-  });
-
-  it("tags an in-flight state neutral", () => {
-    expect(stateBadge(ticket("T", "Todo"), states)?.tone).toBe("neutral");
-    expect(stateBadge(ticket("T", "In Code Review"), states)?.tone).toBe("neutral");
   });
 
   it("returns null while an agent is running (the Working badge covers it)", () => {
