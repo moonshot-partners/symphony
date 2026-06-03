@@ -222,19 +222,10 @@ defmodule SymphonyElixir.Orchestrator do
 
         enforce_opts = [terminate_fn: &terminate_running_issue/3]
 
-        case GateCEnforcement.enforce(gate_c_result, state, issue_id, updated_running_entry, enforce_opts) do
-          {:halted, state} ->
-            state =
-              state
-              |> AgentTotals.apply_token_delta(token_delta)
-              |> AgentTotals.apply_rate_limits(update)
+        {:continue, state} =
+          GateCEnforcement.enforce(gate_c_result, state, issue_id, updated_running_entry, enforce_opts)
 
-            notify_dashboard()
-            {:noreply, state}
-
-          {:continue, state} ->
-            apply_plan_grounding(state, issue_id, updated_running_entry, update, token_delta, enforce_opts)
-        end
+        apply_plan_grounding(state, issue_id, updated_running_entry, update, token_delta, enforce_opts)
     end
   end
 
@@ -318,37 +309,28 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
-  # Gate C passed: post the turn-1 understanding.md artifact, then run the
-  # plan-grounding gate. A grounded plan pins the AC artifacts and keeps the
-  # run alive; an ungrounded plan halts it.
+  # Gate C passed or warned: post the turn-1 understanding.md artifact, then
+  # run the plan-grounding soft gate. Warnings are diagnostic; the run stays
+  # alive and final acceptance happens through PR/tests/evidence.
   defp apply_plan_grounding(state, issue_id, running_entry, update, token_delta, enforce_opts) do
     TurnArtifacts.maybe_post(running_entry, update, issue_id)
     running_entry = TurnSoftCap.maybe_emit(running_entry, update, issue_id)
 
-    case PlanGroundingGate.enforce(state, issue_id, running_entry, update, enforce_opts) do
-      {:halted, state} ->
-        state =
-          state
-          |> AgentTotals.apply_token_delta(token_delta)
-          |> AgentTotals.apply_rate_limits(update)
+    {:continue, state, running_entry} =
+      PlanGroundingGate.enforce(state, issue_id, running_entry, update, enforce_opts)
 
-        notify_dashboard()
-        {:noreply, state}
+    running_entry =
+      running_entry
+      |> ArtifactPin.pin(issue_id, "AC Extracted")
+      |> ArtifactPin.pin(issue_id, "AC Evidence")
 
-      {:continue, state, running_entry} ->
-        running_entry =
-          running_entry
-          |> ArtifactPin.pin(issue_id, "AC Extracted")
-          |> ArtifactPin.pin(issue_id, "AC Evidence")
+    state =
+      state
+      |> AgentTotals.apply_token_delta(token_delta)
+      |> AgentTotals.apply_rate_limits(update)
 
-        state =
-          state
-          |> AgentTotals.apply_token_delta(token_delta)
-          |> AgentTotals.apply_rate_limits(update)
-
-        notify_dashboard()
-        {:noreply, %{state | running: Map.put(state.running, issue_id, running_entry)}}
-    end
+    notify_dashboard()
+    {:noreply, %{state | running: Map.put(state.running, issue_id, running_entry)}}
   end
 
   defp maybe_dispatch(%State{} = state) do

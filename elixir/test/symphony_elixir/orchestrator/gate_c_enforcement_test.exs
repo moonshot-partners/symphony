@@ -80,8 +80,8 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
     end
   end
 
-  describe "enforce/5 — {:violation, reason} hard halt" do
-    test "posts parked comment, terminates running, moves state, marks completed" do
+  describe "enforce/5 — {:violation, reason} soft warning" do
+    test "posts diagnostic summary and keeps the agent running" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
         tracker_on_reject_state: "On Hold / Blocked"
@@ -97,7 +97,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
           claimed: MapSet.new(["issue-gce-1"])
         })
 
-      assert {:halted, halted_state} =
+      assert {:continue, ^state} =
                GateCEnforcement.enforce(
                  {:violation, :missing_header},
                  state,
@@ -106,19 +106,18 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
                  terminate_fn: recording_terminate_fn(self())
                )
 
-      assert_receive {:terminate_called, "issue-gce-1", false}, 500
+      refute_receive {:terminate_called, _, _}, 100
 
       body = RunSummaryStore.read("issue-gce-1")
-      assert body =~ "Gate C violation"
-      assert body =~ "issue parked"
+      assert body =~ "Gate C warning"
+      assert body =~ "allowed to continue"
       assert body =~ "missing_header"
       assert body =~ "ISS-1"
 
-      assert_receive {:memory_tracker_state_update, "issue-gce-1", "On Hold / Blocked"}, 500
-
-      assert MapSet.member?(halted_state.completed, "issue-gce-1")
-      refute Map.has_key?(halted_state.running, "issue-gce-1")
-      refute MapSet.member?(halted_state.claimed, "issue-gce-1")
+      refute_receive {:memory_tracker_state_update, _, _}, 100
+      refute MapSet.member?(state.completed, "issue-gce-1")
+      assert Map.has_key?(state.running, "issue-gce-1")
+      assert MapSet.member?(state.claimed, "issue-gce-1")
     end
 
     test ":empty_message reason renders in comment" do
@@ -132,7 +131,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       entry = running_entry()
       state = empty_state(%{running: %{"issue-gce-1" => entry}})
 
-      assert {:halted, _} =
+      assert {:continue, ^state} =
                GateCEnforcement.enforce(
                  {:violation, :empty_message},
                  state,
@@ -145,7 +144,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       assert body =~ "empty_message"
     end
 
-    test "skips state move when running_entry.issue is nil but still posts comment + terminates" do
+    test "running_entry.issue nil still posts diagnostic summary without halting" do
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "memory",
         tracker_on_reject_state: "On Hold / Blocked"
@@ -156,7 +155,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       entry = running_entry(%{issue: nil})
       state = empty_state(%{running: %{"issue-gce-1" => entry}})
 
-      assert {:halted, halted_state} =
+      assert {:continue, ^state} =
                GateCEnforcement.enforce(
                  {:violation, :missing_header},
                  state,
@@ -165,11 +164,10 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
                  terminate_fn: recording_terminate_fn(self())
                )
 
-      assert_receive {:terminate_called, "issue-gce-1", false}, 500
-      assert RunSummaryStore.read("issue-gce-1") =~ "Gate C violation"
-      refute_receive {:memory_tracker_state_update, _, _}, 200
-
-      assert MapSet.member?(halted_state.completed, "issue-gce-1")
+      refute_receive {:terminate_called, _, _}, 100
+      assert RunSummaryStore.read("issue-gce-1") =~ "Gate C warning"
+      refute_receive {:memory_tracker_state_update, _, _}, 100
+      refute MapSet.member?(state.completed, "issue-gce-1")
     end
 
     test "tolerates running_entry without :identifier — falls back to issue_id in comment" do
@@ -183,7 +181,7 @@ defmodule SymphonyElixir.Orchestrator.GateCEnforcementTest do
       entry = running_entry() |> Map.delete(:identifier)
       state = empty_state(%{running: %{"issue-gce-1" => entry}})
 
-      assert {:halted, _} =
+      assert {:continue, ^state} =
                GateCEnforcement.enforce(
                  {:violation, :missing_header},
                  state,
