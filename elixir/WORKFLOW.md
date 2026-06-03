@@ -83,6 +83,7 @@ agent:
 agent_runtime:
   # Default agent backend = Python shim around claude-agent-sdk.
   # See priv/agent_shim/README.md for setup (uv sync) and ANTHROPIC_OAUTH_TOKEN config.
+  provider: claude
   command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
   approval_policy: never
   thread_sandbox: workspace-write

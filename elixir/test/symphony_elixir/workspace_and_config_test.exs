@@ -1236,6 +1236,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert config.worker.max_concurrent_agents_per_host == nil
     assert config.agent.max_concurrent_agents == 10
+    assert config.agent_runtime.provider == "claude"
     assert config.agent_runtime.command == "python -m symphony_agent_shim"
 
     assert config.agent_runtime.approval_policy == %{
@@ -1286,6 +1287,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Config.settings!().agent_runtime.command ==
              "codex --config 'model=\"gpt-5.5\"' app-server"
+
+    assert Config.settings!().agent_runtime.provider == "codex"
 
     write_workflow_file!(Workflow.workflow_file_path(),
       agent_runtime_docker_image: "schoolsout-base:latest"
@@ -1428,6 +1431,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), agent_runtime_command: "codex app-server")
     assert Config.settings!().agent_runtime.command == "codex app-server"
+    assert Config.settings!().agent_runtime.provider == "codex"
   end
 
   test "config resolves $VAR references for env-backed secret and path values" do
@@ -1698,6 +1702,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
                  })
 
         assert settings.agent_runtime.command == "legacy-codex app-server"
+        assert settings.agent_runtime.provider == "codex"
       end)
 
     assert log =~ "deprecated"
@@ -1714,10 +1719,34 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
                  })
 
         assert settings.agent_runtime.command == "winning-runtime"
+        assert settings.agent_runtime.provider == "custom"
       end)
 
     assert log =~ "both"
     assert log =~ "agent_runtime"
+  end
+
+  test "schema parse accepts explicit agent runtime provider for Claude or Codex switching" do
+    assert {:ok, claude_settings} =
+             Schema.parse(%{
+               "agent_runtime" => %{
+                 "provider" => "Claude",
+                 "command" => "custom-runner app-server"
+               }
+             })
+
+    assert claude_settings.agent_runtime.provider == "claude"
+    assert claude_settings.agent_runtime.command == "custom-runner app-server"
+
+    assert {:ok, codex_settings} =
+             Schema.parse(%{
+               "agent_runtime" => %{
+                 "provider" => "codex",
+                 "command" => "codex --config 'model=\"gpt-5\"' app-server"
+               }
+             })
+
+    assert codex_settings.agent_runtime.provider == "codex"
   end
 
   test "schema resolves sandbox policies from explicit and default workspaces" do

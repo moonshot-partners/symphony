@@ -148,6 +148,7 @@ defmodule SymphonyElixir.Config.Schema do
     agent_runtime = %{
       settings.agent_runtime
       | approval_policy: normalize_keys(settings.agent_runtime.approval_policy),
+        provider: normalize_agent_runtime_provider(settings.agent_runtime.provider, settings.agent_runtime.command),
         turn_sandbox_policy: normalize_optional_map(settings.agent_runtime.turn_sandbox_policy)
     }
 
@@ -168,6 +169,29 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp normalize_key(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_key(value), do: to_string(value)
+
+  defp normalize_agent_runtime_provider(provider, _command) when is_binary(provider) do
+    provider
+    |> String.trim()
+    |> String.downcase()
+    |> case do
+      "" -> "custom"
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_agent_runtime_provider(_provider, command) when is_binary(command) do
+    normalized_command = String.downcase(command)
+
+    cond do
+      String.contains?(normalized_command, "codex") -> "codex"
+      String.contains?(normalized_command, "claude") -> "claude"
+      String.contains?(normalized_command, "symphony_agent_shim") -> "claude"
+      true -> "custom"
+    end
+  end
+
+  defp normalize_agent_runtime_provider(_provider, _command), do: "custom"
 
   defp drop_nil_values(value) when is_map(value) do
     Enum.reduce(value, %{}, fn {key, nested}, acc ->
