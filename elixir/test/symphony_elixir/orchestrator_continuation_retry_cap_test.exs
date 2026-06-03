@@ -162,7 +162,7 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
   end
 
   describe "retry cap exhaustion — tracker side effects" do
-    test "when non-normal exit hits max_retries, orchestrator marks completed, posts comment, moves to on_reject_state" do
+    test "when custom retry_cap gate is disabled, orchestrator posts comment and completes without state transition" do
       max_retries = Config.settings!().agent.max_retries
       issue_id = "issue-halt-side-effects"
       ref = make_ref()
@@ -196,6 +196,52 @@ defmodule SymphonyElixir.OrchestratorContinuationRetryCapTest do
       send(pid, {:DOWN, ref, :process, self(), :boom})
 
       # async Task.Supervisor task posts comment + state transition
+      assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
+      assert body =~ "Retry cap reached"
+
+      refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
+
+      state = :sys.get_state(pid)
+      assert MapSet.member?(state.completed, issue_id), "issue must be in completed after halt"
+      refute Map.has_key?(state.retry_attempts, issue_id)
+    end
+
+    test "when custom retry_cap gate is enabled, orchestrator moves to on_reject_state" do
+      System.put_env("SYMPHONY_ENABLE_ORCHESTRATOR_GATES", "retry_cap")
+      on_exit(fn -> System.delete_env("SYMPHONY_ENABLE_ORCHESTRATOR_GATES") end)
+
+      max_retries = Config.settings!().agent.max_retries
+      issue_id = "issue-halt-side-effects-opt-in"
+      ref = make_ref()
+
+      write_workflow_file!(
+        Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        tracker_on_reject_state: "On Hold / Blocked"
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+      pid = start_orchestrator(Module.concat(__MODULE__, :HaltSideEffectsOptIn))
+
+      initial_state = :sys.get_state(pid)
+
+      entry =
+        running_entry(ref,
+          issue_id: issue_id,
+          identifier: "MT-HALT-OPT-IN",
+          retry_attempt: max_retries
+        )
+
+      :sys.replace_state(pid, fn _ ->
+        initial_state
+        |> Map.put(:running, %{issue_id => entry})
+        |> Map.put(:claimed, MapSet.new([issue_id]))
+        |> Map.put(:retry_attempts, %{})
+      end)
+
+      send(pid, {:DOWN, ref, :process, self(), :boom})
+
       assert_receive {:memory_tracker_comment, ^issue_id, body}, 1_000
       assert body =~ "Retry cap reached"
 

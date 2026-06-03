@@ -14,6 +14,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     cockpit_store = Path.join(System.tmp_dir!(), "wp-cockpit-#{System.unique_integer([:positive])}")
     System.put_env("SYMPHONY_COCKPIT_EVIDENCE_DIR", Path.join(cockpit_store, "evidence"))
     System.put_env("SYMPHONY_COCKPIT_SUMMARY_DIR", Path.join(cockpit_store, "summaries"))
+    System.put_env("SYMPHONY_ENABLE_PR_GATES", "all")
 
     # Default required-checks injection so existing tests (and new ones that
     # don't care about CI routing) don't shell out to `gh pr view`.
@@ -46,6 +47,7 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
       Application.delete_env(:symphony_elixir, :pr_changed_files_fn)
       System.delete_env("SYMPHONY_COCKPIT_EVIDENCE_DIR")
       System.delete_env("SYMPHONY_COCKPIT_SUMMARY_DIR")
+      System.delete_env("SYMPHONY_ENABLE_PR_GATES")
       File.rm_rf(cockpit_store)
     end)
 
@@ -153,6 +155,38 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSyncTest do
     assert ^state = WorkpadPrSync.sync(state, issue_id, self())
 
     assert_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 1_000
+  end
+
+  test "routes to on_complete_state by default when custom PR gates are disabled" do
+    System.delete_env("SYMPHONY_ENABLE_PR_GATES")
+    issue_id = "issue-custom-gates-disabled"
+
+    running = %{
+      issue_id => %{
+        issue: %Issue{id: issue_id, identifier: "WP-NOGATE", state: "Scheduled", repos: []},
+        identifier: "WP-NOGATE",
+        workpad_comment_id: "wp-comment-nogate",
+        workspace_path: "/tmp/nonexistent"
+      }
+    }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      tracker_active_states: ["Scheduled", "In Progress"],
+      tracker_terminal_states: ["Closed", "Done", "Cancelled"],
+      tracker_on_complete_state: "In Code Review",
+      tracker_on_reject_state: "On Hold / Blocked",
+      qa_evidence_subpath: "fe-next-app/qa-evidence"
+    )
+
+    Application.put_env(:symphony_elixir, :pr_qa_blocked_fn, fn _issue -> true end)
+    on_exit(fn -> Application.delete_env(:symphony_elixir, :pr_qa_blocked_fn) end)
+
+    state = build_state(running)
+    assert ^state = WorkpadPrSync.sync(state, issue_id, self())
+
+    assert_receive {:memory_tracker_state_update, ^issue_id, "In Code Review"}, 1_000
+    refute_receive {:memory_tracker_state_update, ^issue_id, "On Hold / Blocked"}, 100
   end
 
   test "bypasses qa_blocked routing and routes to on_complete_state when pr_engagements has count >= 1 for the issue's PR url" do
