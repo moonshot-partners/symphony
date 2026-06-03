@@ -126,7 +126,9 @@ describe("TicketDetail", () => {
 
     expect(screen.getByRole("heading", { name: "Issue actions" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Inspect" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Safe actions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Interrupt" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Destructive" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /status/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /audit/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /stop run/i })).toBeInTheDocument();
@@ -189,7 +191,7 @@ describe("TicketDetail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /actions/i }));
 
-    expect(screen.getByRole("heading", { name: "Act" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Interrupt" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /stop run/i })).toBeEnabled();
   });
 
@@ -261,6 +263,9 @@ describe("TicketDetail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /actions/i }));
     fireEvent.click(screen.getByRole("button", { name: /stop run/i }));
+
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("I understand this terminates the active agent run."));
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
 
     await waitFor(() =>
@@ -312,6 +317,13 @@ describe("TicketDetail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /actions/i }));
     fireEvent.click(screen.getByRole("button", { name: /rerun/i }));
+
+    expect(screen.getByRole("button", { name: "Rerun" })).toBeDisabled();
+    fireEvent.click(
+      screen.getByLabelText(
+        "I understand this deletes prior Symphony artifacts and closes attached pull requests."
+      )
+    );
     fireEvent.click(screen.getByRole("button", { name: "Rerun" }));
 
     await waitFor(() =>

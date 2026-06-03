@@ -39,6 +39,7 @@ import { Markdown } from "@/components/markdown";
 import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Attachment,
   AttachmentInfo,
@@ -263,11 +264,13 @@ type IssueOperation = {
   label: string;
   icon: typeof Radar;
   kind: "read" | "agent" | "danger";
+  risk?: "safe" | "interrupt" | "destructive";
   summary: string;
   primaryAction: string;
   description: string;
   rows: Array<{ label: string; value: string }>;
   note?: string;
+  confirmation?: string;
   backendReady: boolean;
   disabledReason?: string;
   action?: OperationAction;
@@ -289,17 +292,25 @@ function IssueOperations({
   const [active, setActive] = useState<OperationKey | null>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<OperationKey | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const operation = operations.find((op) => op.key === active) ?? null;
   const inspectOperations = operations.filter((op) => op.kind === "read");
-  const actionOperations = operations.filter((op) => op.kind !== "read");
+  const safeOperations = operations.filter((op) => op.kind !== "read" && op.risk === "safe");
+  const interruptOperations = operations.filter(
+    (op) => op.kind !== "read" && op.risk === "interrupt"
+  );
+  const destructiveOperations = operations.filter(
+    (op) => op.kind !== "read" && op.risk === "destructive"
+  );
 
   function close(open: boolean) {
     setOpen(open);
     if (!open) {
       setActive(null);
       setPending(null);
+      setConfirmed(false);
       setResult(null);
       setError(null);
     }
@@ -307,6 +318,7 @@ function IssueOperations({
 
   function select(key: OperationKey) {
     setActive(key);
+    setConfirmed(false);
     setResult(null);
     setError(null);
   }
@@ -363,6 +375,7 @@ function IssueOperations({
                 className="-ml-2 w-fit text-muted-foreground"
                 onClick={() => {
                   setActive(null);
+                  setConfirmed(false);
                   setResult(null);
                   setError(null);
                 }}
@@ -408,13 +421,29 @@ function IssueOperations({
 
             {(operation.kind !== "read" || operation.action) && (
               <DialogFooter className="items-center sm:justify-between">
-                {!operation.backendReady && (
-                  <span className="text-xs text-muted-foreground">Preview only</span>
-                )}
+                <div className="min-w-0">
+                  {operation.confirmation ? (
+                    <label className="flex max-w-xs items-start gap-2 text-xs leading-snug text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 size-3.5 rounded border-border accent-destructive"
+                        checked={confirmed}
+                        onChange={(event) => setConfirmed(event.target.checked)}
+                      />
+                      <span>{operation.confirmation}</span>
+                    </label>
+                  ) : !operation.backendReady ? (
+                    <span className="text-xs text-muted-foreground">Preview only</span>
+                  ) : null}
+                </div>
                 <Button
                   type="button"
                   variant={operation.kind === "danger" ? "destructive" : "default"}
-                  disabled={!operation.backendReady || pending === operation.key}
+                  disabled={
+                    !operation.backendReady ||
+                    pending === operation.key ||
+                    Boolean(operation.confirmation && !confirmed)
+                  }
                   onClick={() => executeOperation(operation)}
                 >
                   {pending === operation.key
@@ -436,7 +465,14 @@ function IssueOperations({
             </DialogHeader>
 
             <OperationGroup label="Inspect" operations={inspectOperations} onSelect={select} />
-            <OperationGroup label="Act" operations={actionOperations} onSelect={select} />
+            <OperationGroup label="Safe actions" operations={safeOperations} onSelect={select} />
+            <OperationGroup label="Interrupt" operations={interruptOperations} onSelect={select} />
+            <OperationGroup
+              label="Destructive"
+              operations={destructiveOperations}
+              onSelect={select}
+              danger
+            />
           </DialogContent>
         )}
       </Dialog>
@@ -494,18 +530,23 @@ function OperationGroup({
   label,
   operations,
   onSelect,
+  danger = false,
 }: {
   label: string;
   operations: IssueOperation[];
   onSelect: (key: OperationKey) => void;
+  danger?: boolean;
 }) {
   if (operations.length === 0) return null;
 
   return (
-    <section aria-labelledby={`issue-actions-${label.toLowerCase()}`} className="space-y-2">
+    <section aria-labelledby={`issue-actions-${label.toLowerCase().replace(/\s+/g, "-")}`} className="space-y-2">
       <h3
-        id={`issue-actions-${label.toLowerCase()}`}
-        className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+        id={`issue-actions-${label.toLowerCase().replace(/\s+/g, "-")}`}
+        className={cn(
+          "text-xs font-medium uppercase tracking-wide text-muted-foreground",
+          danger && "text-destructive"
+        )}
       >
         {label}
       </h3>
@@ -540,7 +581,6 @@ function OperationGroup({
     </section>
   );
 }
-
 function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
   const hasPr = Boolean(ticket.pr?.url);
   const ci = ticket.pr?.ci ?? "unknown";
@@ -588,6 +628,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       label: "Reset plan",
       icon: RotateCcw,
       kind: "agent",
+      risk: "safe",
       summary: "Clear the run plan and prepare the issue for a fresh agent attempt.",
       primaryAction: "Reset plan",
       description: "Prepare this issue for a clean planning pass.",
@@ -606,6 +647,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       label: "Run agent",
       icon: Play,
       kind: "agent",
+      risk: "safe",
       summary: running ? "An agent is already running." : "Start a new agent run for this issue.",
       primaryAction: "Run agent",
       description: running ? "This issue already has an active agent run." : "Start a new agent run for this issue.",
@@ -624,7 +666,8 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       key: "rerun",
       label: "Rerun",
       icon: RefreshCcw,
-      kind: "agent",
+      kind: "danger",
+      risk: "destructive",
       summary: "Delete prior run artifacts and queue a fresh agent attempt.",
       primaryAction: "Rerun",
       description: "Delete prior Symphony artifacts and move this issue back to the dispatch queue.",
@@ -640,6 +683,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       note: running
         ? "This also terminates the active run before queueing the fresh attempt."
         : "Destructive rerun: previous Symphony UI artifacts and attached PRs are removed before queueing.",
+      confirmation: "I understand this deletes prior Symphony artifacts and closes attached pull requests.",
       backendReady: true,
     },
     {
@@ -647,6 +691,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       label: "Stop run",
       icon: Square,
       kind: "danger",
+      risk: "interrupt",
       summary: running ? "Terminate the active agent and preserve workspace state." : "No active run to stop.",
       primaryAction: "Stop run",
       description: running
@@ -662,6 +707,7 @@ function issueOperations(ticket: Ticket, live?: LiveAgent): IssueOperation[] {
       note: running
         ? "Use this when the current run is wrong, stuck, or no longer useful."
         : "Available only while an agent is running.",
+      confirmation: running ? "I understand this terminates the active agent run." : undefined,
       backendReady: running && Boolean(live?.issueId),
     },
   ];
