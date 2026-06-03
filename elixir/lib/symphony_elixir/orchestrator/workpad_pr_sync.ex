@@ -85,22 +85,28 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
     reject_state = Config.settings!().tracker.on_reject_state
     complete_state = Config.settings!().tracker.on_complete_state
 
-    if in_auto_engagement?(issue, pr_engagements) do
-      # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
-      # in on_reject_state on this run even if QA self-reports BLOCKED
-      # or CI is red — let the bounded re-engagement land. Later blocking
-      # claude-pr-review verdicts are handled by PrReengagement.
-      emit_route("auto_engagement_bypass", issue, complete_state, pr_engagements)
-      apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
-    else
-      route_by_ci_then_qa(
-        issue,
-        running_entry,
-        parent_comment_id,
-        pr_engagements,
-        reject_state,
-        complete_state
-      )
+    cond do
+      no_custom_pr_gates_enabled?() ->
+        emit_route("custom_pr_gates_disabled", issue, complete_state, pr_engagements)
+        apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
+
+      in_auto_engagement?(issue, pr_engagements) ->
+        # SYM-16 bypass: the agent is mid auto-re-engagement; do not park
+        # in on_reject_state on this run even if QA self-reports BLOCKED
+        # or CI is red — let the bounded re-engagement land. Later blocking
+        # claude-pr-review verdicts are handled by PrReengagement.
+        emit_route("auto_engagement_bypass", issue, complete_state, pr_engagements)
+        apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
+
+      true ->
+        route_by_ci_then_qa(
+          issue,
+          running_entry,
+          parent_comment_id,
+          pr_engagements,
+          reject_state,
+          complete_state
+        )
     end
   end
 
@@ -117,43 +123,52 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         # SYM-1c (SYM-29): a red required check means the agent's PR cannot
         # land as-is. Park in on_reject_state and publish one final
         # summary naming the failing checks so a human can triage.
-        emit_route("ci_red", issue, reject_state, pr_engagements, %{red_checks: names})
-        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, {:ci_red, names})
+        if pr_gate_enabled?("ci_red") do
+          emit_route("ci_red", issue, reject_state, pr_engagements, %{red_checks: names})
+          apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, {:ci_red, names})
+        else
+          route_by_substance(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
+        end
 
       :pending ->
         # SYM-1c (SYM-29) AC3: checks still running — do NOT transition.
         # The orchestrator's next reconcile tick re-evaluates once GitHub
         # has decided. Skip side effects entirely so we don't double-fire
         # GithubLabel / QaEvidence before completion is real.
-        emit_route("ci_pending", issue, nil, pr_engagements)
-        :ok
+        if pr_gate_enabled?("ci_pending") do
+          emit_route("ci_pending", issue, nil, pr_engagements)
+          :ok
+        else
+          route_by_substance(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
+        end
 
       _ ->
         # :all_green (or :unknown verdict) — substance + conflict checks then legacy tree.
-        case substance_verdict(running_entry) do
-          {:fail, failures} when is_binary(reject_state) ->
-            emit_route("gate_d_substance_fail", issue, reject_state, pr_engagements, %{
-              unbacked_acs: Enum.map(failures, & &1.ac_id)
-            })
+        route_by_substance(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
+    end
+  end
 
-            apply_completion_side_effects(
-              issue,
-              reject_state,
-              running_entry,
-              parent_comment_id,
-              {:gate_d_substance_fail, failures}
-            )
+  defp route_by_substance(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state) do
+    case substance_verdict(running_entry) do
+      {:fail, failures} when is_binary(reject_state) ->
+        if pr_gate_enabled?("gate_d") do
+          emit_route("gate_d_substance_fail", issue, reject_state, pr_engagements, %{
+            unbacked_acs: Enum.map(failures, & &1.ac_id)
+          })
 
-          _ ->
-            route_post_substance(
-              issue,
-              running_entry,
-              parent_comment_id,
-              pr_engagements,
-              reject_state,
-              complete_state
-            )
+          apply_completion_side_effects(
+            issue,
+            reject_state,
+            running_entry,
+            parent_comment_id,
+            {:gate_d_substance_fail, failures}
+          )
+        else
+          route_post_substance(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
         end
+
+      _ ->
+        route_post_substance(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
     end
   end
 
@@ -171,17 +186,21 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         # ticket's allowlist without disclosing them in `## Root cause`.
         # Park in on_reject_state and name the undisclosed files so a human
         # can decide whether to expand the allowlist or revert the diff.
-        emit_route("conflict_disclosure_fail", issue, reject_state, pr_engagements, %{
-          undisclosed_files: undisclosed
-        })
+        if pr_gate_enabled?("conflict_disclosure") do
+          emit_route("conflict_disclosure_fail", issue, reject_state, pr_engagements, %{
+            undisclosed_files: undisclosed
+          })
 
-        apply_completion_side_effects(
-          issue,
-          reject_state,
-          running_entry,
-          parent_comment_id,
-          {:conflict_disclosure_fail, undisclosed}
-        )
+          apply_completion_side_effects(
+            issue,
+            reject_state,
+            running_entry,
+            parent_comment_id,
+            {:conflict_disclosure_fail, undisclosed}
+          )
+        else
+          route_post_conflict(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
+        end
 
       _ ->
         route_post_conflict(
@@ -209,8 +228,12 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
         # QA evidence, but no Playwright artifact (screenshot, webm, zip)
         # exists on disk. Park in on_reject_state — the agent skipped the
         # QA run and only wrote prose.
-        emit_route("qa_artifact_missing", issue, reject_state, pr_engagements)
-        apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, :qa_artifact_missing)
+        if pr_gate_enabled?("qa_artifact") do
+          emit_route("qa_artifact_missing", issue, reject_state, pr_engagements)
+          apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, :qa_artifact_missing)
+        else
+          route_by_qa(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state)
+        end
 
       _ ->
         route_by_qa(
@@ -225,13 +248,30 @@ defmodule SymphonyElixir.Orchestrator.WorkpadPrSync do
   end
 
   defp route_by_qa(issue, running_entry, parent_comment_id, pr_engagements, reject_state, complete_state) do
-    if GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
+    if pr_gate_enabled?("qa_blocked") and GitHubPr.qa_blocked?(issue) and is_binary(reject_state) do
       emit_route("qa_blocked", issue, reject_state, pr_engagements)
       apply_completion_side_effects(issue, reject_state, running_entry, parent_comment_id, :qa_blocked)
     else
       emit_route("default_complete", issue, complete_state, pr_engagements)
       apply_completion_side_effects(issue, complete_state, running_entry, parent_comment_id, :ready_for_review)
     end
+  end
+
+  defp no_custom_pr_gates_enabled? do
+    enabled_pr_gates() == MapSet.new()
+  end
+
+  defp pr_gate_enabled?(name) do
+    enabled = enabled_pr_gates()
+    MapSet.member?(enabled, "all") or MapSet.member?(enabled, name)
+  end
+
+  defp enabled_pr_gates do
+    "SYMPHONY_ENABLE_PR_GATES"
+    |> System.get_env("")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> MapSet.new()
   end
 
   defp substance_verdict(running_entry) do

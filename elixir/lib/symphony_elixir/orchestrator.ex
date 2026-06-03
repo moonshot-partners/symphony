@@ -218,14 +218,20 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry ->
         {updated_running_entry, token_delta} = AgentUpdate.integrate(running_entry, update)
         updated_running_entry = Workpad.maybe_sync(updated_running_entry, update, self())
-        {gate_c_result, updated_running_entry} = GateCTrigger.maybe_run(updated_running_entry, update)
+
+        {gate_c_result, updated_running_entry} =
+          if custom_gate_enabled?("gate_c") do
+            GateCTrigger.maybe_run(updated_running_entry, update)
+          else
+            {:ok, updated_running_entry}
+          end
 
         enforce_opts = [terminate_fn: &terminate_running_issue/3]
 
         {:continue, state} =
           GateCEnforcement.enforce(gate_c_result, state, issue_id, updated_running_entry, enforce_opts)
 
-        apply_plan_grounding(state, issue_id, updated_running_entry, update, token_delta, enforce_opts)
+        handle_agent_update(state, issue_id, updated_running_entry, update, token_delta, enforce_opts)
     end
   end
 
@@ -309,15 +315,24 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
-  # Gate C passed or warned: post the turn-1 understanding.md artifact, then
-  # run the plan-grounding soft gate. Warnings are diagnostic; the run stays
-  # alive and final acceptance happens through PR/tests/evidence.
-  defp apply_plan_grounding(state, issue_id, running_entry, update, token_delta, enforce_opts) do
+  # Custom gates are disabled by default. Keep turn-1 artifacts for debugging,
+  # but do not block or park runs on Symphony-specific rituals.
+  defp handle_agent_update(state, issue_id, running_entry, update, token_delta, enforce_opts) do
     TurnArtifacts.maybe_post(running_entry, update, issue_id)
-    running_entry = TurnSoftCap.maybe_emit(running_entry, update, issue_id)
+
+    running_entry =
+      if custom_gate_enabled?("turn_cap") do
+        TurnSoftCap.maybe_emit(running_entry, update, issue_id)
+      else
+        running_entry
+      end
 
     {:continue, state, running_entry} =
-      PlanGroundingGate.enforce(state, issue_id, running_entry, update, enforce_opts)
+      if custom_gate_enabled?("plan_grounding") do
+        PlanGroundingGate.enforce(state, issue_id, running_entry, update, enforce_opts)
+      else
+        {:continue, state, running_entry}
+      end
 
     running_entry =
       running_entry
@@ -414,7 +429,11 @@ defmodule SymphonyElixir.Orchestrator do
   # callers; this guard is purely an optimization for the poll hot
   # path.
   defp reconcile_pr_reengagement(%State{completed: completed} = state) do
-    if MapSet.size(completed) == 0, do: state, else: do_pr_reengagement(state)
+    if MapSet.size(completed) == 0 or not custom_gate_enabled?("pr_reengagement") do
+      state
+    else
+      do_pr_reengagement(state)
+    end
   end
 
   defp do_pr_reengagement(state) do
@@ -605,14 +624,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case DispatchGate.revalidate(issue, &Tracker.fetch_issue_states_by_ids/1, DispatchGate.terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        case PreDispatch.check(refreshed_issue) do
-          :ok ->
-            do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
-
-          {:reject, code, msg} ->
-            PreDispatch.apply_reject(refreshed_issue, code, msg)
-            %{state | completed: MapSet.put(state.completed, refreshed_issue.id)}
-        end
+        dispatch_revalidated_issue(state, refreshed_issue, attempt, preferred_worker_host)
 
       {:skip, :missing} ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{RunningEntry.format_context(issue)}")
@@ -628,6 +640,25 @@ defmodule SymphonyElixir.Orchestrator do
       {:error, reason} ->
         Logger.warning("Skipping dispatch; issue refresh failed for #{RunningEntry.format_context(issue)}: #{inspect(reason)}")
         state
+    end
+  end
+
+  defp dispatch_revalidated_issue(%State{} = state, %Issue{} = issue, attempt, preferred_worker_host) do
+    if custom_gate_enabled?("pre_dispatch") do
+      apply_pre_dispatch_gate(state, issue, attempt, preferred_worker_host)
+    else
+      do_dispatch_issue(state, issue, attempt, preferred_worker_host)
+    end
+  end
+
+  defp apply_pre_dispatch_gate(%State{} = state, %Issue{} = issue, attempt, preferred_worker_host) do
+    case PreDispatch.check(issue) do
+      :ok ->
+        do_dispatch_issue(state, issue, attempt, preferred_worker_host)
+
+      {:reject, code, msg} ->
+        PreDispatch.apply_reject(issue, code, msg)
+        %{state | completed: MapSet.put(state.completed, issue.id)}
     end
   end
 
@@ -717,7 +748,10 @@ defmodule SymphonyElixir.Orchestrator do
       """
 
       Tracker.create_comment(issue_id, body)
-      StateTransition.apply(issue, Config.settings!().tracker.on_reject_state)
+
+      if custom_gate_enabled?("retry_cap") do
+        StateTransition.apply(issue, Config.settings!().tracker.on_reject_state)
+      end
     end)
 
     complete_issue(state, issue_id)
@@ -731,6 +765,19 @@ defmodule SymphonyElixir.Orchestrator do
       | completed: MapSet.put(state.completed, issue_id),
         retry_attempts: Map.delete(state.retry_attempts, issue_id)
     }
+  end
+
+  defp custom_gate_enabled?(name) do
+    enabled = enabled_orchestrator_gates()
+    MapSet.member?(enabled, "all") or MapSet.member?(enabled, name)
+  end
+
+  defp enabled_orchestrator_gates do
+    "SYMPHONY_ENABLE_ORCHESTRATOR_GATES"
+    |> System.get_env("")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> MapSet.new()
   end
 
   # Silence idle ticks (no running + no completed + no claims). With the
