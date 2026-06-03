@@ -29,19 +29,17 @@ defmodule SymphonyElixir.Orchestrator do
     RetryPlan,
     RunLedgerHook,
     RunningEntry,
+    RuntimeStore,
     SlotPolicy,
     Snapshot,
     StallScan,
     State,
     StateTransition,
-    StatusFile,
     TickScheduler,
     TurnArtifacts,
     TurnSoftCap,
     WorkerSelector,
-    WorkpadPersister,
     WorkpadPrSync,
-    WorkpadStore,
     WorkspaceCleanup
   }
 
@@ -66,7 +64,7 @@ defmodule SymphonyElixir.Orchestrator do
   def init(opts) do
     now_ms = System.monotonic_time(:millisecond)
     config = Config.settings!()
-    runtime_state = StatusFile.load_runtime_state(status_path())
+    persisted = RuntimeStore.load(status_path(), workpads_path())
 
     state = %State{
       poll_interval_ms: config.polling.interval_ms,
@@ -75,11 +73,11 @@ defmodule SymphonyElixir.Orchestrator do
       poll_check_in_progress: false,
       tick_timer_ref: nil,
       tick_token: nil,
-      workpads: WorkpadStore.load(workpads_path()),
+      workpads: persisted.workpads,
       agent_totals: @empty_agent_totals,
       agent_rate_limits: nil,
-      completed: runtime_state.completed,
-      pr_engagements: runtime_state.pr_engagements
+      completed: persisted.completed,
+      pr_engagements: persisted.pr_engagements
     }
 
     WorkspaceCleanup.run_terminal()
@@ -101,16 +99,16 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp persist_workpads(%{workpads: workpads} = state) do
-    # Hand the map to WorkpadPersister for an ordered, off-process write.
+    # Hand the map to RuntimeStore for an ordered, off-process write.
     # A synchronous File.write here would block the Orchestrator's message
     # loop on disk I/O; a failed write must never crash this process and
-    # lose state.running. WorkpadPersister owns both concerns.
-    WorkpadPersister.save_async(workpads_path(), workpads)
+    # lose state.running. RuntimeStore owns both concerns.
+    RuntimeStore.save_workpads_async(workpads_path(), workpads)
     state
   end
 
   defp sync_drain_status(%State{} = state, status_path, drain_flag_path) do
-    drain = StatusFile.drain_requested?(drain_flag_path)
+    drain = RuntimeStore.drain_requested?(drain_flag_path)
 
     if drain and not state.drain do
       Logger.info("Drain requested via #{drain_flag_path}; pausing dispatch of new agents")
@@ -118,7 +116,7 @@ defmodule SymphonyElixir.Orchestrator do
 
     new_state = %{state | drain: drain}
 
-    StatusFile.save(status_path, %{
+    RuntimeStore.save_status(status_path, %{
       running: Map.keys(new_state.running),
       drain: drain,
       completed: new_state.completed,
