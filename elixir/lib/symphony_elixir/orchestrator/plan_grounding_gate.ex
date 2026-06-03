@@ -1,16 +1,14 @@
 defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
   @moduledoc """
-  Hard gate for plan grounding (SYM-2). On the agent's first turn, after
+  Soft gate for plan grounding (SYM-2). On the agent's first turn, after
   `TurnArtifacts` has discovered `understanding.md`, this checks that the
   file's `## Plan` section names real target files in the workspace — see
   `SymphonyElixir.PlanGrounding` for the pure rule.
 
   Symphony already asks the agent to write a citation-backed
   `understanding.md` on turn 1, but nothing on the Symphony side ever
-  verified those citations. An agent could name a plausible-but-wrong file
-  and proceed — shipping correct code in the wrong place. This gate closes
-  that gap with a machine check, the same way `GateCEnforcement`
-  machine-checks the `## AC Extracted` header.
+  verified those citations. This emits that signal without interrupting the
+  agent; final acceptance should come from the PR, tests, and evidence.
 
   `enforce/5` is the single API, fired from the orchestrator's
   `:turn_completed` handler right after `TurnArtifacts.maybe_post`:
@@ -18,30 +16,26 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
     * grounded plan (`:ok`) → `{:continue, state, running_entry}`. The
       `:plan_grounding_checked` flag marks the entry so later turns skip
       the check.
-    * ungrounded plan (`{:violation, reason}`) → records a parked-issue
-      summary in the optional operational view, moves the issue to
-      `tracker.on_reject_state`, calls the orchestrator-supplied
-      `terminate_fn` to kill the running task, and marks the issue completed
-      so reconcile does not redispatch it. Returns `{:halted, state}`.
+    * ungrounded plan (`{:violation, reason}`) → records a diagnostic summary
+      in the optional operational view and keeps the agent running. Returns
+      `{:continue, state, running_entry}`.
 
   Runs once, on turn 1 only. A turn other than the first, an already
   checked entry, or a non-binary `workspace_path` is a silent pass — the
   gate never false-halts a run it cannot evaluate.
 
-  The summary write is a fast, non-raising local-disk write done inline; the
-  state move (tracker I/O) runs inside a `Task.Supervisor.start_child` so the
-  orchestrator process is never blocked on the network.
+  The summary write is a fast, non-raising local-disk write done inline.
   """
 
   require Logger
 
-  alias SymphonyElixir.{Config, OperationalView, PlanGrounding}
-  alias SymphonyElixir.Orchestrator.{DispatchGate, State, StateTransition, TurnArtifacts}
+  alias SymphonyElixir.{OperationalView, PlanGrounding}
+  alias SymphonyElixir.Orchestrator.{DispatchGate, State, TurnArtifacts}
 
-  @type opts :: [terminate_fn: (State.t(), String.t(), boolean() -> State.t())]
+  @type opts :: keyword()
 
   @spec enforce(State.t(), String.t(), map(), map(), opts()) ::
-          {:continue, State.t(), map()} | {:halted, State.t()}
+          {:continue, State.t(), map()}
   def enforce(%State{} = state, issue_id, running_entry, %{event: :turn_completed}, opts)
       when is_binary(issue_id) and is_map(running_entry) and is_list(opts) do
     cond do
@@ -58,14 +52,14 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
         {:continue, state, running_entry}
 
       true ->
-        check(state, issue_id, running_entry, opts)
+        check(state, issue_id, running_entry)
     end
   end
 
   def enforce(%State{} = state, _issue_id, running_entry, _update, _opts),
     do: {:continue, state, running_entry}
 
-  defp check(state, issue_id, running_entry, opts) do
+  defp check(state, issue_id, running_entry) do
     workspace_path = Map.fetch!(running_entry, :workspace_path)
     running_entry = Map.put(running_entry, :plan_grounding_checked, true)
 
@@ -74,7 +68,7 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
         {:continue, state, running_entry}
 
       {:violation, reason} ->
-        halt(state, issue_id, running_entry, reason, opts)
+        warn(state, issue_id, running_entry, reason)
     end
   end
 
@@ -87,33 +81,25 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGate do
     end
   end
 
-  defp halt(state, issue_id, running_entry, reason, opts) do
-    terminate_fn = Keyword.fetch!(opts, :terminate_fn)
+  defp warn(state, issue_id, running_entry, reason) do
     identifier = Map.get(running_entry, :identifier, issue_id)
-    issue = Map.get(running_entry, :issue)
-    on_reject_state = Config.settings!().tracker.on_reject_state
 
-    Logger.warning("Plan-grounding hard halt: issue_id=#{issue_id} issue_identifier=#{identifier} reason=#{inspect(reason)}")
+    Logger.warning("Plan-grounding soft violation: issue_id=#{issue_id} issue_identifier=#{identifier} reason=#{inspect(reason)}")
 
     OperationalView.put_run_summary(issue_id, violation_comment(reason, identifier))
 
-    Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-      StateTransition.apply(issue, on_reject_state)
-    end)
-
-    state = terminate_fn.(state, issue_id, false)
-    {:halted, %{state | completed: MapSet.put(state.completed, issue_id)}}
+    {:continue, state, running_entry}
   end
 
   defp violation_comment(reason, identifier) do
     """
-    ## Plan-grounding violation — issue parked
+    ## Plan-grounding warning
 
     #{explain(reason)}
 
     Issue: #{identifier}
 
-    The agent run has been terminated and the issue moved to a parked state for human review. The turn-1 `understanding.md` must carry a `## Plan` section that names every target file as a backtick-quoted, workspace-relative path; a file the plan will create is tagged `(new)` on its line. To re-dispatch, move the issue back to the dispatch queue.
+    The agent run was allowed to continue. This warning is diagnostic only; final acceptance should be judged by the PR, tests, and evidence.
     """
   end
 

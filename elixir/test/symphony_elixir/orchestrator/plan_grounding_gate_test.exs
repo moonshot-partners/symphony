@@ -172,8 +172,8 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
     end
   end
 
-  describe "enforce/5 — ungrounded plan hard halt" do
-    test "missing ## Plan section halts: comment, terminate, state move, completed" do
+  describe "enforce/5 — ungrounded plan soft warning" do
+    test "missing ## Plan section warns and keeps the agent running" do
       memory_workflow()
 
       ws = workspace_with("# Analysis\n\nNo plan section here at all.\n")
@@ -185,24 +185,24 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
           claimed: MapSet.new(["issue-pg-1"])
         })
 
-      assert {:halted, halted_state} =
+      assert {:continue, ^state, checked_entry} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
-      assert_receive {:terminate_called, "issue-pg-1", false}, 500
+      assert checked_entry.plan_grounding_checked == true
+      refute_receive {:terminate_called, _, _}, 100
 
       body = RunSummaryStore.read("issue-pg-1")
-      assert body =~ "Plan-grounding violation"
-      assert body =~ "issue parked"
+      assert body =~ "Plan-grounding warning"
+      assert body =~ "allowed to continue"
       assert body =~ "ISS-1"
 
-      assert_receive {:memory_tracker_state_update, "issue-pg-1", "On Hold / Blocked"}, 500
-
-      assert MapSet.member?(halted_state.completed, "issue-pg-1")
-      refute Map.has_key?(halted_state.running, "issue-pg-1")
-      refute MapSet.member?(halted_state.claimed, "issue-pg-1")
+      refute_receive {:memory_tracker_state_update, _, _}, 100
+      refute MapSet.member?(state.completed, "issue-pg-1")
+      assert Map.has_key?(state.running, "issue-pg-1")
+      assert MapSet.member?(state.claimed, "issue-pg-1")
     end
 
-    test "a hallucinated path halts and names the offending path in the comment" do
+    test "a hallucinated path warns and names the offending path in the summary" do
       memory_workflow()
 
       ws =
@@ -215,29 +215,31 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
       entry = running_entry(%{workspace_path: ws})
       state = empty_state(%{running: %{"issue-pg-1" => entry}})
 
-      assert {:halted, _} =
+      assert {:continue, ^state, checked_entry} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
+      assert checked_entry.plan_grounding_checked == true
       body = RunSummaryStore.read("issue-pg-1")
       assert body =~ "app/controllers/filter_modal_controller.rb"
     end
 
-    test "a missing understanding.md halts as a missing-plan violation" do
+    test "a missing understanding.md warns as a missing-plan violation" do
       memory_workflow()
 
       ws = workspace_with(nil)
       entry = running_entry(%{workspace_path: ws})
       state = empty_state(%{running: %{"issue-pg-1" => entry}})
 
-      assert {:halted, halted_state} =
+      assert {:continue, ^state, checked_entry} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
       body = RunSummaryStore.read("issue-pg-1")
-      assert body =~ "Plan-grounding violation"
-      assert MapSet.member?(halted_state.completed, "issue-pg-1")
+      assert body =~ "Plan-grounding warning"
+      assert checked_entry.plan_grounding_checked == true
+      refute MapSet.member?(state.completed, "issue-pg-1")
     end
 
-    test "a plan with no grounded path halts and explains the missing anchor" do
+    test "a plan with no grounded path warns and explains the missing anchor" do
       memory_workflow()
 
       ws =
@@ -250,29 +252,31 @@ defmodule SymphonyElixir.Orchestrator.PlanGroundingGateTest do
       entry = running_entry(%{workspace_path: ws})
       state = empty_state(%{running: %{"issue-pg-1" => entry}})
 
-      assert {:halted, halted_state} =
+      assert {:continue, ^state, checked_entry} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
       body = RunSummaryStore.read("issue-pg-1")
       assert body =~ "names no file that exists"
-      assert MapSet.member?(halted_state.completed, "issue-pg-1")
+      assert checked_entry.plan_grounding_checked == true
+      refute MapSet.member?(state.completed, "issue-pg-1")
     end
 
-    test "skips state move when running_entry.issue is nil but still halts" do
+    test "running_entry.issue nil still warns without halting" do
       memory_workflow()
 
       ws = workspace_with("# Analysis\n\nNo plan.\n")
       entry = running_entry(%{workspace_path: ws, issue: nil})
       state = empty_state(%{running: %{"issue-pg-1" => entry}})
 
-      assert {:halted, halted_state} =
+      assert {:continue, ^state, checked_entry} =
                PlanGroundingGate.enforce(state, "issue-pg-1", entry, turn_completed(), gate_opts())
 
-      assert_receive {:terminate_called, "issue-pg-1", false}, 500
-      assert RunSummaryStore.read("issue-pg-1") =~ "Plan-grounding violation"
-      refute_receive {:memory_tracker_state_update, _, _}, 200
+      refute_receive {:terminate_called, _, _}, 100
+      assert RunSummaryStore.read("issue-pg-1") =~ "Plan-grounding warning"
+      refute_receive {:memory_tracker_state_update, _, _}, 100
 
-      assert MapSet.member?(halted_state.completed, "issue-pg-1")
+      assert checked_entry.plan_grounding_checked == true
+      refute MapSet.member?(state.completed, "issue-pg-1")
     end
   end
 end
