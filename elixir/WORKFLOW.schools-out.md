@@ -90,39 +90,13 @@ agent:
   # nothing.
   max_turns: 25
 agent_runtime:
-  command: $SYMPHONY_AGENT_SHIM_PYTHON -m symphony_agent_shim
-  docker_image: schoolsout-base:latest
+  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
   thread_sandbox: workspace-write
   read_timeout_ms: 60000
   turn_sandbox_policy:
     type: workspaceWrite
-  # GitHub identity used by the agent's git/gh subprocesses. When all three
-  # SYMPHONY_GITHUB_APP_* vars are set, the shim mints an installation token
-  # and the agent authors PRs as `symphony-orchestrator[bot]`. If any var is
-  # missing, the shim falls back to GH_TOKEN/GITHUB_TOKEN from the operator's
-  # environment so older runs keep working. See docs/github-app-setup.md.
-  github_app_env:
-    - SYMPHONY_GITHUB_APP_ID
-    - SYMPHONY_GITHUB_APP_INSTALLATION_ID
-    - SYMPHONY_GITHUB_APP_PRIVATE_KEY_PATH
-  # SYM-25: enforce branch naming at `git push` time. Pattern must allow the
-  # types AGENTS.md declares: `agents/` (canonical), plus the conventional-commit
-  # prefixes Symphony itself uses for its own PRs (so the orchestrator's own
-  # branches don't get blocked when symphony repos run through the same shim).
-  # Team prefixes are matched case-insensitively in the shim.
-  branch_naming_pattern: "^(feat|fix|chore|docs|refactor|test|ci|agents)/(SYM|SODEV)-[0-9]+(-[a-z0-9-]+)?$"
-  # SYM-37: opt the Schools Out agent into the Memoria MCP tool. Provides
-  # decision-level human context (Slack threads, meeting notes, wiki pages)
-  # via `search_knowledge`. Optional, fail-open: if MEMORIA_API_KEY is unset
-  # or the API is unavailable, the tool returns empty and the agent proceeds
-  # without it. NOT for code lookup — use grep/glob for files/symbols.
-  # `project_id` is the Memoria UUID for Schools Out; `project_tag` is the
-  # client-side tag filter applied to every result to keep cross-tenant
-  # leakage from the shared Slack workspace out of the agent's context.
-  memoria:
-    project_id: 574d7d43-82b9-44ac-b2c2-a8dc93e84c8e
-    project_tag: schools-out
+    networkAccess: true
 qa:
   # Paths inside the workspace where tests drop QA evidence bundles
   # (screenshots, session.webm, qa-report.md). Symphony reads each dir
