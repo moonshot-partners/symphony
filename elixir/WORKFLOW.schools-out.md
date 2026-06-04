@@ -61,7 +61,7 @@ codex:
     networkAccess: true
 server:
   host: 127.0.0.1
-  port: 4000
+  port: 4010
 ---
 
 You are working on Linear ticket `{{ issue.identifier }}` for SchoolsOut.
