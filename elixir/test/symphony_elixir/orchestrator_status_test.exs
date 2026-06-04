@@ -77,6 +77,18 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
        }}
     )
 
+    # Noise: a token-usage update must update last_codex_message but never enter
+    # the live timeline ring buffer.
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :notification,
+         payload: %{method: "thread/tokenUsage/updated"},
+         timestamp: now
+       }}
+    )
+
     send(
       pid,
       {:codex_worker_update, issue_id,
@@ -100,12 +112,17 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              timestamp: now
            }
 
-    # The recent-events ring buffer accumulates meaningful updates, newest first,
-    # and the newest action mirrors last_codex_message.
+    # The recent-events ring buffer accumulates meaningful updates, newest first.
     assert [newest | _rest] = snapshot_entry.recent_events
     assert newest.event == :notification
     assert newest.at == now
     assert newest.action == snapshot_entry.last_codex_message
+
+    # The token-usage update is noise: it bumped last_codex_message above but was
+    # dropped from the timeline ring buffer.
+    refute Enum.any?(snapshot_entry.recent_events, fn e ->
+             get_in(e, [:action, :message, :method]) == "thread/tokenUsage/updated"
+           end)
   end
 
   test "orchestrator snapshot tracks codex thread totals and app-server pid" do

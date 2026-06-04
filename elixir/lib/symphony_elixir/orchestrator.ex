@@ -1733,14 +1733,27 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   # Newest-first ring buffer of meaningful agent events for the live cockpit
-  # timeline. Updates with no human summary (token counts, stream chunks) carry
-  # no action, so they are skipped to keep the timeline readable.
-  defp push_recent_event(running_entry, _event, nil, _timestamp),
-    do: Map.get(running_entry, :recent_events, [])
-
+  # timeline. High-frequency churn (streaming deltas, token-usage and rate-limit
+  # updates, internal reasoning) is dropped so the timeline reads as discrete
+  # actions: commands, file edits, messages, turn boundaries.
   defp push_recent_event(running_entry, event, message, timestamp) do
-    [%{event: event, action: message, at: timestamp} | Map.get(running_entry, :recent_events, [])]
-    |> Enum.take(@recent_events_limit)
+    if recent_event_noise?(message) do
+      Map.get(running_entry, :recent_events, [])
+    else
+      [%{event: event, action: message, at: timestamp} | Map.get(running_entry, :recent_events, [])]
+      |> Enum.take(@recent_events_limit)
+    end
+  end
+
+  @recent_event_noise ["streaming", "token usage", "rate limit", "reasoning"]
+  defp recent_event_noise?(message) do
+    case SymphonyElixir.StatusDashboard.humanize_codex_message(message) do
+      action when is_binary(action) ->
+        String.contains?(String.downcase(action), @recent_event_noise)
+
+      _ ->
+        true
+    end
   end
 
   defp codex_app_server_pid_for_update(_existing, %{codex_app_server_pid: pid})
