@@ -136,9 +136,18 @@ Reviewers approve from the PR, so put the proof there.
 - For changes users can see (UI, pages, components, styles): capture a
   screenshot of the working result with Playwright against the running app
   (and the broken state first when the ticket is a bug). Save the images under
-  `qa-evidence/` in the workspace, commit them on the PR branch, and embed them
-  in the PR description under a `## QA Evidence` heading using their raw GitHub
-  URLs so they render inline for the reviewer. If the repo already has a
+  `qa-evidence/` in the workspace. `qa-evidence/` is gitignored, so they are
+  silently skipped by a normal `git add` and never reach the PR — stage them
+  explicitly with `git add -f qa-evidence/<files>` and commit them on the PR
+  branch. The repo is private, so `raw.githubusercontent.com` and blob image
+  URLs do NOT render inline in a PR description (GitHub's image proxy cannot
+  read private repos), and relative paths are not resolved in PR bodies. Do not
+  embed them as inline images. Instead, under a `## QA Evidence` heading, link
+  each committed screenshot by its full blob URL at the PR's head commit so the
+  reviewer can open it, e.g.
+  `- [Parents signup typo suggestion](https://github.com/<owner>/<repo>/blob/<branch-or-sha>/qa-evidence/<file>.png)`.
+  The committed images also render directly in the PR's Files changed tab,
+  which is the reliable proof for a private repo. If the repo already has a
   Playwright or e2e setup, use it; otherwise drive the dev server with a small
   Playwright script.
 - For backend, config, or non-visual changes: state in the PR what you ran to
