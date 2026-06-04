@@ -5,15 +5,15 @@
 # Run on the VPS as a sudo-capable user, e.g. from CI:
 #   ssh "$SSH_USER@$SSH_HOST" 'bash -s' < scripts/deploy.sh
 #
-# It pulls the canonical deploy branch, rebuilds BOTH the Elixir escript
-# (orchestrator) and, when the dashboard changed, the Next.js cockpit, then
-# restarts the systemd services and health-checks each. Source of truth is git:
-# /opt/symphony is a checkout of $DEPLOY_BRANCH, so `git -C /opt/symphony
-# rev-parse HEAD` (and /opt/symphony/DEPLOYED_SHA) always tell you exactly what
-# is running.
+# Run it FOREGROUND and watch it: it stops the orchestrator briefly, so a
+# dropped connection mid-deploy must not be silent. The slow escript rebuild
+# happens BEFORE the stop, so a build failure (or a disconnect during the build)
+# leaves the running orchestrator untouched; only a fast stop+start swaps code.
 #
-# Gitignored runtime state (elixir/_build, elixir/deps, state/, dashboard build)
-# survives the deploy untouched.
+# Source of truth is git: /opt/symphony is a checkout of $DEPLOY_BRANCH, so
+# `git -C /opt/symphony rev-parse HEAD` (and /opt/symphony/DEPLOYED_SHA) always
+# tell you exactly what is running. Gitignored runtime state (elixir/_build,
+# elixir/deps, state/, dashboard build) survives the deploy untouched.
 
 set -euo pipefail
 
@@ -41,37 +41,44 @@ cd "$SYMPHONY_DIR"
 old_sha=$(asapp git rev-parse HEAD 2>/dev/null || echo none)
 
 # 2. Best-effort drain: wait for in-flight agents to finish so a deploy never
-#    kills a running turn. systemd TimeoutStopSec is the hard safety net.
+#    kills a running turn. An unreachable orchestrator means it is already down,
+#    so there is nothing to drain — proceed immediately instead of spinning the
+#    full timeout. systemd TimeoutStopSec is the hard safety net.
 log "waiting for agents to drain (timeout ${DRAIN_TIMEOUT_SECONDS}s)"
 deadline=$(( SECONDS + DRAIN_TIMEOUT_SECONDS ))
 while (( SECONDS < deadline )); do
-  running=$(curl -fsS "$HEALTH_URL" 2>/dev/null | jq -r '.counts.running // 0' 2>/dev/null || echo unknown)
+  if ! state=$(curl -fsS "$HEALTH_URL" 2>/dev/null); then
+    log "orchestrator unreachable (already down), proceeding"
+    break
+  fi
+  running=$(printf '%s' "$state" | jq -r '.counts.running // 0' 2>/dev/null || echo unknown)
   if [[ "$running" == "0" ]]; then log "idle, proceeding"; break; fi
   log "running=$running, waiting ${DRAIN_POLL_SECONDS}s"
   sleep "$DRAIN_POLL_SECONDS"
 done
 (( SECONDS >= deadline )) && log "drain timeout reached, proceeding anyway"
 
-# 3. Stop the orchestrator before swapping code.
-log "stop symphony"
-sudo systemctl stop symphony
-
-# 4. Update code from git (the canonical deploy branch).
+# 3. Update code from git (the canonical deploy branch). The orchestrator keeps
+#    running on the old code through this and the rebuild below.
 asapp git fetch --quiet origin "$DEPLOY_BRANCH"
 asapp git reset --hard "origin/$DEPLOY_BRANCH"
 new_sha=$(asapp git rev-parse HEAD)
 log "old_sha=$old_sha new_sha=$new_sha"
 
-# 5. Rebuild the escript. _build/prod is nuked because schema/struct changes can
-#    otherwise reuse stale compiled BEAMs.
-log "rebuild escript"
+# 4. Rebuild the escript BEFORE stopping anything. The running orchestrator does
+#    not read _build/prod or bin/symphony at runtime, so a rebuild (or a failure
+#    here) cannot disturb it — prod stays up if the build breaks. _build/prod is
+#    nuked because schema/struct changes can otherwise reuse stale compiled BEAMs.
+log "rebuild escript (orchestrator still serving)"
 cd "$SYMPHONY_DIR/elixir"
 asapp env PATH="$ELIXIR_PATH" sh -c 'rm -rf _build/prod'
 asapp env PATH="$ELIXIR_PATH" MIX_ENV=prod mix deps.get </dev/null >/dev/null
 asapp env PATH="$ELIXIR_PATH" MIX_ENV=prod mix escript.build </dev/null
 
-# 6. Restart and health-check the orchestrator. Fail the deploy if unhealthy.
+# 5. Swap code: stop, then start. This is the only window the orchestrator is
+#    down, and it is just a restart (seconds), not a build.
 log "restart symphony"
+sudo systemctl stop symphony
 sudo systemctl start symphony
 sleep 6
 if ! sudo systemctl is-active --quiet symphony; then
@@ -85,7 +92,7 @@ if [[ "$code" != "200" ]]; then
 fi
 log "orchestrator deployed — service active, health 200"
 
-# 7. Cockpit. Rebuild only when the dashboard tree actually changed; log the
+# 6. Cockpit. Rebuild only when the dashboard tree actually changed; log the
 #    decision loudly either way so a green deploy never silently ships a stale
 #    cockpit. Next.js standalone keeps serving the old build until the restart,
 #    so the only blip is the restart itself.
@@ -115,6 +122,6 @@ else
   log "cockpit deployed — service active, health 200"
 fi
 
-# 8. Record what is deployed (only after every stage is green).
+# 7. Record what is deployed (only after every stage is green).
 printf '%s\n' "$new_sha" | sudo tee "$SYMPHONY_DIR/DEPLOYED_SHA" >/dev/null
 log "deployed $new_sha — orchestrator + cockpit reconciled"
