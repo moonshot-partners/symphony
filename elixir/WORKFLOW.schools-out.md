@@ -3,7 +3,7 @@ tracker:
   kind: linear
   label: agent
   active_states:
-    - In Development
+    - Scheduled
   terminal_states:
     - Released / Live
     - Closed
