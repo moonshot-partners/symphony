@@ -1,0 +1,11 @@
+fileType: momentic/test/v2
+version: 1.0.0
+id: dashboard-home-smoke
+labels: [smoke, owner:symphony]
+url: http://127.0.0.1:3210
+steps:
+  - assert:
+      that: |
+        The Symphony Cockpit page is loaded. The header shows Symphony,
+        Cockpit, and a search input.
+      timeout: 30000

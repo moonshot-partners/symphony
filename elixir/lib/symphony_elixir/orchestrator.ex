@@ -1324,6 +1324,56 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @spec run_issue(String.t()) :: {:ok, map()} | {:error, :not_found | :not_active | :already_running | :no_capacity | :unavailable | term()}
+  def run_issue(identifier), do: run_issue(__MODULE__, identifier)
+
+  @spec run_issue(GenServer.server(), String.t()) ::
+          {:ok, map()} | {:error, :not_found | :not_active | :already_running | :no_capacity | :unavailable | term()}
+  def run_issue(server, identifier) when is_binary(identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:run_issue, identifier})
+    else
+      {:error, :unavailable}
+    end
+  end
+
+  @spec rerun_issue(String.t()) :: {:ok, map()} | {:error, :not_found | :not_active | :no_capacity | :unavailable | term()}
+  def rerun_issue(identifier), do: rerun_issue(__MODULE__, identifier)
+
+  @spec rerun_issue(GenServer.server(), String.t()) ::
+          {:ok, map()} | {:error, :not_found | :not_active | :no_capacity | :unavailable | term()}
+  def rerun_issue(server, identifier) when is_binary(identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:rerun_issue, identifier})
+    else
+      {:error, :unavailable}
+    end
+  end
+
+  @spec reset_issue(String.t()) :: {:ok, map()} | {:error, :not_found | :unavailable | term()}
+  def reset_issue(identifier), do: reset_issue(__MODULE__, identifier)
+
+  @spec reset_issue(GenServer.server(), String.t()) :: {:ok, map()} | {:error, :not_found | :unavailable | term()}
+  def reset_issue(server, identifier) when is_binary(identifier) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:reset_issue, identifier})
+    else
+      {:error, :unavailable}
+    end
+  end
+
+  @spec stop_run(String.t()) :: {:ok, map()} | {:error, :not_running | :unavailable}
+  def stop_run(issue_id), do: stop_run(__MODULE__, issue_id)
+
+  @spec stop_run(GenServer.server(), String.t()) :: {:ok, map()} | {:error, :not_running | :unavailable}
+  def stop_run(server, issue_id) when is_binary(issue_id) do
+    if Process.whereis(server) do
+      GenServer.call(server, {:stop_run, issue_id})
+    else
+      {:error, :unavailable}
+    end
+  end
+
   @spec snapshot() :: map() | :timeout | :unavailable
   def snapshot, do: snapshot(__MODULE__, 15_000)
 
@@ -1432,8 +1482,162 @@ defmodule SymphonyElixir.Orchestrator do
      }, state}
   end
 
+  def handle_call({:stop_run, issue_id}, _from, state) do
+    case Map.get(state.running, issue_id) do
+      nil ->
+        {:reply, {:error, :not_running}, state}
+
+      %{identifier: identifier} ->
+        updated_state = terminate_running_issue(state, issue_id, false)
+        notify_dashboard()
+
+        {:reply,
+         {:ok,
+          %{
+            operation: "stop",
+            issue_id: issue_id,
+            issue_identifier: identifier,
+            stopped: true,
+            workspace_removed: false
+          }}, updated_state}
+    end
+  end
+
+  def handle_call({:run_issue, identifier}, _from, state) do
+    {reply, state} = run_issue_by_identifier(state, identifier, false)
+    notify_dashboard()
+    {:reply, reply, state}
+  end
+
+  def handle_call({:rerun_issue, identifier}, _from, state) do
+    state = stop_existing_issue_by_identifier(state, identifier, false)
+    {reply, state} = run_issue_by_identifier(state, identifier, true)
+    notify_dashboard()
+    {:reply, reply, state}
+  end
+
+  def handle_call({:reset_issue, identifier}, _from, state) do
+    state = stop_existing_issue_by_identifier(state, identifier, false)
+    notify_dashboard()
+
+    {:reply,
+     {:ok,
+      %{
+        operation: "reset",
+        issue_identifier: normalize_identifier(identifier),
+        stopped: true,
+        workspace_removed: false,
+        queued: false
+      }}, state}
+  end
+
   defp blocked_issue_state(%{issue: %Issue{state: state}}), do: state
   defp blocked_issue_state(_metadata), do: nil
+
+  defp run_issue_by_identifier(state, identifier, force_retry?) do
+    normalized = normalize_identifier(identifier)
+
+    case find_candidate_issue_by_identifier(normalized) do
+      {:ok, %Issue{} = issue} ->
+        cond do
+          Map.has_key?(state.running, issue.id) ->
+            {{:error, :already_running}, state}
+
+          !retry_candidate_issue?(issue, terminal_state_set()) ->
+            {{:error, :not_active}, state}
+
+          !dispatch_slots_available?(issue, state) or !worker_slots_available?(state) ->
+            {{:error, :no_capacity}, state}
+
+          true ->
+            next_state =
+              state
+              |> release_issue_claim(issue.id)
+              |> maybe_cleanup_for_forced_retry(issue, force_retry?)
+              |> dispatch_issue(issue)
+
+            {{:ok,
+              %{
+                operation: if(force_retry?, do: "rerun", else: "run"),
+                issue_id: issue.id,
+                issue_identifier: issue.identifier,
+                queued: true
+              }}, next_state}
+        end
+
+      {:error, reason} ->
+        {{:error, reason}, state}
+    end
+  end
+
+  defp stop_existing_issue_by_identifier(state, identifier, cleanup_workspace?) do
+    normalized = normalize_identifier(identifier)
+
+    state.running
+    |> Enum.find(fn
+      {_issue_id, %{identifier: running_identifier}} -> normalize_identifier(running_identifier) == normalized
+      _ -> false
+    end)
+    |> case do
+      {issue_id, _running_entry} -> terminate_running_issue(state, issue_id, cleanup_workspace?)
+      nil -> release_blocked_or_retry_by_identifier(state, normalized, cleanup_workspace?)
+    end
+  end
+
+  defp release_blocked_or_retry_by_identifier(state, normalized_identifier, cleanup_workspace?) do
+    state =
+      Enum.reduce(state.blocked, state, fn
+        {issue_id, %{identifier: identifier, worker_host: worker_host}}, state_acc ->
+          if normalize_identifier(identifier) == normalized_identifier do
+            if cleanup_workspace?, do: cleanup_issue_workspace(identifier, worker_host)
+            release_issue_claim(state_acc, issue_id)
+          else
+            state_acc
+          end
+
+        _entry, state_acc ->
+          state_acc
+      end)
+
+    Enum.reduce(state.retry_attempts, state, fn
+      {issue_id, %{identifier: identifier, timer_ref: timer_ref}}, state_acc ->
+        if normalize_identifier(identifier) == normalized_identifier do
+          if is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+          release_issue_claim(state_acc, issue_id)
+        else
+          state_acc
+        end
+
+      _entry, state_acc ->
+        state_acc
+    end)
+  end
+
+  defp maybe_cleanup_for_forced_retry(state, %Issue{identifier: identifier}, true) do
+    cleanup_issue_workspace(identifier)
+    state
+  end
+
+  defp maybe_cleanup_for_forced_retry(state, _issue, false), do: state
+
+  defp find_candidate_issue_by_identifier(identifier) do
+    case Tracker.fetch_candidate_issues() do
+      {:ok, issues} ->
+        case Enum.find(issues, &(normalize_identifier(Map.get(&1, :identifier)) == identifier)) do
+          %Issue{} = issue -> {:ok, issue}
+          _ -> {:error, :not_found}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp normalize_identifier(identifier) when is_binary(identifier) do
+    identifier |> String.trim() |> String.upcase()
+  end
+
+  defp normalize_identifier(_identifier), do: ""
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = extract_token_delta(running_entry, update)

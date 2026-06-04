@@ -28,6 +28,15 @@ defmodule SymphonyElixirWeb.Router do
   end
 
   scope "/", SymphonyElixirWeb do
+    get("/board", ObservabilityApiController, :board)
+    get("/live", ObservabilityApiController, :live)
+    post("/refresh", ObservabilityApiController, :refresh)
+    post("/runs/:issue_id/stop", ObservabilityApiController, :stop_run)
+    post("/issues/:identifier/audit", ObservabilityApiController, :audit_issue)
+    post("/issues/:identifier/run", ObservabilityApiController, :run_issue)
+    post("/issues/:identifier/rerun", ObservabilityApiController, :rerun_issue)
+    post("/issues/:identifier/reset", ObservabilityApiController, :reset_issue)
+
     get("/api/v1/state", ObservabilityApiController, :state)
 
     match(:*, "/", ObservabilityApiController, :method_not_allowed)

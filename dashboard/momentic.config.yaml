@@ -1,0 +1,35 @@
+name: symphony-dashboard
+fileFormat: v2
+include:
+  - "tests/momentic/**/*.test.yaml"
+exclude:
+  - "node_modules/**/*"
+  - ".next/**/*"
+  - "qa-evidence/**/*"
+retries: 0
+parallel: 1
+recordVideo: on-fail
+reporterDir: qa-evidence/momentic/reports
+gitMainBranch: main
+gitProtectedBranches:
+  - main
+  - production
+environments:
+  - name: local
+    baseUrl: http://127.0.0.1:3210
+browser:
+  defaultBrowserType: Chromium
+  smartWaitingTimeoutMs: 8000
+  pageLoadTimeoutMs: 15000
+ai:
+  useMemory: true
+  failureRecovery: true
+  aiFailureAnalysis: true
+  agentConfig:
+    locator: v3
+    assertion: v3
+    visual-assertion: v3
+    text-extraction: v3
+    failure-recovery: v2
+advanced:
+  fakerConstantSeed: true
