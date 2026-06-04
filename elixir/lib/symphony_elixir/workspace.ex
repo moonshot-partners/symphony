@@ -296,6 +296,8 @@ defmodule SymphonyElixir.Workspace do
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=local")
 
+    started_ms = System.monotonic_time(:millisecond)
+
     task =
       Task.async(fn ->
         System.cmd("sh", ["-lc", command], cd: workspace, stderr_to_stdout: true)
@@ -303,6 +305,7 @@ defmodule SymphonyElixir.Workspace do
 
     case Task.yield(task, timeout_ms) do
       {:ok, cmd_result} ->
+        log_hook_duration(hook_name, issue_context, workspace, "local", started_ms)
         handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
 
       nil ->
@@ -319,8 +322,11 @@ defmodule SymphonyElixir.Workspace do
 
     Logger.info("Running workspace hook hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=#{worker_host}")
 
+    started_ms = System.monotonic_time(:millisecond)
+
     case run_remote_command(worker_host, "cd #{shell_escape(workspace)} && #{command}", timeout_ms) do
       {:ok, cmd_result} ->
+        log_hook_duration(hook_name, issue_context, workspace, worker_host, started_ms)
         handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
 
       {:error, {:workspace_hook_timeout, ^hook_name, _timeout_ms} = reason} ->
@@ -329,6 +335,12 @@ defmodule SymphonyElixir.Workspace do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp log_hook_duration(hook_name, issue_context, workspace, worker_host, started_ms) do
+    duration_ms = System.monotonic_time(:millisecond) - started_ms
+
+    Logger.info("Workspace hook completed hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} worker_host=#{worker_host} duration_ms=#{duration_ms}")
   end
 
   defp handle_hook_command_result({_output, 0}, _workspace, _issue_id, _hook_name) do
