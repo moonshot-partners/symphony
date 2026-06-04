@@ -76,6 +76,31 @@ Source of truth:
 5. Do not edit files outside the Symphony workspace.
 6. Do not invent Symphony-specific gates, workpads, or policy ceremony unless the repository instructions explicitly require them.
 
+Workspace:
+
+The workspace starts with `schools-out` (Rails backend, at the root) and
+`fe-next-app` (Next.js frontend, in `./fe-next-app/`) already cloned on `dev`.
+`schools-out` is the shared backend for every product. Decide which product
+this ticket belongs to from its title, description, and labels, then make sure
+that product's repositories are present before you start. Clone any that are
+missing with `git clone --depth 1 https://github.com/schoolsoutapp/<repo> <dir>`
+(git authentication is already configured) and check out `dev`.
+
+Product to repository map:
+
+- Parents app, SEO, web frontend: `fe-next-app` (already present) plus the
+  `schools-out` backend.
+- New Maestro: the `claude-camps-crawler` repo (its `claude-workflow/` is the
+  Next.js admin UI; its `claude-worker/` is the Python worker), the
+  `temporal-crawler` repo (Python + Temporal crawler), and the `schools-out`
+  backend (already present, receives ingestion via the Internal API).
+- Old Maestro (being retired): `data-ingestion-admin` only when the ticket
+  explicitly targets it.
+
+Read each repository's own `AGENTS.md` / `README` before changing it, keep
+changes scoped to the repositories the ticket actually requires, and install
+dependencies only for the repositories you actually edit.
+
 Issue:
 
 Identifier: {{ issue.identifier }}
