@@ -13,7 +13,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   @spec board(Conn.t(), map()) :: Conn.t()
   def board(conn, _params) do
     settings = Config.settings!()
-    states = board_states(settings.tracker)
+    states = settings.tracker.active_states
 
     issues =
       case Tracker.fetch_issues_by_states(states) do
