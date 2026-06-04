@@ -1317,6 +1317,14 @@ defmodule SymphonyElixir.Orchestrator do
     )
   end
 
+  # Cockpit operation calls (refresh/run/rerun/reset/stop) are serviced by the
+  # single orchestrator GenServer, which also runs the poll + reconcile cycle
+  # (multiple Linear fetches and `gh pr view` subprocesses). An operation issued
+  # while a reconcile is in flight queues behind it, so the default 5s call
+  # timeout can fire and surface to the cockpit as a spurious 500 even though the
+  # operation itself then completes. Give these calls generous headroom.
+  @operation_call_timeout_ms 30_000
+
   @spec request_refresh() :: map() | :unavailable
   def request_refresh do
     request_refresh(__MODULE__)
@@ -1325,7 +1333,7 @@ defmodule SymphonyElixir.Orchestrator do
   @spec request_refresh(GenServer.server()) :: map() | :unavailable
   def request_refresh(server) do
     if Process.whereis(server) do
-      GenServer.call(server, :request_refresh)
+      GenServer.call(server, :request_refresh, @operation_call_timeout_ms)
     else
       :unavailable
     end
@@ -1338,7 +1346,7 @@ defmodule SymphonyElixir.Orchestrator do
           {:ok, map()} | {:error, :not_found | :not_active | :already_running | :no_capacity | :unavailable | term()}
   def run_issue(server, identifier) when is_binary(identifier) do
     if Process.whereis(server) do
-      GenServer.call(server, {:run_issue, identifier})
+      GenServer.call(server, {:run_issue, identifier}, @operation_call_timeout_ms)
     else
       {:error, :unavailable}
     end
@@ -1351,7 +1359,7 @@ defmodule SymphonyElixir.Orchestrator do
           {:ok, map()} | {:error, :not_found | :not_active | :no_capacity | :unavailable | term()}
   def rerun_issue(server, identifier) when is_binary(identifier) do
     if Process.whereis(server) do
-      GenServer.call(server, {:rerun_issue, identifier})
+      GenServer.call(server, {:rerun_issue, identifier}, @operation_call_timeout_ms)
     else
       {:error, :unavailable}
     end
@@ -1363,7 +1371,7 @@ defmodule SymphonyElixir.Orchestrator do
   @spec reset_issue(GenServer.server(), String.t()) :: {:ok, map()} | {:error, :not_found | :unavailable | term()}
   def reset_issue(server, identifier) when is_binary(identifier) do
     if Process.whereis(server) do
-      GenServer.call(server, {:reset_issue, identifier})
+      GenServer.call(server, {:reset_issue, identifier}, @operation_call_timeout_ms)
     else
       {:error, :unavailable}
     end
@@ -1375,7 +1383,7 @@ defmodule SymphonyElixir.Orchestrator do
   @spec stop_run(GenServer.server(), String.t()) :: {:ok, map()} | {:error, :not_running | :unavailable}
   def stop_run(server, issue_id) when is_binary(issue_id) do
     if Process.whereis(server) do
-      GenServer.call(server, {:stop_run, issue_id})
+      GenServer.call(server, {:stop_run, issue_id}, @operation_call_timeout_ms)
     else
       {:error, :unavailable}
     end

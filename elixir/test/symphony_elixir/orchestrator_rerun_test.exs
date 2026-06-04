@@ -67,6 +67,55 @@ defmodule SymphonyElixir.OrchestratorRerunTest do
     refute MapSet.member?(new_state.completed, "issue-cr-1")
   end
 
+  test "rerun while the issue is actively running terminates it and requeues without crashing" do
+    issue = %Issue{
+      id: "issue-cr-run",
+      identifier: "SODEV-430",
+      title: "Improve Sign-Up Email Validation",
+      description: "x",
+      state: "In Code Review"
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+    agent_pid = spawn(fn -> receive do: (:stop -> :ok) end)
+    ref = Process.monitor(agent_pid)
+
+    running_entry = %{
+      pid: agent_pid,
+      ref: ref,
+      identifier: "SODEV-430",
+      issue: issue,
+      worker_host: nil,
+      workspace_path: nil,
+      session_id: nil,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_app_server_pid: nil,
+      codex_input_tokens: 0,
+      codex_output_tokens: 0,
+      codex_total_tokens: 0,
+      turn_count: 0,
+      retry_attempt: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    state = %State{
+      running: %{"issue-cr-run" => running_entry},
+      claimed: MapSet.new(["issue-cr-run"]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    assert {:reply, {:ok, result}, new_state} =
+             Orchestrator.handle_call({:rerun_issue, "SODEV-430"}, {self(), make_ref()}, state)
+
+    assert result.queued == true
+    assert result.moved_to == "Scheduled"
+    refute Map.has_key?(new_state.running, "issue-cr-run")
+    assert_received {:memory_tracker_state_update, "issue-cr-run", "Scheduled"}
+  end
+
   test "rerun returns not_found when the identifier is not on the board" do
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
 
