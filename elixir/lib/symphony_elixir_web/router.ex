@@ -30,6 +30,7 @@ defmodule SymphonyElixirWeb.Router do
   scope "/", SymphonyElixirWeb do
     get("/board", ObservabilityApiController, :board)
     get("/live", ObservabilityApiController, :live)
+    get("/linear-asset/*path", ObservabilityApiController, :linear_asset)
     post("/refresh", ObservabilityApiController, :refresh)
     post("/runs/:issue_id/stop", ObservabilityApiController, :stop_run)
     post("/issues/:identifier/audit", ObservabilityApiController, :audit_issue)
