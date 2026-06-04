@@ -1487,8 +1487,12 @@ defmodule SymphonyElixir.Orchestrator do
       nil ->
         {:reply, {:error, :not_running}, state}
 
-      %{identifier: identifier} ->
-        updated_state = terminate_running_issue(state, issue_id, false)
+      %{identifier: identifier} = running_entry ->
+        updated_state =
+          state
+          |> record_session_completion_totals(running_entry)
+          |> stop_and_block_issue(issue_id, running_entry, "stopped by operator")
+
         notify_dashboard()
 
         {:reply,
