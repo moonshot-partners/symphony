@@ -276,7 +276,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
         costUsd: nil,
         lastAction: nil
       },
-      pr: nil,
+      pr: pr_payload(issue),
       evidence: [],
       report: nil,
       summary: nil,
@@ -286,6 +286,16 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       updatedAt: issue.updated_at || ""
     }
   end
+
+  # The agent's GitHub PR comes from the Linear issue attachment (the run ledger
+  # the fork used for this was stripped in the migration). CI status needs a
+  # GitHub call we do not make here, so it stays nil; the cockpit contract allows
+  # a null ci/url.
+  defp pr_payload(%Issue{pr: %{url: url, number: number}}) do
+    %{number: number, url: url, ci: nil}
+  end
+
+  defp pr_payload(_issue), do: nil
 
   defp live_agent_payload(entry) do
     %{

@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.LinearClientTest do
   use ExUnit.Case, async: true
 
-  alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.Linear.{Client, Issue}
 
   describe "build_candidate_filter/3" do
     test "project only scopes by project and state, no label key" do
@@ -40,6 +40,36 @@ defmodule SymphonyElixir.LinearClientTest do
       filter = Client.build_candidate_filter_for_test(nil, nil, ["In Development"])
 
       assert filter == %{state: %{name: %{in: ["In Development"]}}}
+    end
+  end
+
+  describe "normalize_issue/2 PR extraction" do
+    test "extracts the GitHub PR from the issue attachments" do
+      issue = %{
+        "identifier" => "SODEV-969",
+        "attachments" => %{
+          "nodes" => [
+            %{"url" => "https://uploads.linear.app/a/b/c"},
+            %{"url" => "https://github.com/schoolsoutapp/fe-next-app/pull/658"}
+          ]
+        }
+      }
+
+      assert %Issue{pr: %{url: url, number: 658}} = Client.normalize_issue_for_test(issue)
+      assert url == "https://github.com/schoolsoutapp/fe-next-app/pull/658"
+    end
+
+    test "pr is nil when no attachment is a GitHub PR" do
+      issue = %{
+        "identifier" => "SODEV-1",
+        "attachments" => %{"nodes" => [%{"url" => "https://uploads.linear.app/x/y/z"}]}
+      }
+
+      assert %Issue{pr: nil} = Client.normalize_issue_for_test(issue)
+    end
+
+    test "pr is nil when the issue has no attachments" do
+      assert %Issue{pr: nil} = Client.normalize_issue_for_test(%{"identifier" => "SODEV-2"})
     end
   end
 end

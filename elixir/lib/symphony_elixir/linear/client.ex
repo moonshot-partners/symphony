@@ -31,6 +31,11 @@ defmodule SymphonyElixir.Linear.Client do
             name
           }
         }
+        attachments(first: 25) {
+          nodes {
+            url
+          }
+        }
         inverseRelations(first: $relationFirst) {
           nodes {
             type
@@ -74,6 +79,11 @@ defmodule SymphonyElixir.Linear.Client do
         labels {
           nodes {
             name
+          }
+        }
+        attachments(first: 25) {
+          nodes {
+            url
           }
         }
         inverseRelations(first: $relationFirst) {
@@ -483,6 +493,7 @@ defmodule SymphonyElixir.Linear.Client do
       assignee_id: assignee_field(assignee, "id"),
       blocked_by: extract_blockers(issue),
       labels: extract_labels(issue),
+      pr: extract_pr(issue),
       assigned_to_worker: assigned_to_worker?(assignee, assignee_filter),
       created_at: parse_datetime(issue["createdAt"]),
       updated_at: parse_datetime(issue["updatedAt"])
@@ -490,6 +501,26 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
+
+  # The agent attaches its GitHub PR to the Linear issue (attachmentLinkGitHubPR),
+  # so the PR survives the run and is the source of truth for finished tickets.
+  # Pick the first attachment whose url is a GitHub pull request.
+  @github_pr_regex ~r{github\.com/[^/\s]+/[^/\s]+/pull/(\d+)}
+  defp extract_pr(issue) do
+    issue
+    |> get_in(["attachments", "nodes"])
+    |> List.wrap()
+    |> Enum.find_value(fn
+      %{"url" => url} when is_binary(url) ->
+        case Regex.run(@github_pr_regex, url) do
+          [_, number] -> %{url: url, number: String.to_integer(number)}
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil
