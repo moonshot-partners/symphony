@@ -1521,7 +1521,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_call({:reset_issue, identifier}, _from, state) do
-    state = stop_existing_issue_by_identifier(state, identifier, false)
+    state = reset_existing_issue_by_identifier(state, identifier)
     notify_dashboard()
 
     {:reply,
@@ -1586,6 +1586,60 @@ defmodule SymphonyElixir.Orchestrator do
       {issue_id, _running_entry} -> terminate_running_issue(state, issue_id, cleanup_workspace?)
       nil -> release_blocked_or_retry_by_identifier(state, normalized, cleanup_workspace?)
     end
+  end
+
+  defp reset_existing_issue_by_identifier(state, identifier) do
+    normalized = normalize_identifier(identifier)
+
+    state.running
+    |> Enum.find(fn
+      {_issue_id, %{identifier: running_identifier}} -> normalize_identifier(running_identifier) == normalized
+      _ -> false
+    end)
+    |> case do
+      {issue_id, running_entry} ->
+        state
+        |> record_session_completion_totals(running_entry)
+        |> stop_and_block_issue(issue_id, running_entry, "reset by operator")
+
+      nil ->
+        block_retry_issue_by_identifier(state, normalized)
+    end
+  end
+
+  defp block_retry_issue_by_identifier(state, normalized_identifier) do
+    Enum.reduce(state.retry_attempts, state, fn
+      {issue_id, %{identifier: identifier, timer_ref: timer_ref} = retry_entry}, state_acc ->
+        if normalize_identifier(identifier) == normalized_identifier do
+          if is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+
+          blocked_entry = %{
+            issue_id: issue_id,
+            identifier: identifier,
+            issue: nil,
+            worker_host: Map.get(retry_entry, :worker_host),
+            workspace_path: Map.get(retry_entry, :workspace_path),
+            session_id: nil,
+            error: "reset by operator",
+            blocked_at: DateTime.utc_now(),
+            last_codex_message: nil,
+            last_codex_event: nil,
+            last_codex_timestamp: nil
+          }
+
+          %{
+            state_acc
+            | retry_attempts: Map.delete(state_acc.retry_attempts, issue_id),
+              claimed: MapSet.put(state_acc.claimed, issue_id),
+              blocked: Map.put(state_acc.blocked, issue_id, blocked_entry)
+          }
+        else
+          state_acc
+        end
+
+      _entry, state_acc ->
+        state_acc
+    end)
   end
 
   defp release_blocked_or_retry_by_identifier(state, normalized_identifier, cleanup_workspace?) do
