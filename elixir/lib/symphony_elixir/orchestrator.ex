@@ -1339,7 +1339,8 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  @spec run_issue(String.t()) :: {:ok, map()} | {:error, :not_found | :not_active | :already_running | :no_capacity | :unavailable | term()}
+  @spec run_issue(String.t()) ::
+          {:ok, map()} | {:error, :not_found | :not_active | :already_running | :no_capacity | :unavailable | term()}
   def run_issue(identifier), do: run_issue(__MODULE__, identifier)
 
   @spec run_issue(GenServer.server(), String.t()) ::
@@ -1352,7 +1353,8 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  @spec rerun_issue(String.t()) :: {:ok, map()} | {:error, :not_found | :not_active | :no_capacity | :unavailable | term()}
+  @spec rerun_issue(String.t()) ::
+          {:ok, map()} | {:error, :not_found | :not_active | :no_capacity | :unavailable | term()}
   def rerun_issue(identifier), do: rerun_issue(__MODULE__, identifier)
 
   @spec rerun_issue(GenServer.server(), String.t()) ::
@@ -1711,7 +1713,7 @@ defmodule SymphonyElixir.Orchestrator do
     Enum.reduce(state.retry_attempts, state, fn
       {issue_id, %{identifier: identifier, timer_ref: timer_ref} = retry_entry}, state_acc ->
         if normalize_identifier(identifier) == normalized_identifier do
-          if is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+          cancel_timer_if_ref(timer_ref)
 
           blocked_entry = %{
             issue_id: issue_id,
@@ -1747,7 +1749,7 @@ defmodule SymphonyElixir.Orchestrator do
       Enum.reduce(state.blocked, state, fn
         {issue_id, %{identifier: identifier, worker_host: worker_host}}, state_acc ->
           if normalize_identifier(identifier) == normalized_identifier do
-            if cleanup_workspace?, do: cleanup_issue_workspace(identifier, worker_host)
+            cleanup_workspace_if(cleanup_workspace?, identifier, worker_host)
             release_issue_claim(state_acc, issue_id)
           else
             state_acc
@@ -1760,7 +1762,7 @@ defmodule SymphonyElixir.Orchestrator do
     Enum.reduce(state.retry_attempts, state, fn
       {issue_id, %{identifier: identifier, timer_ref: timer_ref}}, state_acc ->
         if normalize_identifier(identifier) == normalized_identifier do
-          if is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+          cancel_timer_if_ref(timer_ref)
           release_issue_claim(state_acc, issue_id)
         else
           state_acc
@@ -1769,6 +1771,14 @@ defmodule SymphonyElixir.Orchestrator do
       _entry, state_acc ->
         state_acc
     end)
+  end
+
+  defp cancel_timer_if_ref(timer_ref) do
+    if is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+  end
+
+  defp cleanup_workspace_if(cleanup_workspace?, identifier, worker_host) do
+    if cleanup_workspace?, do: cleanup_issue_workspace(identifier, worker_host)
   end
 
   defp find_candidate_issue_by_identifier(identifier) do
@@ -1836,6 +1846,9 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @recent_event_noise ["streaming", "token usage", "rate limit", "reasoning"]
+  # humanize_codex_message is typed to always return a binary, so dialyzer sees
+  # the non-binary fallback as unreachable. Kept as a defensive guard.
+  @dialyzer {:nowarn_function, recent_event_noise?: 1}
   defp recent_event_noise?(message) do
     case SymphonyElixir.StatusDashboard.humanize_codex_message(message) do
       action when is_binary(action) ->
@@ -1943,6 +1956,9 @@ defmodule SymphonyElixir.Orchestrator do
   # Persist the finished run's trace + summary so the cockpit can surface them on
   # a ticket that has left the live snapshot. Injectable and fail-safe: a ledger
   # problem must never disturb orchestration.
+  # Callers always pass a map running_entry, so dialyzer sees the non-map fallback
+  # clause as unreachable. Kept as a defensive guard.
+  @dialyzer {:nowarn_function, record_run_ledger: 2}
   defp record_run_ledger(running_entry, session_id) when is_map(running_entry) do
     record_fn =
       Application.get_env(
@@ -1975,9 +1991,7 @@ defmodule SymphonyElixir.Orchestrator do
         SymphonyElixir.StatusDashboard.humanize_codex_message(action)
 
       _ ->
-        SymphonyElixir.StatusDashboard.humanize_codex_message(
-          Map.get(running_entry, :last_codex_message)
-        )
+        SymphonyElixir.StatusDashboard.humanize_codex_message(Map.get(running_entry, :last_codex_message))
     end
   end
 

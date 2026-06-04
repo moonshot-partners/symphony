@@ -34,6 +34,9 @@ defmodule SymphonyElixir.RunLedger do
   Fire-and-forget record of a finished run, called from the orchestrator. Resolves
   the trace off the orchestrator process and never raises into the caller.
   """
+  # Task.start is typed as always {:ok, pid}, so dialyzer sees the :error fallback
+  # as unreachable. It is a deliberate defensive guard, so silence the warning.
+  @dialyzer {:nowarn_function, record_async: 1}
   @spec record_async(map()) :: {:ok, pid()} | :error
   def record_async(%{} = entry) do
     case Task.start(fn -> record(entry) end) do
@@ -55,8 +58,12 @@ defmodule SymphonyElixir.RunLedger do
     }
 
     case File.write(path(), Jason.encode!(record) <> "\n", [:append]) do
-      :ok -> :ok
-      {:error, reason} -> Logger.warning("run ledger write failed: #{inspect(reason)}"); :error
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("run ledger write failed: #{inspect(reason)}")
+        :error
     end
   rescue
     error ->

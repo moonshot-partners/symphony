@@ -26,6 +26,11 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   # Served through CockpitCache so the dashboard's 1.5s polling reads a cached
   # value instead of hitting Linear and the orchestrator on every request.
   @doc false
+  # ticket_payload/3 takes the opaque MapSet.t() of running ids; passing the
+  # in-module MapSet here trips dialyzer's MapSet opacity check (a known false
+  # positive), so silence it on this caller only.
+  @dialyzer {:nowarn_function, build_board_payload: 0}
+  @spec build_board_payload() :: map()
   def build_board_payload do
     tracker = Config.settings!().tracker
 
@@ -63,6 +68,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   # view, so "Done" surfaces only recently-shipped work (done_extra), not the
   # full archive of closed tickets.
   @doc false
+  @spec board_state_names(map()) :: [String.t()]
   def board_state_names(tracker) do
     [
       tracker.active_states,
@@ -84,6 +90,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   # CockpitCache so a snapshot call queued behind the orchestrator's reconcile
   # never blocks the dashboard's 2s poll.
   @doc false
+  @spec build_live_payload() :: map()
   def build_live_payload do
     case Orchestrator.snapshot(orchestrator(), snapshot_timeout_ms()) do
       %{} = snapshot ->
@@ -276,6 +283,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   end
 
   @doc false
+  @spec ticket_payload(Issue.t(), MapSet.t(), map()) :: map()
   def ticket_payload(%Issue{} = issue, running_ids, ledger) do
     running? = MapSet.member?(running_ids, issue.id)
     # The persisted ledger holds this identifier's last finished run. Its summary

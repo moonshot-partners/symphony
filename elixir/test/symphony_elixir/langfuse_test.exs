@@ -7,6 +7,7 @@ defmodule SymphonyElixir.LangfuseTest do
   setup do
     on_exit(fn ->
       Application.delete_env(:symphony_elixir, :langfuse_trace_fetcher)
+
       Enum.each(
         ~w(LANGFUSE_HOST LANGFUSE_BASE_URL LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_SECRET),
         &System.delete_env/1
