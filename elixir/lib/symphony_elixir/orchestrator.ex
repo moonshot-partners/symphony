@@ -1516,14 +1516,14 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_call({:run_issue, identifier}, _from, state) do
-    {reply, state} = run_issue_by_identifier(state, identifier, false)
+    {reply, state} = run_issue_by_identifier(state, identifier)
     notify_dashboard()
     {:reply, reply, state}
   end
 
   def handle_call({:rerun_issue, identifier}, _from, state) do
     state = stop_existing_issue_by_identifier(state, identifier, false)
-    {reply, state} = run_issue_by_identifier(state, identifier, true)
+    {reply, state} = rerun_issue_by_identifier(state, identifier)
     notify_dashboard()
     {:reply, reply, state}
   end
@@ -1546,7 +1546,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp blocked_issue_state(%{issue: %Issue{state: state}}), do: state
   defp blocked_issue_state(_metadata), do: nil
 
-  defp run_issue_by_identifier(state, identifier, force_retry?) do
+  defp run_issue_by_identifier(state, identifier) do
     normalized = normalize_identifier(identifier)
 
     case find_candidate_issue_by_identifier(normalized) do
@@ -1565,12 +1565,11 @@ defmodule SymphonyElixir.Orchestrator do
             next_state =
               state
               |> release_issue_claim(issue.id)
-              |> maybe_cleanup_for_forced_retry(issue, force_retry?)
               |> dispatch_issue(issue)
 
             {{:ok,
               %{
-                operation: if(force_retry?, do: "rerun", else: "run"),
+                operation: "run",
                 issue_id: issue.id,
                 issue_identifier: issue.identifier,
                 queued: true
@@ -1580,6 +1579,91 @@ defmodule SymphonyElixir.Orchestrator do
       {:error, reason} ->
         {{:error, reason}, state}
     end
+  end
+
+  # Rerun is an explicit operator override fired from the cockpit: unlike a normal
+  # `run` (which only dispatches an already-active issue), it must work on any
+  # issue the board shows, including one parked in review or blocked. So it looks
+  # the issue up across every routed board state, moves it back to the dispatch
+  # state, wipes the stale workspace, clears local run markers, and lets the next
+  # poll pick it up fresh. Looking only at the active dispatch states is what made
+  # rerun 404 for an issue sitting in "In Code Review".
+  defp rerun_issue_by_identifier(state, identifier) do
+    normalized = normalize_identifier(identifier)
+
+    case find_rerun_issue_by_identifier(normalized) do
+      {:ok, %Issue{} = issue} ->
+        dispatch_state = rerun_dispatch_state()
+
+        case Tracker.update_issue_state(issue.id, dispatch_state) do
+          :ok ->
+            cleanup_issue_workspace(issue.identifier)
+
+            next_state =
+              state
+              |> release_issue_claim(issue.id)
+              |> drop_completed_marker(issue.id)
+              |> schedule_tick(0)
+
+            {{:ok,
+              %{
+                operation: "rerun",
+                issue_id: issue.id,
+                issue_identifier: issue.identifier,
+                moved_to: dispatch_state,
+                queued: true
+              }}, next_state}
+
+          {:error, reason} ->
+            Logger.warning("Manual rerun state transition failed identifier=#{issue.identifier}: #{inspect(reason)}")
+
+            {{:error, :state_transition_failed}, state}
+        end
+
+      {:error, reason} ->
+        {{:error, reason}, state}
+    end
+  end
+
+  defp find_rerun_issue_by_identifier(identifier) do
+    case Tracker.fetch_issues_by_states(rerun_lookup_states()) do
+      {:ok, issues} ->
+        case Enum.find(issues, &(normalize_identifier(Map.get(&1, :identifier)) == identifier)) do
+          %Issue{} = issue -> {:ok, issue}
+          _ -> {:error, :not_found}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Every non-terminal state the cockpit board can display for a routed issue.
+  # This is the set an operator can actually see and click "Rerun" on, so it is
+  # the right lookup scope — wider than the active dispatch queue alone.
+  defp rerun_lookup_states do
+    tracker = Config.settings!().tracker
+
+    [
+      tracker.active_states,
+      tracker.in_progress_states,
+      tracker.review_state,
+      tracker.ready_state,
+      tracker.blocked_state
+    ]
+    |> List.flatten()
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.uniq()
+  end
+
+  defp rerun_dispatch_state do
+    Config.settings!().tracker.active_states
+    |> List.wrap()
+    |> Enum.find("", &(is_binary(&1) and String.trim(&1) != ""))
+  end
+
+  defp drop_completed_marker(%State{} = state, issue_id) do
+    %{state | completed: MapSet.delete(state.completed, issue_id)}
   end
 
   defp stop_existing_issue_by_identifier(state, identifier, cleanup_workspace?) do
@@ -1678,13 +1762,6 @@ defmodule SymphonyElixir.Orchestrator do
         state_acc
     end)
   end
-
-  defp maybe_cleanup_for_forced_retry(state, %Issue{identifier: identifier}, true) do
-    cleanup_issue_workspace(identifier)
-    state
-  end
-
-  defp maybe_cleanup_for_forced_retry(state, _issue, false), do: state
 
   defp find_candidate_issue_by_identifier(identifier) do
     case Tracker.fetch_candidate_issues() do

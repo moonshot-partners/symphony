@@ -100,6 +100,11 @@ defmodule SymphonyElixir.TestSupport do
           tracker_assignee: nil,
           tracker_active_states: ["Todo", "In Progress"],
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
+          tracker_in_progress_states: [],
+          tracker_review_state: nil,
+          tracker_ready_state: nil,
+          tracker_blocked_state: nil,
+          tracker_done_extra_states: [],
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           worker_ssh_hosts: [],
@@ -138,6 +143,11 @@ defmodule SymphonyElixir.TestSupport do
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+    tracker_in_progress_states = Keyword.get(config, :tracker_in_progress_states)
+    tracker_review_state = Keyword.get(config, :tracker_review_state)
+    tracker_ready_state = Keyword.get(config, :tracker_ready_state)
+    tracker_blocked_state = Keyword.get(config, :tracker_blocked_state)
+    tracker_done_extra_states = Keyword.get(config, :tracker_done_extra_states)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
@@ -177,6 +187,11 @@ defmodule SymphonyElixir.TestSupport do
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
+        "  in_progress_states: #{yaml_value(tracker_in_progress_states)}",
+        "  review_state: #{yaml_value(tracker_review_state)}",
+        "  ready_state: #{yaml_value(tracker_ready_state)}",
+        "  blocked_state: #{yaml_value(tracker_blocked_state)}",
+        "  done_extra_states: #{yaml_value(tracker_done_extra_states)}",
         "polling:",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
