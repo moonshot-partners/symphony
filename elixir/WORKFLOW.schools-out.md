@@ -1,9 +1,8 @@
 ---
 tracker:
   kind: linear
-  project_slug: schools-out-50b85c16c2c3
+  project_slug: c30ab7cd169e
   active_states:
-    - Scheduled
     - In Development
   terminal_states:
     - Released / Live
