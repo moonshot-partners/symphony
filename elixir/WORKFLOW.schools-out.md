@@ -4,6 +4,7 @@ tracker:
   label: agent
   active_states:
     - Scheduled
+    - In Development
   terminal_states:
     - Released / Live
     - Closed
@@ -110,18 +111,23 @@ dependencies only for the repositories you actually edit.
 
 Ticket lifecycle:
 
-You drive this ticket's Linear state yourself with the `linear_graphql` tool
-(it already carries Symphony's Linear auth; see the `linear` skill). Symphony
-only reads state, it never moves the ticket, so if you leave the ticket in an
-active state when you stop, it will be dispatched again. Always fetch the
-team's workflow states first to get the exact `stateId`, then `issueUpdate`.
+You drive this ticket's Linear state with the `linear_graphql` tool (it carries
+Symphony's Linear auth; see the `linear` skill). Symphony picks up tickets in
+`Scheduled` and `In Development` and never moves them itself, only reads state.
+Those two are the "agent is on it" states. Always fetch the team's workflow
+states first to get the exact `stateId`, then `issueUpdate`.
 
-- When you start, move this ticket from `Scheduled` to `In Development` so it
-  leaves the agent queue and the team sees it is being worked.
-- When you open the PR, attach it to the ticket with `attachmentLinkGitHubPR`
-  and move the ticket to `In Code Review`.
+- When you start, move the ticket from `Scheduled` to `In Development` so the
+  team sees it is being worked. Keep going across turns until the work is done;
+  `In Development` stays active, so if a turn is interrupted Symphony re-engages
+  you to continue from the same workspace.
+- When you open the PR, attach it with `attachmentLinkGitHubPR` and move the
+  ticket to `In Code Review`. That takes it out of the active states and ends
+  the run cleanly.
 - If you are genuinely blocked and cannot finish, move the ticket to
-  `On Hold / Blocked` and add a comment explaining what is blocking it.
+  `On Hold / Blocked` and comment what is blocking it. That also ends the run.
+- Never stop while still in `Scheduled` or `In Development` unless you have an
+  open PR or a real blocker; otherwise you will simply be re-dispatched.
 
 Issue:
 
