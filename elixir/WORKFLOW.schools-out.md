@@ -26,23 +26,45 @@ hooks:
   after_create: |
     set -eu
 
+    # Clones stay serial: schools-out clones into the workspace root, so cloning
+    # fe-next-app concurrently could leave the root non-empty and fail that clone.
+    # They are cheap (--depth 1). The two dependency installs are independent
+    # (Ruby vs JS) and are the slow part, so they run in parallel; we wait on both
+    # and abort if either fails, so a broken setup never yields a half-built tree.
     git clone --depth 1 --branch dev https://github.com/schoolsoutapp/schools-out .
     git clone --depth 1 --branch dev https://github.com/schoolsoutapp/fe-next-app fe-next-app
 
-    if [ -f Gemfile ]; then
-      bundle config set --local path vendor/bundle
-      bundle install --no-color
-    fi
-
-    if [ -f fe-next-app/package.json ]; then
-      cd fe-next-app
-      if [ -f pnpm-lock.yaml ] && command -v pnpm >/dev/null 2>&1; then
-        pnpm install --frozen-lockfile
-      elif [ -f package-lock.json ]; then
-        npm ci --no-audit --no-fund
-      else
-        npm install --no-audit --no-fund
+    (
+      if [ -f Gemfile ]; then
+        bundle config set --local path vendor/bundle
+        bundle install --no-color
       fi
+    ) &
+    backend_deps_pid=$!
+
+    (
+      if [ -f fe-next-app/package.json ]; then
+        cd fe-next-app
+        if [ -f pnpm-lock.yaml ] && command -v pnpm >/dev/null 2>&1; then
+          pnpm install --frozen-lockfile
+        elif [ -f package-lock.json ]; then
+          npm ci --no-audit --no-fund
+        else
+          npm install --no-audit --no-fund
+        fi
+      fi
+    ) &
+    frontend_deps_pid=$!
+
+    # Reap both jobs before deciding: the `|| rc=$?` keeps set -e from aborting on
+    # the first failure, so we never exit while the other install is still writing.
+    backend_deps_rc=0
+    frontend_deps_rc=0
+    wait "$backend_deps_pid" || backend_deps_rc=$?
+    wait "$frontend_deps_pid" || frontend_deps_rc=$?
+    if [ "$backend_deps_rc" -ne 0 ] || [ "$frontend_deps_rc" -ne 0 ]; then
+      echo "dependency install failed (backend=$backend_deps_rc frontend=$frontend_deps_rc)" >&2
+      exit 1
     fi
   before_run: |
     set -eu
@@ -91,8 +113,9 @@ The workspace starts with `schools-out` (Rails backend, at the root) and
 `schools-out` is the shared backend for every product. Decide which product
 this ticket belongs to from its title, description, and labels, then make sure
 that product's repositories are present before you start. Clone any that are
-missing with `git clone --depth 1 https://github.com/schoolsoutapp/<repo> <dir>`
-(git authentication is already configured) and check out `dev`.
+missing with `git clone --depth 1 --branch dev https://github.com/schoolsoutapp/<repo> <dir>`
+(git authentication is already configured); every SchoolsOut repo uses `dev` as
+its integration branch.
 
 Product to repository map:
 
