@@ -6,7 +6,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
-  alias SymphonyElixir.{Config, Orchestrator, Tracker}
+  alias SymphonyElixir.{Config, Langfuse, Orchestrator, RunLedger, Tracker}
   alias SymphonyElixir.Linear.Issue
   alias SymphonyElixirWeb.{Endpoint, Presenter}
 
@@ -31,6 +31,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       end
 
     running_ids = running_issue_ids(orchestrator(), snapshot_timeout_ms())
+    ledger = RunLedger.latest_by_identifier()
 
     json(conn, %{
       states: %{
@@ -45,7 +46,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
         doneExtra: tracker.done_extra_states,
         inProgressExtra: tracker.in_progress_states
       },
-      tickets: Enum.map(issues, &ticket_payload(&1, running_ids))
+      tickets: Enum.map(issues, &ticket_payload(&1, running_ids, ledger))
     })
   end
 
@@ -261,8 +262,11 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     end
   end
 
-  defp ticket_payload(%Issue{} = issue, running_ids) do
+  defp ticket_payload(%Issue{} = issue, running_ids, ledger) do
     running? = MapSet.member?(running_ids, issue.id)
+    # A still-running ticket gets its trace from the live overlay; only finished
+    # tickets read the persisted run ledger, so a stale prior run never shows.
+    record = unless running?, do: Map.get(ledger, issue.identifier)
 
     %{
       id: issue.identifier,
@@ -279,13 +283,19 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       pr: pr_payload(issue),
       evidence: [],
       report: nil,
-      summary: nil,
+      summary: ledger_summary(record),
       timeline: [],
       url: issue.url,
-      traceUrl: nil,
+      traceUrl: ledger_trace_url(record),
       updatedAt: issue.updated_at || ""
     }
   end
+
+  defp ledger_summary(%{"summary" => summary}) when is_binary(summary), do: summary
+  defp ledger_summary(_record), do: nil
+
+  defp ledger_trace_url(%{"traceUrl" => url}) when is_binary(url), do: url
+  defp ledger_trace_url(_record), do: nil
 
   # The agent's GitHub PR comes from the Linear issue attachment (the run ledger
   # the fork used for this was stripped in the migration). CI status needs a
@@ -318,7 +328,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       sessionId: Map.get(entry, :session_id),
       workerHost: Map.get(entry, :worker_host),
       costUsd: nil,
-      traceUrl: langfuse_trace_url(entry)
+      traceUrl: Langfuse.trace_url(Map.get(entry, :session_id))
     }
   end
 
@@ -347,77 +357,6 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   defp live_phase(:turn_cancelled), do: "cancelled"
   defp live_phase(nil), do: "starting"
   defp live_phase(_event), do: "building"
-
-  defp langfuse_trace_url(entry) do
-    with {:ok, config} <- langfuse_config(),
-         {:ok, turn_id} <- session_turn_id(Map.get(entry, :session_id)),
-         {:ok, trace} <- fetch_langfuse_trace(config, turn_id) do
-      langfuse_trace_url(config.host, trace)
-    else
-      _ -> nil
-    end
-  end
-
-  defp langfuse_config do
-    host = System.get_env("LANGFUSE_HOST") || System.get_env("LANGFUSE_BASE_URL")
-    public_key = System.get_env("LANGFUSE_PUBLIC_KEY")
-    secret_key = System.get_env("LANGFUSE_SECRET_KEY") || System.get_env("LANGFUSE_SECRET")
-
-    if present?(host) and present?(public_key) and present?(secret_key) do
-      {:ok, %{host: String.trim_trailing(host, "/"), public_key: public_key, secret_key: secret_key}}
-    else
-      :error
-    end
-  end
-
-  defp session_turn_id(session_id) when is_binary(session_id) do
-    case String.split(session_id, "-", parts: 6) do
-      [_, _, _, _, _, turn_id] when byte_size(turn_id) > 0 -> {:ok, turn_id}
-      _ -> :error
-    end
-  end
-
-  defp session_turn_id(_session_id), do: :error
-
-  defp fetch_langfuse_trace(%{host: host, public_key: public_key, secret_key: secret_key}, turn_id) do
-    auth = Base.encode64("#{public_key}:#{secret_key}")
-
-    case Req.get("#{host}/api/public/traces",
-           params: [limit: 50],
-           headers: [{"authorization", "Basic #{auth}"}],
-           receive_timeout: 1_500
-         ) do
-      {:ok, %{status: status, body: %{"data" => traces}}} when status in 200..299 ->
-        traces
-        |> Enum.find(&trace_matches_turn_id?(&1, turn_id))
-        |> case do
-          nil -> :error
-          trace -> {:ok, trace}
-        end
-
-      _ ->
-        :error
-    end
-  end
-
-  defp trace_matches_turn_id?(%{"metadata" => %{"attributes" => attributes}}, turn_id) when is_map(attributes) do
-    Map.get(attributes, "turn.id") == turn_id
-  end
-
-  defp trace_matches_turn_id?(_trace, _turn_id), do: false
-
-  defp langfuse_trace_url(host, %{"htmlPath" => html_path}) when is_binary(html_path) do
-    host <> html_path
-  end
-
-  defp langfuse_trace_url(_host, %{"id" => id, "projectId" => project_id})
-       when is_binary(id) and is_binary(project_id) do
-    "https://cloud.langfuse.com/project/#{project_id}/traces/#{id}"
-  end
-
-  defp langfuse_trace_url(_host, _trace), do: nil
-
-  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   # Format the orchestrator's recent-events ring buffer into the live timeline
   # contract: {event, action, at}, newest first (already ordered by the buffer).

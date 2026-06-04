@@ -298,6 +298,68 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.total_tokens == 16
   end
 
+  test "records the finished run to the ledger on agent down" do
+    test_pid = self()
+
+    Application.put_env(:symphony_elixir, :run_ledger_record_fn, fn entry ->
+      send(test_pid, {:ledger_recorded, entry})
+    end)
+
+    on_exit(fn ->
+      Application.put_env(:symphony_elixir, :run_ledger_record_fn, fn _entry -> :ok end)
+    end)
+
+    issue_id = "issue-ledger-record"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-LEDGER",
+      title: "Ledger record on down",
+      description: "Persist trace + summary at completion",
+      state: "In Code Review",
+      url: "https://example.org/issues/MT-LEDGER"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :LedgerRecordOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :normal) end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: "sess-a-b-c-d-turn42",
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_input_tokens: 0,
+      codex_output_tokens: 0,
+      codex_total_tokens: 0,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(pid, {:DOWN, process_ref, :process, self(), :normal})
+
+    assert_receive {:ledger_recorded, entry}, 1_000
+    assert entry.identifier == "MT-LEDGER"
+    assert entry.session_id == "sess-a-b-c-d-turn42"
+    assert is_binary(entry.summary)
+  end
+
   test "orchestrator snapshot tracks codex token-count cumulative usage payloads" do
     issue_id = "issue-token-count-snapshot"
 

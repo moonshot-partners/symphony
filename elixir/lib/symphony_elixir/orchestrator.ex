@@ -133,6 +133,7 @@ defmodule SymphonyElixir.Orchestrator do
         session_id = running_entry_session_id(running_entry)
 
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
+        record_run_ledger(running_entry, session_id)
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
 
@@ -1849,6 +1850,33 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp record_session_completion_totals(state, _running_entry), do: state
+
+  # Persist the finished run's trace + summary so the cockpit can surface them on
+  # a ticket that has left the live snapshot. Injectable and fail-safe: a ledger
+  # problem must never disturb orchestration.
+  defp record_run_ledger(running_entry, session_id) when is_map(running_entry) do
+    record_fn =
+      Application.get_env(
+        :symphony_elixir,
+        :run_ledger_record_fn,
+        &SymphonyElixir.RunLedger.record_async/1
+      )
+
+    record_fn.(%{
+      identifier: Map.get(running_entry, :identifier),
+      session_id: session_id,
+      summary:
+        SymphonyElixir.StatusDashboard.humanize_codex_message(
+          Map.get(running_entry, :last_codex_message)
+        )
+    })
+  rescue
+    error ->
+      Logger.warning("run ledger dispatch failed: #{inspect(error)}")
+      :error
+  end
+
+  defp record_run_ledger(_running_entry, _session_id), do: :ok
 
   defp refresh_runtime_config(%State{} = state) do
     config = Config.settings!()
