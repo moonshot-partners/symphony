@@ -10,6 +10,13 @@ tracker:
     - Canceled
     - Cancelled
     - Duplicate
+  in_progress_states:
+    - In Development
+  review_state: In Code Review
+  ready_state: Approved QA
+  blocked_state: On Hold / Blocked
+  done_extra_states:
+    - Recently released
 polling:
   interval_ms: 5000
 workspace:

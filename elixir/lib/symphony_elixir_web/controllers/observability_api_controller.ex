@@ -12,11 +12,13 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec board(Conn.t(), map()) :: Conn.t()
   def board(conn, _params) do
-    settings = Config.settings!()
-    states = settings.tracker.active_states
+    tracker = Config.settings!().tracker
 
+    # Fetch the whole agent pipeline (not just the active queue) so every
+    # lifecycle column can populate. The label/project filter still applies via
+    # fetch_issues_by_states, so this stays scoped to the agent's own tickets.
     issues =
-      case Tracker.fetch_issues_by_states(states) do
+      case Tracker.fetch_issues_by_states(board_state_names(tracker)) do
         {:ok, issues} -> issues
         {:error, _reason} -> []
       end
@@ -25,19 +27,35 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
     json(conn, %{
       states: %{
-        active: settings.tracker.active_states,
-        onComplete: nil,
+        active: tracker.active_states,
+        onComplete: tracker.review_state,
         onExhaust: nil,
-        onPromote: nil,
+        onPromote: tracker.ready_state,
         onPrMerge: nil,
-        onReject: nil,
-        terminal: settings.tracker.terminal_states,
+        onReject: tracker.blocked_state,
+        terminal: tracker.terminal_states,
         upNextExtra: [],
-        doneExtra: [],
-        inProgressExtra: []
+        doneExtra: tracker.done_extra_states,
+        inProgressExtra: tracker.in_progress_states
       },
       tickets: Enum.map(issues, &ticket_payload(&1, running_ids))
     })
+  end
+
+  # The union of every Linear state the cockpit columns can show, deduped and
+  # with unset mappings dropped.
+  @doc false
+  def board_state_names(tracker) do
+    [
+      tracker.active_states,
+      tracker.in_progress_states,
+      [tracker.review_state, tracker.ready_state, tracker.blocked_state],
+      tracker.terminal_states,
+      tracker.done_extra_states
+    ]
+    |> List.flatten()
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
   end
 
   @spec live(Conn.t(), map()) :: Conn.t()

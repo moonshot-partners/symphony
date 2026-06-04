@@ -53,6 +53,14 @@ defmodule SymphonyElixir.Config.Schema do
       field(:assignee, :string)
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+      # Cockpit board column mapping (display only; does not affect dispatch).
+      # Each maps a Linear state (or states) to a lifecycle column so the board
+      # can show the whole pipeline, not just the active queue.
+      field(:in_progress_states, {:array, :string}, default: [])
+      field(:review_state, :string)
+      field(:ready_state, :string)
+      field(:blocked_state, :string)
+      field(:done_extra_states, {:array, :string}, default: [])
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -60,7 +68,21 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:kind, :endpoint, :api_key, :project_slug, :label, :assignee, :active_states, :terminal_states],
+        [
+          :kind,
+          :endpoint,
+          :api_key,
+          :project_slug,
+          :label,
+          :assignee,
+          :active_states,
+          :terminal_states,
+          :in_progress_states,
+          :review_state,
+          :ready_state,
+          :blocked_state,
+          :done_extra_states
+        ],
         empty_values: []
       )
     end
