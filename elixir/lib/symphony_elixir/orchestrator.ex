@@ -1881,11 +1881,13 @@ defmodule SymphonyElixir.Orchestrator do
 
   # Prefer the last meaningful agent action (the noise-filtered recent-events ring
   # buffer's head) over the raw last codex message, which is often a rate-limit or
-  # token-usage notification rather than anything a human wants to read.
+  # token-usage notification rather than anything a human wants to read. The
+  # buffered action is a codex-update map; humanize it the same way the live
+  # timeline does. Fall back to the last message only when the buffer is empty.
   defp run_ledger_summary(running_entry) do
     case Map.get(running_entry, :recent_events, []) do
-      [%{action: action} | _] when is_binary(action) and action != "" ->
-        action
+      [%{action: action} | _] when not is_nil(action) ->
+        SymphonyElixir.StatusDashboard.humanize_codex_message(action)
 
       _ ->
         SymphonyElixir.StatusDashboard.humanize_codex_message(
