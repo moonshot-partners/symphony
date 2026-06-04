@@ -244,7 +244,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       phase: live_phase(Map.get(entry, :last_codex_event)),
       lastAction: summarize_live_message(Map.get(entry, :last_codex_message)),
       lastEvent: stringify(Map.get(entry, :last_codex_event)),
-      events: [],
+      events: live_events_payload(Map.get(entry, :recent_events, [])),
       runtimeSeconds: Map.get(entry, :runtime_seconds),
       startedAt: iso8601(Map.get(entry, :started_at)),
       lastActivityAt: iso8601(Map.get(entry, :last_codex_timestamp)),
@@ -356,6 +356,20 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   defp langfuse_trace_url(_host, _trace), do: nil
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  # Format the orchestrator's recent-events ring buffer into the live timeline
+  # contract: {event, action, at}, newest first (already ordered by the buffer).
+  defp live_events_payload(events) when is_list(events) do
+    Enum.map(events, fn event ->
+      %{
+        event: stringify(Map.get(event, :event)),
+        action: summarize_live_message(Map.get(event, :action)),
+        at: iso8601(Map.get(event, :at))
+      }
+    end)
+  end
+
+  defp live_events_payload(_events), do: []
 
   defp summarize_live_message(nil), do: nil
   defp summarize_live_message(message), do: SymphonyElixir.StatusDashboard.humanize_codex_message(message)

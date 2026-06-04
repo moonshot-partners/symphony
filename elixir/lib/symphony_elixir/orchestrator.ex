@@ -12,6 +12,8 @@ defmodule SymphonyElixir.Orchestrator do
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
+  # Newest-first ring buffer size for the live cockpit activity timeline.
+  @recent_events_limit 20
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_codex_totals %{
@@ -1416,6 +1418,7 @@ defmodule SymphonyElixir.Orchestrator do
           last_codex_timestamp: metadata.last_codex_timestamp,
           last_codex_message: metadata.last_codex_message,
           last_codex_event: metadata.last_codex_event,
+          recent_events: Map.get(metadata, :recent_events, []),
           runtime_seconds: running_seconds(metadata.started_at, now)
         }
       end)
@@ -1707,11 +1710,13 @@ defmodule SymphonyElixir.Orchestrator do
     last_reported_output = Map.get(running_entry, :codex_last_reported_output_tokens, 0)
     last_reported_total = Map.get(running_entry, :codex_last_reported_total_tokens, 0)
     turn_count = Map.get(running_entry, :turn_count, 0)
+    message = summarize_codex_update(update)
 
     {
       Map.merge(running_entry, %{
         last_codex_timestamp: timestamp,
-        last_codex_message: summarize_codex_update(update),
+        last_codex_message: message,
+        recent_events: push_recent_event(running_entry, event, message, timestamp),
         session_id: session_id_for_update(running_entry.session_id, update),
         last_codex_event: event,
         codex_app_server_pid: codex_app_server_pid_for_update(codex_app_server_pid, update),
@@ -1725,6 +1730,17 @@ defmodule SymphonyElixir.Orchestrator do
       }),
       token_delta
     }
+  end
+
+  # Newest-first ring buffer of meaningful agent events for the live cockpit
+  # timeline. Updates with no human summary (token counts, stream chunks) carry
+  # no action, so they are skipped to keep the timeline readable.
+  defp push_recent_event(running_entry, _event, nil, _timestamp),
+    do: Map.get(running_entry, :recent_events, [])
+
+  defp push_recent_event(running_entry, event, message, timestamp) do
+    [%{event: event, action: message, at: timestamp} | Map.get(running_entry, :recent_events, [])]
+    |> Enum.take(@recent_events_limit)
   end
 
   defp codex_app_server_pid_for_update(_existing, %{codex_app_server_pid: pid})

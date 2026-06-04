@@ -99,6 +99,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              message: %{method: "some-event"},
              timestamp: now
            }
+
+    # The recent-events ring buffer accumulates meaningful updates, newest first,
+    # and the newest action mirrors last_codex_message.
+    assert [newest | _rest] = snapshot_entry.recent_events
+    assert newest.event == :notification
+    assert newest.at == now
+    assert newest.action == snapshot_entry.last_codex_message
   end
 
   test "orchestrator snapshot tracks codex thread totals and app-server pid" do
