@@ -42,15 +42,16 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     })
   end
 
-  # The union of every Linear state the cockpit columns can show, deduped and
-  # with unset mappings dropped.
+  # The live pipeline states the cockpit shows, deduped and with unset mappings
+  # dropped. Terminal states are intentionally excluded: the board is a live
+  # view, so "Done" surfaces only recently-shipped work (done_extra), not the
+  # full archive of closed tickets.
   @doc false
   def board_state_names(tracker) do
     [
       tracker.active_states,
       tracker.in_progress_states,
       [tracker.review_state, tracker.ready_state, tracker.blocked_state],
-      tracker.terminal_states,
       tracker.done_extra_states
     ]
     |> List.flatten()
