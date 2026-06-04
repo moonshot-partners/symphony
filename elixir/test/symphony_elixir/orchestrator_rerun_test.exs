@@ -147,4 +147,86 @@ defmodule SymphonyElixir.OrchestratorRerunTest do
                %State{}
              )
   end
+
+  # Characterization: reset on an issue parked in retry_attempts (no running
+  # entry) routes through block_retry_issue_by_identifier, which cancels the
+  # retry, claims the issue, and parks it in blocked with the operator reason.
+  # timer_ref is nil so no real timer fires (deterministic). Guards the refactor
+  # of that function.
+  test "reset on a retrying issue moves it from retry_attempts to blocked and claims it" do
+    state = %State{
+      claimed: MapSet.new(),
+      retry_attempts: %{
+        "issue-retry-1" => %{
+          identifier: "SODEV-700",
+          timer_ref: nil,
+          worker_host: nil,
+          workspace_path: nil
+        }
+      }
+    }
+
+    assert {:reply, {:ok, result}, new_state} =
+             Orchestrator.handle_call({:reset_issue, "SODEV-700"}, {self(), make_ref()}, state)
+
+    assert result.operation == "reset"
+    refute Map.has_key?(new_state.retry_attempts, "issue-retry-1")
+    assert MapSet.member?(new_state.claimed, "issue-retry-1")
+    assert %{error: "reset by operator", identifier: "SODEV-700"} = new_state.blocked["issue-retry-1"]
+  end
+
+  # Characterization: rerun on a blocked (not running) issue first stops it via
+  # release_blocked_or_retry_by_identifier with cleanup off (no workspace IO),
+  # which releases the claim and drops it from the blocked map, then requeues it.
+  # Guards the refactor of the blocked branch of that function.
+  test "rerun on a blocked issue releases it from the blocked map before requeueing" do
+    issue = %Issue{
+      id: "issue-blocked-1",
+      identifier: "SODEV-701",
+      title: "t",
+      description: "d",
+      state: "On Hold / Blocked"
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+    state = %State{
+      claimed: MapSet.new(["issue-blocked-1"]),
+      blocked: %{"issue-blocked-1" => %{identifier: "SODEV-701", worker_host: nil}}
+    }
+
+    assert {:reply, {:ok, result}, new_state} =
+             Orchestrator.handle_call({:rerun_issue, "SODEV-701"}, {self(), make_ref()}, state)
+
+    assert result.queued == true
+    refute Map.has_key?(new_state.blocked, "issue-blocked-1")
+    assert_received {:memory_tracker_state_update, "issue-blocked-1", "Scheduled"}
+  end
+
+  # Characterization: rerun on a retrying (not running) issue routes through the
+  # retry branch of release_blocked_or_retry_by_identifier, which cancels the
+  # retry and releases the claim before requeueing. timer_ref is nil so no real
+  # timer fires (deterministic). Guards the refactor of the retry branch.
+  test "rerun on a retrying issue releases it from retry_attempts before requeueing" do
+    issue = %Issue{
+      id: "issue-retry-2",
+      identifier: "SODEV-702",
+      title: "t",
+      description: "d",
+      state: "In Code Review"
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+    state = %State{
+      claimed: MapSet.new(["issue-retry-2"]),
+      retry_attempts: %{"issue-retry-2" => %{identifier: "SODEV-702", timer_ref: nil}}
+    }
+
+    assert {:reply, {:ok, result}, new_state} =
+             Orchestrator.handle_call({:rerun_issue, "SODEV-702"}, {self(), make_ref()}, state)
+
+    assert result.queued == true
+    refute Map.has_key?(new_state.retry_attempts, "issue-retry-2")
+  end
 end
