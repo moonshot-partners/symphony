@@ -1,8 +1,8 @@
 allowBuilds:
-  msw: set this to true or false
+  msw: true
   protobufjs: true
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  sharp: true
+  unrs-resolver: true
 onlyBuiltDependencies:
   - sharp
   - unrs-resolver
