@@ -56,6 +56,31 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Path.basename(first_workspace) == "MT_Det"
   end
 
+  test "after_create hook logs its duration" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-duration-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "true"
+      )
+
+      log =
+        ExUnit.CaptureLog.capture_log([level: :info], fn ->
+          assert {:ok, _workspace} = Workspace.create_for_issue("MT-DURATION")
+        end)
+
+      assert log =~ "hook=after_create"
+      assert log =~ ~r/duration_ms=\d+/
+    after
+      File.rm_rf(workspace_root)
+    end
+  end
+
   test "workspace reuses existing issue directory without deleting local changes" do
     workspace_root =
       Path.join(
