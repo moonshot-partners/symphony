@@ -360,6 +360,48 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert is_binary(entry.summary)
   end
 
+  test "records the run when the reconciler stops an agent that left the active states" do
+    test_pid = self()
+
+    Application.put_env(:symphony_elixir, :run_ledger_record_fn, fn entry ->
+      send(test_pid, {:ledger_recorded, entry})
+    end)
+
+    on_exit(fn ->
+      Application.put_env(:symphony_elixir, :run_ledger_record_fn, fn _entry -> :ok end)
+    end)
+
+    issue_id = "issue-ledger-terminate"
+    agent_pid = spawn(fn -> receive do: (:stop -> :ok) end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: "MT-TERM",
+          issue: %Issue{id: issue_id, state: "In Progress", identifier: "MT-TERM"},
+          session_id: "sess-a-b-c-d-turn99",
+          last_codex_message: nil,
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    # The agent moved the ticket out of the active states (In Code Review), so the
+    # reconciler stops the run with demonitor(:flush) and no {:DOWN} fires — the
+    # ledger must still record from this path.
+    reviewed = %Issue{id: issue_id, identifier: "MT-TERM", state: "In Code Review", labels: []}
+    Orchestrator.reconcile_issue_states_for_test([reviewed], state)
+
+    assert_receive {:ledger_recorded, entry}, 1_000
+    assert entry.identifier == "MT-TERM"
+    assert entry.session_id == "sess-a-b-c-d-turn99"
+  end
+
   test "orchestrator snapshot tracks codex token-count cumulative usage payloads" do
     issue_id = "issue-token-count-snapshot"
 

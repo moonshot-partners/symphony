@@ -536,6 +536,10 @@ defmodule SymphonyElixir.Orchestrator do
 
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
         state = record_session_completion_totals(state, running_entry)
+        # The reconciler stops the agent with demonitor(:flush) (no {:DOWN}), so
+        # this is the completion hook for runs that end by leaving the active
+        # states (e.g. the agent moved the ticket to In Code Review).
+        record_run_ledger(running_entry, running_entry_session_id(running_entry))
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
