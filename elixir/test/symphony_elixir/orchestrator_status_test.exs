@@ -334,7 +334,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       identifier: issue.identifier,
       issue: issue,
       session_id: "sess-a-b-c-d-turn42",
-      last_codex_message: nil,
+      recent_events: [%{event: :notification, action: "item completed: agent message", at: DateTime.utc_now()}],
+      last_codex_message: %{message: "rate limits updated: primary 0%"},
       last_codex_timestamp: nil,
       last_codex_event: nil,
       codex_input_tokens: 0,
@@ -357,7 +358,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert_receive {:ledger_recorded, entry}, 1_000
     assert entry.identifier == "MT-LEDGER"
     assert entry.session_id == "sess-a-b-c-d-turn42"
-    assert is_binary(entry.summary)
+    # Prefers the noise-filtered ring-buffer action over the raw last message.
+    assert entry.summary == "item completed: agent message"
   end
 
   test "records the run when the reconciler stops an agent that left the active states" do

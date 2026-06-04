@@ -1869,10 +1869,7 @@ defmodule SymphonyElixir.Orchestrator do
     record_fn.(%{
       identifier: Map.get(running_entry, :identifier),
       session_id: session_id,
-      summary:
-        SymphonyElixir.StatusDashboard.humanize_codex_message(
-          Map.get(running_entry, :last_codex_message)
-        )
+      summary: run_ledger_summary(running_entry)
     })
   rescue
     error ->
@@ -1881,6 +1878,21 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp record_run_ledger(_running_entry, _session_id), do: :ok
+
+  # Prefer the last meaningful agent action (the noise-filtered recent-events ring
+  # buffer's head) over the raw last codex message, which is often a rate-limit or
+  # token-usage notification rather than anything a human wants to read.
+  defp run_ledger_summary(running_entry) do
+    case Map.get(running_entry, :recent_events, []) do
+      [%{action: action} | _] when is_binary(action) and action != "" ->
+        action
+
+      _ ->
+        SymphonyElixir.StatusDashboard.humanize_codex_message(
+          Map.get(running_entry, :last_codex_message)
+        )
+    end
+  end
 
   defp refresh_runtime_config(%State{} = state) do
     config = Config.settings!()
