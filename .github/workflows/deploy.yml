@@ -26,8 +26,28 @@ jobs:
       - run: mix deps.get
       - run: mix test
 
+  cockpit-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: dashboard/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
   deploy:
-    needs: test
+    needs: [test, cockpit-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
