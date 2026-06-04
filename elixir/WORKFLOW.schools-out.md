@@ -101,6 +101,21 @@ Read each repository's own `AGENTS.md` / `README` before changing it, keep
 changes scoped to the repositories the ticket actually requires, and install
 dependencies only for the repositories you actually edit.
 
+Ticket lifecycle:
+
+You drive this ticket's Linear state yourself with the `linear_graphql` tool
+(it already carries Symphony's Linear auth; see the `linear` skill). Symphony
+only reads state, it never moves the ticket, so if you leave the ticket in an
+active state when you stop, it will be dispatched again. Always fetch the
+team's workflow states first to get the exact `stateId`, then `issueUpdate`.
+
+- When you start, move this ticket from `Scheduled` to `In Development` so it
+  leaves the agent queue and the team sees it is being worked.
+- When you open the PR, attach it to the ticket with `attachmentLinkGitHubPR`
+  and move the ticket to `In Code Review`.
+- If you are genuinely blocked and cannot finish, move the ticket to
+  `On Hold / Blocked` and add a comment explaining what is blocking it.
+
 Issue:
 
 Identifier: {{ issue.identifier }}
