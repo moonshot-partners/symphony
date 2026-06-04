@@ -29,17 +29,23 @@ pulls the branch, rebuilds the escript, restarts the systemd unit, and
 health-checks. Gitignored runtime state (`elixir/_build`, `elixir/deps`,
 `state/`, the dashboard build) survives untouched.
 
-Deploy (CI, preferred):
-
-```
-gh workflow run deploy.yml          # runs tests, then SSH-deploys
-```
-
-Deploy (manual, same script):
+Deploy (current method, validated):
 
 ```
 ssh "$SSH_USER@$SSH_HOST" 'bash -s' < scripts/deploy.sh
 ```
+
+Deploy (CI, once enabled):
+
+```
+gh workflow run deploy.yml          # runs tests, then SSH-deploys via the same script
+```
+
+The `deploy.yml` workflow is committed but not yet triggerable: GitHub only
+exposes `workflow_dispatch` for workflows on the repo default branch, which is
+still `main` (the legacy fork). To enable CI deploys, make `schoolsout-prod`
+the default branch (recommended, it also makes "what is current" unambiguous).
+Until then, deploy with the manual command above.
 
 What is running, from the VPS:
 
