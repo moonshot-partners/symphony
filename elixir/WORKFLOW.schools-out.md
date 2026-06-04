@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  project_slug: c30ab7cd169e
+  label: agent
   active_states:
     - In Development
   terminal_states:

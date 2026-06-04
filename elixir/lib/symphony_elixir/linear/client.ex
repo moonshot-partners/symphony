@@ -10,8 +10,8 @@ defmodule SymphonyElixir.Linear.Client do
   @max_error_body_log_bytes 1_000
 
   @query """
-  query SymphonyLinearPoll($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
-    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+  query SymphonyLinearPoll($filter: IssueFilter!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: $filter, first: $first, after: $after) {
       nodes {
         id
         identifier
@@ -107,17 +107,18 @@ defmodule SymphonyElixir.Linear.Client do
   def fetch_candidate_issues do
     tracker = Config.settings!().tracker
     project_slug = tracker.project_slug
+    label = tracker.label
 
     cond do
       is_nil(tracker.api_key) ->
         {:error, :missing_linear_api_token}
 
-      is_nil(project_slug) ->
+      is_nil(project_slug) and is_nil(label) ->
         {:error, :missing_linear_project_slug}
 
       true ->
         with {:ok, assignee_filter} <- routing_assignee_filter() do
-          do_fetch_by_states(project_slug, tracker.active_states, assignee_filter)
+          do_fetch_by_states(project_slug, label, tracker.active_states, assignee_filter)
         end
     end
   end
@@ -131,16 +132,17 @@ defmodule SymphonyElixir.Linear.Client do
     else
       tracker = Config.settings!().tracker
       project_slug = tracker.project_slug
+      label = tracker.label
 
       cond do
         is_nil(tracker.api_key) ->
           {:error, :missing_linear_api_token}
 
-        is_nil(project_slug) ->
+        is_nil(project_slug) and is_nil(label) ->
           {:error, :missing_linear_project_slug}
 
         true ->
-          do_fetch_by_states(project_slug, normalized_states, nil)
+          do_fetch_by_states(project_slug, label, normalized_states, nil)
       end
     end
   end
@@ -236,15 +238,15 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
-    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
+  defp do_fetch_by_states(project_slug, label, state_names, assignee_filter) do
+    filter = build_candidate_filter(project_slug, label, state_names)
+    do_fetch_by_states_page(filter, assignee_filter, nil, [])
   end
 
-  defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
+  defp do_fetch_by_states_page(filter, assignee_filter, after_cursor, acc_issues) do
     with {:ok, body} <-
            graphql(@query, %{
-             projectSlug: project_slug,
-             stateNames: state_names,
+             filter: filter,
              first: @issue_page_size,
              relationFirst: @issue_page_size,
              after: after_cursor
@@ -254,7 +256,7 @@ defmodule SymphonyElixir.Linear.Client do
 
       case next_page_cursor(page_info) do
         {:ok, next_cursor} ->
-          do_fetch_by_states_page(project_slug, state_names, assignee_filter, next_cursor, updated_acc)
+          do_fetch_by_states_page(filter, assignee_filter, next_cursor, updated_acc)
 
         :done ->
           {:ok, finalize_paginated_issues(updated_acc)}
@@ -264,6 +266,27 @@ defmodule SymphonyElixir.Linear.Client do
       end
     end
   end
+
+  @doc false
+  @spec build_candidate_filter_for_test(String.t() | nil, String.t() | nil, [String.t()]) :: map()
+  def build_candidate_filter_for_test(project_slug, label, state_names) do
+    build_candidate_filter(project_slug, label, state_names)
+  end
+
+  # Compose the Linear IssueFilter from whatever scoping is configured: project
+  # and/or label are optional, state is always applied. Polling requires at least
+  # one of project/label (enforced in fetch_candidate_issues).
+  defp build_candidate_filter(project_slug, label, state_names) do
+    %{state: %{name: %{in: state_names}}}
+    |> maybe_put_project(project_slug)
+    |> maybe_put_label(label)
+  end
+
+  defp maybe_put_project(filter, nil), do: filter
+  defp maybe_put_project(filter, slug), do: Map.put(filter, :project, %{slugId: %{eq: slug}})
+
+  defp maybe_put_label(filter, nil), do: filter
+  defp maybe_put_label(filter, label), do: Map.put(filter, :labels, %{name: %{eq: label}})
 
   defp prepend_page_issues(issues, acc_issues) when is_list(issues) and is_list(acc_issues) do
     Enum.reverse(issues, acc_issues)
