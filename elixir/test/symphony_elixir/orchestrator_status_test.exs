@@ -941,11 +941,18 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
     end)
 
+    worker_ref = Process.monitor(worker_pid)
+    since_ms = System.monotonic_time(:millisecond)
     send(pid, :tick)
-    Process.sleep(100)
+    # The :tick handler detects the stall and kills the worker; the worker's death
+    # then reaches the orchestrator as a :DOWN, and *that* handler removes it from
+    # running and schedules the retry. So wait for the worker to actually die
+    # (deterministic, no sleep), then :sys.get_state to sync the orchestrator's
+    # handling of that :DOWN (the worker's :DOWN is already enqueued ahead of this
+    # synchronous call).
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _}, 1_000
     state = :sys.get_state(pid)
 
-    refute Process.alive?(worker_pid)
     refute Map.has_key?(state.running, issue_id)
 
     assert %{
@@ -956,9 +963,11 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
            } = state.retry_attempts[issue_id]
 
     assert is_integer(due_at_ms)
-    remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
-    assert remaining_ms >= 9_500
-    assert remaining_ms <= 10_500
+    # due_at was computed at handler time, which is at or after since_ms, so this
+    # lower bound is exact and never races on slow runs.
+    delta_ms = due_at_ms - since_ms
+    assert delta_ms >= 10_000
+    assert delta_ms <= 12_000
   end
 
   test "orchestrator blocks stalled workers that are waiting on MCP elicitation" do

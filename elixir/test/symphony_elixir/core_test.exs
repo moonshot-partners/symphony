@@ -551,15 +551,17 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    since_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :normal})
-    Process.sleep(50)
+    # :sys.get_state is a synchronous call, so it only returns after the GenServer
+    # has handled the :DOWN above (mailbox is FIFO). No sleep needed.
     state = :sys.get_state(pid)
 
     refute Map.has_key?(state.running, issue_id)
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 500, 1_100)
+    assert_due_at(due_at_ms, since_ms, 1_000)
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -592,14 +594,14 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    since_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
-    Process.sleep(50)
     state = :sys.get_state(pid)
 
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 39_500, 40_500)
+    assert_due_at(due_at_ms, since_ms, 40_000)
   end
 
   test "first abnormal worker exit waits before retrying" do
@@ -631,14 +633,14 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    since_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
-    Process.sleep(50)
     state = :sys.get_state(pid)
 
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 9_000, 10_500)
+    assert_due_at(due_at_ms, since_ms, 10_000)
   end
 
   test "stale retry timer messages do not consume newer retry entries" do
@@ -758,11 +760,20 @@ defmodule SymphonyElixir.CoreTest do
     assert Orchestrator.select_worker_host_for_test(state, "worker-a") == "worker-a"
   end
 
-  defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
-    remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
+  # Assert a retry was scheduled `backoff_ms` after `since_ms`, a monotonic
+  # baseline captured *before* the triggering message. The lower bound is exact
+  # (due_at is computed at handler time, which is at or after the baseline), so
+  # this never races on slow/loaded runs the way `due_at - now` does. The upper
+  # bound only allows for handler-dispatch latency.
+  @retry_schedule_tolerance_ms 2_000
+  defp assert_due_at(due_at_ms, since_ms, backoff_ms) do
+    delta_ms = due_at_ms - since_ms
 
-    assert remaining_ms >= min_remaining_ms
-    assert remaining_ms <= max_remaining_ms
+    assert delta_ms >= backoff_ms,
+           "retry scheduled too soon: #{delta_ms}ms after baseline, expected at least #{backoff_ms}ms"
+
+    assert delta_ms <= backoff_ms + @retry_schedule_tolerance_ms,
+           "retry scheduled too late: #{delta_ms}ms after baseline, expected at most #{backoff_ms + @retry_schedule_tolerance_ms}ms"
   end
 
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
