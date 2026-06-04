@@ -1,0 +1,60 @@
+name: deploy
+
+# Manual deploy to the SchoolsOut VPS. Prod is deployed by hand on purpose:
+# no auto-deploy on push, so a merge never surprises production. Run from the
+# Actions tab (or `gh workflow run deploy.yml`) once the deploy branch is ready.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: symphony-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elixir
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: elixir/.tool-versions
+          version-type: strict
+      - run: mix deps.get
+      - run: mix test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Preflight (fail fast on stale host or missing toolchain)
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o ConnectTimeout=10 -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
+            'test -d /opt/symphony/.git && command -v mix >/dev/null && systemctl is-enabled symphony'
+
+      - name: Deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" \
+            'bash -s' < scripts/deploy.sh
