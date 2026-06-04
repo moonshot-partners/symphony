@@ -8,7 +8,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   alias Plug.Conn
   alias SymphonyElixir.{Config, Langfuse, Orchestrator, RunLedger, Tracker}
   alias SymphonyElixir.Linear.Issue
-  alias SymphonyElixirWeb.{Endpoint, Presenter}
+  alias SymphonyElixirWeb.{CockpitCache, Endpoint, Presenter}
 
   # Linear stores issue-description images on uploads.linear.app, which 401s
   # without the tracker API token, so a browser <img> renders broken. The
@@ -19,6 +19,14 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec board(Conn.t(), map()) :: Conn.t()
   def board(conn, _params) do
+    json(conn, CockpitCache.board())
+  end
+
+  # Builds the full board payload (Linear pipeline fetch + run state + ledger).
+  # Served through CockpitCache so the dashboard's 1.5s polling reads a cached
+  # value instead of hitting Linear and the orchestrator on every request.
+  @doc false
+  def build_board_payload do
     tracker = Config.settings!().tracker
 
     # Fetch the whole agent pipeline (not just the active queue) so every
@@ -33,7 +41,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     running_ids = running_issue_ids(orchestrator(), snapshot_timeout_ms())
     ledger = RunLedger.latest_by_identifier()
 
-    json(conn, %{
+    %{
       states: %{
         active: tracker.active_states,
         onComplete: tracker.review_state,
@@ -47,7 +55,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
         inProgressExtra: tracker.in_progress_states
       },
       tickets: Enum.map(issues, &ticket_payload(&1, running_ids, ledger))
-    })
+    }
   end
 
   # The live pipeline states the cockpit shows, deduped and with unset mappings
@@ -69,21 +77,26 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec live(Conn.t(), map()) :: Conn.t()
   def live(conn, _params) do
-    payload =
-      case Orchestrator.snapshot(orchestrator(), snapshot_timeout_ms()) do
-        %{} = snapshot ->
-          %{
-            available: true,
-            agents: Enum.map(snapshot.running, &live_agent_payload/1),
-            retrying: Enum.map(snapshot.retrying, &live_retry_payload/1),
-            polling: live_polling_payload(snapshot.polling)
-          }
+    json(conn, CockpitCache.live())
+  end
 
-        _ ->
-          %{available: false, agents: [], retrying: [], polling: nil}
-      end
+  # Builds the live runtime payload from the orchestrator snapshot. Served via
+  # CockpitCache so a snapshot call queued behind the orchestrator's reconcile
+  # never blocks the dashboard's 2s poll.
+  @doc false
+  def build_live_payload do
+    case Orchestrator.snapshot(orchestrator(), snapshot_timeout_ms()) do
+      %{} = snapshot ->
+        %{
+          available: true,
+          agents: Enum.map(snapshot.running, &live_agent_payload/1),
+          retrying: Enum.map(snapshot.retrying, &live_retry_payload/1),
+          polling: live_polling_payload(snapshot.polling)
+        }
 
-    json(conn, payload)
+      _ ->
+        %{available: false, agents: [], retrying: [], polling: nil}
+    end
   end
 
   @spec state(Conn.t(), map()) :: Conn.t()
@@ -262,11 +275,16 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     end
   end
 
-  defp ticket_payload(%Issue{} = issue, running_ids, ledger) do
+  @doc false
+  def ticket_payload(%Issue{} = issue, running_ids, ledger) do
     running? = MapSet.member?(running_ids, issue.id)
-    # A still-running ticket gets its trace from the live overlay; only finished
-    # tickets read the persisted run ledger, so a stale prior run never shows.
-    record = unless running?, do: Map.get(ledger, issue.identifier)
+    # The persisted ledger holds this identifier's last finished run. Its summary
+    # is shown even while a fresh run is in flight: dropping it on every
+    # re-dispatch made the cockpit flicker the run summary away to nothing. The
+    # trace is different — while running, the live `/live` overlay supplies it,
+    # so only a finished ticket reads the ledger trace, keeping a stale prior-run
+    # trace from ever showing.
+    record = Map.get(ledger, issue.identifier)
 
     %{
       id: issue.identifier,
@@ -286,7 +304,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       summary: ledger_summary(record),
       timeline: [],
       url: issue.url,
-      traceUrl: ledger_trace_url(record),
+      traceUrl: unless(running?, do: ledger_trace_url(record)),
       updatedAt: issue.updated_at || ""
     }
   end
