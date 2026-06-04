@@ -129,6 +129,24 @@ states first to get the exact `stateId`, then `issueUpdate`.
 - Never stop while still in `Scheduled` or `In Development` unless you have an
   open PR or a real blocker; otherwise you will simply be re-dispatched.
 
+Proof of work (PR evidence):
+
+Reviewers approve from the PR, so put the proof there.
+
+- For changes users can see (UI, pages, components, styles): capture a
+  screenshot of the working result with Playwright against the running app
+  (and the broken state first when the ticket is a bug). Save the images under
+  `qa-evidence/` in the workspace, commit them on the PR branch, and embed them
+  in the PR description under a `## QA Evidence` heading using their raw GitHub
+  URLs so they render inline for the reviewer. If the repo already has a
+  Playwright or e2e setup, use it; otherwise drive the dev server with a small
+  Playwright script.
+- For backend, config, or non-visual changes: state in the PR what you ran to
+  verify it (tests, build, type-check) and paste the relevant output. Do not
+  fabricate screenshots.
+
+Keep it honest and minimal: real proof a reviewer can check, not ceremony.
+
 Issue:
 
 Identifier: {{ issue.identifier }}

@@ -1,1 +1,8 @@
 DEPLOYED_SHA
+
+# Local agent-session scratch (never deploy these)
+.claude/
+.local/
+AGENTS.md
+CLAUDE.md
+qa-evidence/

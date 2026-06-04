@@ -15,7 +15,7 @@ export const Evidence = z.object({
   id: z.string(),
   kind: z.enum(["image", "video"]),
   name: z.string(),
-  url: z.string(), // same-origin BFF proxy, e.g. "/api/evidence/<issue id>/<file>"
+  url: z.string(), // absolute URL to the artifact (evidence now lives on the PR)
 });
 
 export const Agent = z.object({

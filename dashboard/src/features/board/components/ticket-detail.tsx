@@ -225,7 +225,22 @@ function Body({
           <section>
             <SectionLabel>Evidence ({ticket.evidence.length})</SectionLabel>
             {ticket.evidence.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No evidence captured.</p>
+              pr?.url ? (
+                <p className="text-sm text-muted-foreground">
+                  QA evidence is attached to the{" "}
+                  <a
+                    href={pr.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    pull request
+                  </a>
+                  .
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">No evidence captured.</p>
+              )
             ) : (
               <Attachments variant="list" className="w-full">
                 {ticket.evidence.map((item) => (
