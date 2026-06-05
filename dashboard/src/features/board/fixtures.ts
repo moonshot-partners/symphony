@@ -9,6 +9,10 @@ import type { BoardPayload } from "./contract";
 const linear = (id: string) => `https://linear.app/schools-out/issue/${id}`;
 const ghPr = (n: number) => `https://github.com/schoolsoutapp/fe-next-app/pull/${n}`;
 const trace = (id: string) => `https://cloud.langfuse.com/trace/${id}`;
+const evidenceImage = (label: string) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540"><rect width="960" height="540" fill="#f8fafc"/><rect x="64" y="64" width="832" height="412" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/><rect x="104" y="112" width="520" height="30" rx="8" fill="#0f172a"/><rect x="104" y="178" width="752" height="48" rx="10" fill="#e2e8f0"/><rect x="104" y="254" width="620" height="48" rx="10" fill="#dcfce7"/><rect x="104" y="330" width="700" height="48" rx="10" fill="#dbeafe"/><text x="104" y="430" fill="#334155" font-family="Arial, sans-serif" font-size="38" font-weight="700">${label}</text></svg>`
+  )}`;
 
 export const MOCK_BOARD: BoardPayload = {
   states: {
@@ -48,10 +52,10 @@ export const MOCK_BOARD: BoardPayload = {
       },
       pr: { number: 642, ci: "pending", url: ghPr(642) },
       evidence: [
-        { id: "e1", kind: "image", name: "before.png", url: "#" },
-        { id: "e2", kind: "image", name: "after.png", url: "#" },
+        { id: "e1", kind: "image", name: "before.png", url: evidenceImage("Before") },
+        { id: "e2", kind: "image", name: "after.png", url: evidenceImage("After") },
         { id: "e3", kind: "video", name: "flow.webm", url: "#" },
-        { id: "e4", kind: "image", name: "flicker-1.png", url: "#" },
+        { id: "e4", kind: "image", name: "flicker-1.png", url: evidenceImage("No flicker") },
       ],
       report:
         "- Result: PASS\n\n| Check | Result |\n| --- | --- |\n| debounce fires one request | PASS |\n| no loading flicker | PASS |\n",
@@ -73,8 +77,8 @@ export const MOCK_BOARD: BoardPayload = {
       agent: { status: "idle", turn: 11, maxTurns: 20, costUsd: 1.92, lastAction: "opened PR" },
       pr: { number: 631, ci: "passing", url: ghPr(631) },
       evidence: [
-        { id: "e5", kind: "image", name: "upload-ok.png", url: "#" },
-        { id: "e6", kind: "image", name: "reject.png", url: "#" },
+        { id: "e5", kind: "image", name: "upload-ok.png", url: evidenceImage("Upload ok") },
+        { id: "e6", kind: "image", name: "reject.png", url: evidenceImage("Rejected") },
       ],
       timeline: [
         { label: "Read issue and extracted acceptance criteria", turn: 1, status: "done" },
@@ -135,7 +139,7 @@ export const MOCK_BOARD: BoardPayload = {
       state: "Approved QA",
       agent: { status: "idle", turn: 6, maxTurns: 20, costUsd: 0.78, lastAction: "merged" },
       pr: { number: 690, ci: "passing", url: ghPr(690) },
-      evidence: [{ id: "e8", kind: "image", name: "share.png", url: "#" }],
+      evidence: [{ id: "e8", kind: "image", name: "share.png", url: evidenceImage("Share") }],
       url: linear("SODEV-880"),
       traceUrl: trace("11223344556677ccdd"),
       updatedAt: "2026-05-27T08:40:00Z",
