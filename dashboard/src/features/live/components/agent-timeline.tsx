@@ -20,9 +20,9 @@ import type { LiveAgent } from "../contract";
  * The live workflow is a fixed, user-facing pipeline. The event stream only
  * decides which step is active; it does not create or remove steps.
  */
-export function AgentTimeline({ live }: { live: LiveAgent }) {
+export function AgentTimeline({ completed = false, live }: { completed?: boolean; live: Pick<LiveAgent, "phase"> }) {
   const activeStep = activeStepFor(live);
-  const { nodes, edges } = buildWorkflow(activeStep);
+  const { nodes, edges } = buildWorkflow(activeStep, completed);
 
   return (
     <>
@@ -42,8 +42,8 @@ export function AgentTimeline({ live }: { live: LiveAgent }) {
         <TaskTrigger title="6 workflow steps" />
         <TaskContent>
           {PIPELINE.map((step) => {
-            const active = step.key === activeStep;
-            const done = step.order < orderFor(activeStep);
+            const active = !completed && step.key === activeStep;
+            const done = completed || step.order < orderFor(activeStep);
             const Icon = step.icon;
 
             return (
@@ -173,19 +173,19 @@ const edgeTypes = {
   temporary: Edge.Temporary,
 };
 
-function buildWorkflow(activeStep: PipelineStepKey) {
+function buildWorkflow(activeStep: PipelineStepKey, completed = false) {
   const activeOrder = orderFor(activeStep);
   const nodes: FlowNode<WorkflowNodeData>[] = PIPELINE.map((step, index) => ({
     id: nodeId(index),
     position: { x: index * 230, y: 60 },
     type: "workflow",
     data: {
-      active: step.key === activeStep,
+      active: !completed && step.key === activeStep,
       description: step.description,
       handles: { target: index > 0, source: index < PIPELINE.length - 1 },
       icon: step.icon,
       label: step.label,
-      state: step.order < activeOrder ? "done" : step.key === activeStep ? "active" : "next",
+      state: completed ? "done" : step.order < activeOrder ? "done" : step.key === activeStep ? "active" : "next",
       step: step.order,
     },
   }));
@@ -194,7 +194,7 @@ function buildWorkflow(activeStep: PipelineStepKey) {
     id: `edge-${index}`,
     source: nodeId(index),
     target: nodeId(index + 1),
-    type: index + 1 < activeOrder ? "animated" : "temporary",
+    type: completed || index + 1 < activeOrder ? "animated" : "temporary",
   }));
 
   return { nodes, edges };
@@ -208,7 +208,7 @@ function orderFor(step: PipelineStepKey) {
   return PIPELINE.find((item) => item.key === step)?.order ?? 1;
 }
 
-function activeStepFor(live: LiveAgent): PipelineStepKey {
+function activeStepFor(live: Pick<LiveAgent, "phase">): PipelineStepKey {
   switch (live.phase) {
     case "starting":
       return "start";

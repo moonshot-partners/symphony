@@ -21,6 +21,8 @@ SYMPHONY_DIR="${SYMPHONY_DIR:-/opt/symphony}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-schoolsout-prod}"
 APP_USER="${APP_USER:-ubuntu}"
 APP_HOME="${APP_HOME:-/home/$APP_USER}"
+ENV_FILE="${ENV_FILE:-/etc/symphony/symphony.env}"
+STATE_DIR="${STATE_DIR:-$SYMPHONY_DIR/state}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:4010/api/v1/state}"
 DRAIN_TIMEOUT_SECONDS="${DRAIN_TIMEOUT_SECONDS:-600}"
 DRAIN_POLL_SECONDS="${DRAIN_POLL_SECONDS:-10}"
@@ -34,11 +36,35 @@ NODE_BIN_PATH="${NODE_BIN_PATH:-/usr/local/bin:/usr/bin:/bin}"
 log() { printf '[deploy] %s\n' "$*"; }
 asapp() { sudo -u "$APP_USER" "$@"; }
 
+ensure_env_line() {
+  local key="$1"
+  local value="$2"
+  local current
+
+  sudo mkdir -p "$(dirname "$ENV_FILE")"
+  sudo touch "$ENV_FILE"
+  if sudo grep -q "^${key}=" "$ENV_FILE"; then
+    current=$(sudo sed -n "s|^${key}=||p" "$ENV_FILE" | tail -n 1)
+    if [[ "$current" != "$value" ]]; then
+      sudo sed -i.bak "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+      log "updated $key in $ENV_FILE"
+    fi
+  else
+    printf '%s=%s\n' "$key" "$value" | sudo tee -a "$ENV_FILE" >/dev/null
+    log "configured $key in $ENV_FILE"
+  fi
+}
+
 # 1. Record the pre-deploy HEAD up front. Capturing old_sha BEFORE the drain
 #    means a HEAD move mid-drain can never turn the dashboard-change check into a
 #    false negative that silently ships a stale cockpit.
 cd "$SYMPHONY_DIR"
 old_sha=$(asapp git rev-parse HEAD 2>/dev/null || echo none)
+
+sudo mkdir -p "$STATE_DIR"
+sudo chown "$APP_USER:$APP_USER" "$STATE_DIR"
+ensure_env_line "SYMPHONY_STATE_DIR" "$STATE_DIR"
+ensure_env_line "SYMPHONY_RUN_LEDGER_PATH" "$STATE_DIR/symphony_run_ledger.jsonl"
 
 # 2. Best-effort drain: wait for in-flight agents to finish so a deploy never
 #    kills a running turn. An unreachable orchestrator means it is already down,

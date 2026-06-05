@@ -29,4 +29,10 @@ describe("AgentTimeline", () => {
     render(<AgentTimeline live={{ ...MOCK_LIVE.agents[0], phase: "building", lastAction: "Editing search-input.tsx", lastEvent: "approval_auto_approved" }} />);
     expect(screen.getAllByText("Edit code and address the request").length).toBeGreaterThan(0);
   });
+
+  it("can render the pipeline as completed after the live snapshot is gone", () => {
+    render(<AgentTimeline live={{ phase: "handoff" }} completed />);
+    expect(screen.getAllByText("done").length).toBeGreaterThanOrEqual(6);
+    expect(screen.queryByText("current")).toBeNull();
+  });
 });

@@ -14,7 +14,9 @@ defmodule SymphonyElixir.RunLedger do
   once). Reads tolerate the occasional half-written or corrupt line.
 
   The ledger is forward-looking: only runs that finish after this is deployed get
-  a record. Path is `SYMPHONY_RUN_LEDGER_PATH`, defaulting under the system tmp dir.
+  a record. Path is `SYMPHONY_RUN_LEDGER_PATH`, or
+  `SYMPHONY_STATE_DIR/symphony_run_ledger.jsonl`, defaulting under the repo-level
+  `state/` directory for local development.
   """
 
   require Logger
@@ -27,7 +29,7 @@ defmodule SymphonyElixir.RunLedger do
   @spec path() :: String.t()
   def path do
     System.get_env("SYMPHONY_RUN_LEDGER_PATH") ||
-      Path.join(System.tmp_dir!(), "symphony_run_ledger.jsonl")
+      Path.join(state_dir(), "symphony_run_ledger.jsonl")
   end
 
   @doc """
@@ -57,7 +59,10 @@ defmodule SymphonyElixir.RunLedger do
       "at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
-    case File.write(path(), Jason.encode!(record) <> "\n", [:append]) do
+    path = path()
+    File.mkdir_p(Path.dirname(path))
+
+    case File.write(path, Jason.encode!(record) <> "\n", [:append]) do
       :ok ->
         :ok
 
@@ -102,4 +107,9 @@ defmodule SymphonyElixir.RunLedger do
   defp truncate(nil), do: nil
   defp truncate(value) when is_binary(value), do: String.slice(value, 0, @summary_limit)
   defp truncate(value), do: value |> to_string() |> truncate()
+
+  defp state_dir do
+    System.get_env("SYMPHONY_STATE_DIR") ||
+      Path.expand("../state", File.cwd!())
+  end
 end

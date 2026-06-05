@@ -12,6 +12,7 @@ defmodule SymphonyElixir.RunLedgerTest do
 
     on_exit(fn ->
       System.delete_env("SYMPHONY_RUN_LEDGER_PATH")
+      System.delete_env("SYMPHONY_STATE_DIR")
       Application.delete_env(:symphony_elixir, :langfuse_trace_fetcher)
       File.rm(path)
     end)
@@ -60,6 +61,20 @@ defmodule SymphonyElixir.RunLedgerTest do
   test "latest_by_identifier is empty when the ledger file does not exist" do
     System.put_env("SYMPHONY_RUN_LEDGER_PATH", Path.join(System.tmp_dir!(), "does_not_exist_#{System.unique_integer([:positive])}.jsonl"))
     assert RunLedger.latest_by_identifier() == %{}
+  end
+
+  test "default path lives under the repo state directory" do
+    System.delete_env("SYMPHONY_RUN_LEDGER_PATH")
+    System.delete_env("SYMPHONY_STATE_DIR")
+    assert RunLedger.path() == Path.expand("../state/symphony_run_ledger.jsonl", File.cwd!())
+  end
+
+  test "state dir env controls the default path" do
+    System.delete_env("SYMPHONY_RUN_LEDGER_PATH")
+    state_dir = Path.join(System.tmp_dir!(), "run_ledger_state_#{System.unique_integer([:positive])}")
+    System.put_env("SYMPHONY_STATE_DIR", state_dir)
+
+    assert RunLedger.path() == Path.join(state_dir, "symphony_run_ledger.jsonl")
   end
 
   test "record_async returns a live pid without blocking" do
