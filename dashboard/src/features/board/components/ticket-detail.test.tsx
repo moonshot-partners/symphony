@@ -374,13 +374,17 @@ describe("TicketDetail", () => {
     expect(screen.queryByText("No activity yet.")).toBeNull();
   });
 
-  it("shows no evidence captured for an idle ticket with a PR when the cockpit has no artifacts", async () => {
+  it("links to the PR for an idle ticket with a PR when the cockpit has no artifacts", async () => {
     const bare: Ticket = { ...running, timeline: [], evidence: [], summary: null, report: null };
     render(<TicketDetail ticket={bare} onClose={() => {}} />);
     await screen.findByText("Timeline");
 
     expect(screen.getByText("No activity yet.")).toBeInTheDocument();
-    expect(screen.getByText("No evidence captured.")).toBeInTheDocument();
+    expect(screen.getByText(/No cockpit evidence captured/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "pull request" })).toHaveAttribute(
+      "href",
+      running.pr!.url,
+    );
     expect(screen.queryByText(/QA evidence is attached/)).toBeNull();
   });
 
