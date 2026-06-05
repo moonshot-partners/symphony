@@ -64,6 +64,13 @@ asapp git fetch --quiet origin "$DEPLOY_BRANCH"
 asapp git reset --hard "origin/$DEPLOY_BRANCH"
 new_sha=$(asapp git rev-parse HEAD)
 log "old_sha=$old_sha new_sha=$new_sha"
+dashboard_changes="fresh checkout"
+if [[ "$old_sha" != "none" ]]; then
+  if ! dashboard_changes=$(asapp git diff --name-only "$old_sha" "$new_sha" -- dashboard/); then
+    log "cockpit: could not diff $old_sha..$new_sha — forcing rebuild"
+    dashboard_changes="fresh checkout"
+  fi
+fi
 
 # 4. Rebuild the escript BEFORE stopping anything. The running orchestrator does
 #    not read _build/prod or bin/symphony at runtime, so a rebuild (or a failure
@@ -96,10 +103,11 @@ log "orchestrator deployed — service active, health 200"
 #    decision loudly either way so a green deploy never silently ships a stale
 #    cockpit. Next.js standalone keeps serving the old build until the restart,
 #    so the only blip is the restart itself.
-if [[ "$old_sha" != "none" ]] && asapp git diff --quiet "$old_sha" "$new_sha" -- dashboard/; then
+if [[ -z "$dashboard_changes" ]]; then
   log "cockpit: dashboard/ unchanged ($old_sha..$new_sha) — skip rebuild"
 else
   log "cockpit: dashboard/ changed (or fresh checkout) — rebuilding"
+  printf '%s\n' "$dashboard_changes" | sed 's/^/[deploy] cockpit changed: /'
   asapp env HOME="$APP_HOME" PATH="$NODE_BIN_PATH" bash -euo pipefail -c "
     cd '$COCKPIT_DIR'
     pnpm install --frozen-lockfile
