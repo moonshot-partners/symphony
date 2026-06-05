@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TicketDetail } from "./ticket-detail";
 import { MOCK_BOARD } from "../fixtures";
 import { MOCK_LIVE } from "@/features/live/fixtures";
@@ -27,6 +27,21 @@ describe("TicketDetail", () => {
     expect(screen.getByText("before.png")).toBeInTheDocument();
     expect(screen.getByText("flow.webm")).toBeInTheDocument();
     expect(screen.getByText("flicker-1.png")).toBeInTheDocument();
+  });
+
+  it("opens image evidence directly in the cockpit", async () => {
+    render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    fireEvent.click(screen.getByRole("button", { name: /before\.png/i }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "before.png" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Image evidence")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: /open before\.png/i })).toHaveAttribute(
+      "href",
+      running.evidence[0].url,
+    );
   });
 
   it("renders the QA report markdown table as real cells, not raw pipes", async () => {
@@ -359,17 +374,14 @@ describe("TicketDetail", () => {
     expect(screen.queryByText("No activity yet.")).toBeNull();
   });
 
-  it("points empty Evidence at the PR for an idle ticket with a PR", async () => {
+  it("shows no evidence captured for an idle ticket with a PR when the cockpit has no artifacts", async () => {
     const bare: Ticket = { ...running, timeline: [], evidence: [], summary: null, report: null };
     render(<TicketDetail ticket={bare} onClose={() => {}} />);
     await screen.findByText("Timeline");
 
     expect(screen.getByText("No activity yet.")).toBeInTheDocument();
-    expect(screen.getByText(/QA evidence is attached/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "pull request" })).toHaveAttribute(
-      "href",
-      running.pr!.url,
-    );
+    expect(screen.getByText("No evidence captured.")).toBeInTheDocument();
+    expect(screen.queryByText(/QA evidence is attached/)).toBeNull();
   });
 
   it("shows 'No evidence captured.' for an idle ticket with no PR", async () => {

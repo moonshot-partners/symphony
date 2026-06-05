@@ -41,6 +41,19 @@ describe("TicketCard", () => {
     expect(screen.queryByText(/lint/i)).toBeNull();
   });
 
+  it("uses the live turn for the running progress bar", () => {
+    render(
+      <TicketCard
+        ticket={byId("SODEV-956")}
+        states={MOCK_BOARD.states}
+        live={MOCK_LIVE.agents[0]}
+        onSelect={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "35");
+  });
+
   it("shows 'Checks passed' for a passing ticket and no Working badge", () => {
     renderCard("SODEV-940");
     expect(screen.getByText("Checks passed")).toBeInTheDocument();

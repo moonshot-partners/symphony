@@ -27,6 +27,7 @@ import {
   ClipboardCheck,
   GitPullRequest,
   LoaderCircle,
+  Maximize2,
   Play,
   Radar,
   RefreshCcw,
@@ -42,7 +43,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Attachment,
-  AttachmentInfo,
   AttachmentPreview,
   Attachments,
   type AttachmentData,
@@ -97,6 +97,7 @@ function Body({
   // While running, the in-flight live trace wins over the ticket's ledger trace
   // (which is the previous finished run, and so stale for a running agent).
   const traceUrl = live?.traceUrl ?? ticket.traceUrl;
+  const [previewEvidence, setPreviewEvidence] = useState<Evidence | null>(null);
 
   return (
     <>
@@ -225,26 +226,15 @@ function Body({
           <section>
             <SectionLabel>Evidence ({ticket.evidence.length})</SectionLabel>
             {ticket.evidence.length === 0 ? (
-              pr?.url ? (
-                <p className="text-sm text-muted-foreground">
-                  QA evidence is attached to the{" "}
-                  <a
-                    href={pr.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline underline-offset-2 hover:text-foreground"
-                  >
-                    pull request
-                  </a>
-                  .
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">No evidence captured.</p>
-              )
+              <p className="text-sm text-muted-foreground">No evidence captured.</p>
             ) : (
-              <Attachments variant="list" className="w-full">
+              <Attachments variant="grid" className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3">
                 {ticket.evidence.map((item) => (
-                  <EvidenceThumb key={item.id} item={item} />
+                  <EvidenceThumb
+                    key={item.id}
+                    item={item}
+                    onPreview={() => setPreviewEvidence(item)}
+                  />
                 ))}
               </Attachments>
             )}
@@ -267,6 +257,13 @@ function Body({
           </section>
         )}
       </div>
+
+      <EvidencePreviewDialog
+        evidence={previewEvidence}
+        onOpenChange={(open) => {
+          if (!open) setPreviewEvidence(null);
+        }}
+      />
     </>
   );
 }
@@ -739,22 +736,89 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function EvidenceThumb({ item }: { item: Evidence }) {
+function EvidenceThumb({ item, onPreview }: { item: Evidence; onPreview: () => void }) {
   const attachment = evidenceToAttachment(item);
+  const description = evidenceDescription(item);
 
   return (
-    <a
-      href={item.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block w-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    <button
+      type="button"
+      onClick={onPreview}
+      className="group/evidence flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-2 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Attachment data={attachment}>
         <AttachmentPreview />
-        <AttachmentInfo showMediaType />
       </Attachment>
-    </a>
+      <span className="flex min-w-0 items-start justify-between gap-2">
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium leading-snug">{item.name}</span>
+          <span className="block truncate text-xs text-muted-foreground">{description}</span>
+        </span>
+        <Maximize2
+          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/evidence:text-foreground"
+          aria-hidden
+        />
+      </span>
+    </button>
   );
+}
+
+function EvidencePreviewDialog({
+  evidence,
+  onOpenChange,
+}: {
+  evidence: Evidence | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const attachment = evidence ? evidenceToAttachment(evidence) : null;
+  const mediaType = evidence ? mediaTypeFor(evidence) : "";
+
+  return (
+    <Dialog open={!!evidence} onOpenChange={onOpenChange}>
+      {evidence && attachment && (
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{evidence.name}</DialogTitle>
+            <DialogDescription>{evidenceDescription(evidence)}</DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-hidden rounded-lg border bg-muted/20">
+            {evidence.kind === "video" ? (
+              <video
+                className="max-h-[70vh] w-full bg-black"
+                controls
+                src={evidence.url === "#" ? undefined : evidence.url}
+              />
+            ) : mediaType.startsWith("image/") ? (
+              // Evidence URLs are dynamic BFF/proxy URLs; next/image remote config would
+              // add complexity without improving this cockpit preview.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                alt={evidence.name}
+                className="max-h-[70vh] w-full object-contain"
+                src={evidence.url === "#" ? undefined : evidence.url}
+              />
+            ) : (
+              <Attachment data={attachment}>
+                <AttachmentPreview />
+              </Attachment>
+            )}
+          </div>
+
+          <DialogFooter>
+            <ExternalAction href={evidence.url} icon={Maximize2} label={`Open ${evidence.name}`}>
+              Open file
+            </ExternalAction>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+function evidenceDescription(item: Evidence): string {
+  if (item.kind === "video") return "Video evidence";
+  return "Image evidence";
 }
 
 function evidenceToAttachment(item: Evidence): AttachmentData {

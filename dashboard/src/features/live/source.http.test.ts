@@ -46,4 +46,74 @@ describe("fetchLive — http adapter", () => {
     expect(live.agents[0].id).toBe("SODEV-956");
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("keeps the last trace URL for the same active session", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DATA_SOURCE", "http");
+    vi.resetModules();
+    const first = MOCK_LIVE;
+    const second = {
+      ...MOCK_LIVE,
+      agents: MOCK_LIVE.agents.map((agent, index) =>
+        index === 0 ? { ...agent, traceUrl: null } : agent
+      ),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, json: async () => second });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchLive } = await import("./source");
+    const firstPayload = await fetchLive();
+    const secondPayload = await fetchLive();
+
+    expect(firstPayload.agents[0].traceUrl).toBe(MOCK_LIVE.agents[0].traceUrl);
+    expect(secondPayload.agents[0].traceUrl).toBe(MOCK_LIVE.agents[0].traceUrl);
+  });
+
+  it("does not reuse a cached trace URL for a later session", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DATA_SOURCE", "http");
+    vi.resetModules();
+    const first = MOCK_LIVE;
+    const second = {
+      ...MOCK_LIVE,
+      agents: MOCK_LIVE.agents.map((agent, index) =>
+        index === 0 ? { ...agent, sessionId: "later-session", traceUrl: null } : agent
+      ),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, json: async () => second });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchLive } = await import("./source");
+    await fetchLive();
+    const live = await fetchLive();
+
+    expect(live.agents[0].traceUrl).toBeNull();
+  });
+
+  it("does not reuse a cached trace URL when the next payload has no session id", async () => {
+    vi.stubEnv("NEXT_PUBLIC_DATA_SOURCE", "http");
+    vi.resetModules();
+    const first = MOCK_LIVE;
+    const second = {
+      ...MOCK_LIVE,
+      agents: MOCK_LIVE.agents.map((agent, index) =>
+        index === 0 ? { ...agent, sessionId: null, traceUrl: null } : agent
+      ),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, json: async () => second });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchLive } = await import("./source");
+    await fetchLive();
+    const live = await fetchLive();
+
+    expect(live.agents[0].traceUrl).toBeNull();
+  });
 });

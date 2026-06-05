@@ -26,9 +26,11 @@ export function TicketCard({
   const { agent, pr } = ticket;
   const running = agent.status === "running";
   const badge = stateBadge(ticket, states);
+  const progressTurn = live?.turn ?? agent.turn;
+  const progressMaxTurns = agent.maxTurns ?? 20;
   const pct =
-    agent.turn && agent.maxTurns
-      ? Math.min(100, Math.round((agent.turn / agent.maxTurns) * 100))
+    progressTurn != null && progressMaxTurns > 0
+      ? Math.min(100, Math.round((progressTurn / progressMaxTurns) * 100))
       : 0;
   const proof = ticket.evidence.length;
 
