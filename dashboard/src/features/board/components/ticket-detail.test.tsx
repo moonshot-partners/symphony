@@ -35,7 +35,8 @@ describe("TicketDetail", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /before\.png/i }));
 
-    const dialog = screen.getByRole("dialog");
+    const dialog = screen.getByRole("heading", { name: "before.png" }).closest('[role="dialog"]');
+    if (!dialog) throw new Error("missing evidence preview dialog");
     expect(within(dialog).getByRole("heading", { name: "before.png" })).toBeInTheDocument();
     expect(within(dialog).getByText("Image evidence")).toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: /open before\.png/i })).toHaveAttribute(
@@ -358,10 +359,54 @@ describe("TicketDetail", () => {
     expect(screen.queryByText(/\$0\.42/)).toBeNull();
   });
 
-  it("omits the live panel when no agent is running", async () => {
+  it("shows the workflow as done for an idle ticket with a PR", async () => {
     render(<TicketDetail ticket={running} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getAllByText("done").length).toBeGreaterThanOrEqual(6);
+    expect(screen.queryByText("Live")).toBeNull();
+    expect(screen.getByText("Timeline")).toBeInTheDocument();
+  });
+
+  it("omits the workflow when no agent is running and there is no PR", async () => {
+    const bare: Ticket = { ...running, pr: null };
+    render(<TicketDetail ticket={bare} onClose={() => {}} />);
     await screen.findByText("Timeline");
     expect(screen.queryByRole("heading", { name: /Agent workflow/ })).toBeNull();
+  });
+
+  it("shows the completed workflow for a review PR even when old ledger data is missing", async () => {
+    const bare: Ticket = {
+      ...running,
+      state: "In Code Review",
+      timeline: [],
+      traceUrl: null,
+      summary: null,
+      report: null,
+      evidence: [],
+    };
+    render(<TicketDetail ticket={bare} onClose={() => {}} />);
+    await screen.findByRole("heading", { name: "Agent workflow" });
+
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.getAllByText("done").length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("does not mark a blocked PR as completed without ledger proof", async () => {
+    const bare: Ticket = {
+      ...running,
+      state: "On Hold / Blocked",
+      timeline: [],
+      traceUrl: null,
+      summary: null,
+      report: null,
+      evidence: [],
+    };
+    render(<TicketDetail ticket={bare} onClose={() => {}} />);
+    await screen.findByText("Timeline");
+
+    expect(screen.queryByRole("heading", { name: "Agent workflow" })).toBeNull();
   });
 
   it("hides the ledger Timeline and empty Evidence while an agent is running", async () => {

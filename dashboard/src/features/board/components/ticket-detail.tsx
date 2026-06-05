@@ -97,6 +97,7 @@ function Body({
   // While running, the in-flight live trace wins over the ticket's ledger trace
   // (which is the previous finished run, and so stale for a running agent).
   const traceUrl = live?.traceUrl ?? ticket.traceUrl;
+  const showAgentWorkflow = Boolean(live || (pr?.url && hasCompletedWorkflowSignal(ticket, steps)));
   const [previewEvidence, setPreviewEvidence] = useState<Evidence | null>(null);
 
   return (
@@ -150,33 +151,39 @@ function Body({
       <Separator />
 
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
-        {live && (
+        {showAgentWorkflow && (
           <section aria-labelledby="live-workflow-heading" className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
-                <StatusBadge tone="success" className="gap-1.5">
-                  <LoaderCircle className="size-3 animate-spin" aria-hidden />
-                  Live
-                </StatusBadge>
+                {live ? (
+                  <StatusBadge tone="success" className="gap-1.5">
+                    <LoaderCircle className="size-3 animate-spin" aria-hidden />
+                    Live
+                  </StatusBadge>
+                ) : (
+                  <StatusBadge tone="muted">Done</StatusBadge>
+                )}
                 <h3 id="live-workflow-heading" className="truncate text-sm font-medium text-foreground">
                   Agent workflow
                 </h3>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <StatusBadge tone="muted" className="font-mono">
-                  turn {live.turn ?? "—"}
-                </StatusBadge>
-                <StatusBadge tone="muted" className="font-mono">
-                  {formatDuration(live.runtimeSeconds ?? 0)}
-                </StatusBadge>
-              </div>
+              {live && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <StatusBadge tone="muted" className="font-mono">
+                    turn {live.turn ?? "—"}
+                  </StatusBadge>
+                  <StatusBadge tone="muted" className="font-mono">
+                    {formatDuration(live.runtimeSeconds ?? 0)}
+                  </StatusBadge>
+                </div>
+              )}
             </div>
-            {live.lastAction && (
+            {live?.lastAction && (
               <p className="rounded-md bg-muted/30 px-3 py-2 text-sm leading-snug text-muted-foreground">
                 <span className="font-medium text-foreground">Now:</span> {live.lastAction}
               </p>
             )}
-            <AgentTimeline live={live} />
+            <AgentTimeline live={live ?? { phase: "handoff" }} completed={!live} />
           </section>
         )}
 
@@ -748,6 +755,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
       {children}
     </h3>
+  );
+}
+
+function hasCompletedWorkflowSignal(ticket: Ticket, steps: Ticket["timeline"] = []) {
+  if (ticket.traceUrl || ticket.summary || steps.some((step) => /handoff|opened pr|ready for review/i.test(step.label))) {
+    return true;
+  }
+
+  const state = ticket.state.toLowerCase();
+  return ["review", "approved", "released", "promote", "done"].some((needle) =>
+    state.includes(needle)
   );
 }
 
